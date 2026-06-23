@@ -386,7 +386,7 @@ testAsync('app shell moves project and settings into account popover', async () 
   assert.match(appSource, /const accountProjects = computed/)
 })
 
-testAsync('app shell applies global 24px content padding except design and engineering', async () => {
+testAsync('app shell uses zero main padding for edge to edge workspace views', async () => {
   const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8')
   const cssSource = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
 
@@ -394,9 +394,13 @@ testAsync('app shell applies global 24px content padding except design and engin
   assert.match(appSource, /const isEdgeToEdgeView = computed/)
   assert.match(appSource, /activeView\.value === 'workflow'/)
   assert.match(appSource, /isFactoryView\.value/)
-  assert.match(cssSource, /\.main\s*\{[\s\S]*?padding:\s*24px;/)
-  assert.match(cssSource, /\.main\.edge-to-edge\s*\{[\s\S]*?padding:\s*0;/)
-  assert.match(cssSource, /\.analysis-focus\s+\.main\s*\{[\s\S]*?padding:\s*0;/)
+  const mainRule = cssSource.match(/\.main\s*\{[^}]*\}/)?.[0] || ''
+  const edgeRule = cssSource.match(/\.main\.edge-to-edge\s*\{[^}]*\}/)?.[0] || ''
+  const analysisMainRule = cssSource.match(/\.analysis-focus\s+\.main\s*\{[^}]*\}/)?.[0] || ''
+  assert.match(mainRule, /padding:\s*0;/)
+  assert.doesNotMatch(mainRule, /padding:\s*24px;/)
+  assert.match(edgeRule, /padding:\s*0;/)
+  assert.match(analysisMainRule, /padding:\s*0;/)
 })
 
 testAsync('workspace account owns backend generated project ids', async () => {
@@ -1168,6 +1172,24 @@ testAsync('requirements workspace uses source tabs table fields and knowledge st
   assert.doesNotMatch(requirementsSource, /已归档/)
   assert.match(cssSource, /\.requirements-workspace/)
   assert.match(cssSource, /\.requirements-table/)
+})
+
+testAsync('materials toolbar keeps primary import buttons black and right aligned', async () => {
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8')
+  const requirementsStart = appSource.indexOf('<section v-if="materialsTab === \'requirements\'" class="requirements-workspace">')
+  const requirementsEnd = appSource.indexOf('<section v-if="materialsTab === \'knowledge\'"', requirementsStart)
+  const requirementsSource = appSource.slice(requirementsStart, requirementsEnd)
+  const requirementActionsStart = requirementsSource.indexOf('class="materials-toolbar-actions"')
+  const requirementActionsEnd = requirementsSource.indexOf('</div>', requirementActionsStart)
+  const requirementActionsSource = requirementsSource.slice(requirementActionsStart, requirementActionsEnd)
+  const knowledgeStart = appSource.indexOf('<section v-if="materialsTab === \'knowledge\'"')
+  const knowledgeEnd = appSource.indexOf('<div class="knowledge-primary-tabs"', knowledgeStart)
+  const knowledgeSource = appSource.slice(knowledgeStart, knowledgeEnd)
+
+  assert.ok(requirementActionsSource.indexOf('批量管理') < requirementActionsSource.indexOf('上传需求文件'))
+  assert.match(requirementActionsSource, /<button class="primary" type="button" @click="openMaterialCreate">上传需求文件<\/button>/)
+  assert.ok(knowledgeSource.indexOf('批量管理') < knowledgeSource.indexOf('导入文件'))
+  assert.match(knowledgeSource, /<button class="primary" type="button" @click="openMaterialCreate">导入文件<\/button>/)
 })
 
 testAsync('project workspace sorts active and resource backed projects before recovered history', async () => {
@@ -3572,6 +3594,21 @@ testAsync('workflow canvas detail supports progressive tree expansion while smal
   assert.match(styles, /white-space:\s*normal/)
   assert.match(styles, /\.canvas-tree-node\.expanded/)
   assert.match(styles, /padding-left:\s*calc\(12px \+ var\(--tree-depth\) \* 22px\)/)
+})
+
+testAsync('workflow canvas fullscreen tree items keep long content visible within a limited height', async () => {
+  const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  const treeRule = (styles.match(/\.canvas-tree-node\s*\{[\s\S]*?\}/g) || [])
+    .find((rule) => /grid-template-columns/.test(rule)) || ''
+  const spanRule = styles.match(/\.canvas-tree-node span\s*\{[\s\S]*?\}/)?.[0] || ''
+
+  assert.match(treeRule, /max-height:\s*128px;/)
+  assert.match(treeRule, /align-items:\s*start;/)
+  assert.doesNotMatch(treeRule, /height:\s*auto;/)
+  assert.match(spanRule, /max-height:\s*96px;/)
+  assert.match(spanRule, /overflow-y:\s*auto;/)
+  assert.match(spanRule, /display:\s*block;/)
+  assert.match(spanRule, /padding-right:\s*6px;/)
 })
 
 testAsync('workflow canvas fullscreen renders Axure style path graph only for flow node details', async () => {
@@ -14989,6 +15026,186 @@ testAsync('frontend repair action calls backend analysis repair and replaces can
   assert.match(appSource, /workflowAnalysisResult\.value = data\.analysis/)
   assert.match(appSource, /documentAnalysis:\s*data\.analysis/)
   assert.match(appSource, /upsertWorkflowRunRecord\(state\.workflowRuns/)
+})
+
+testAsync('workflow fullscreen node editing saves through backend and refreshes current plus downstream canvas', async () => {
+  const componentSource = await readFile(new URL('../src/components/workflow/WorkflowCanvasPage.vue', import.meta.url), 'utf8')
+  const appSource = await readFile(new URL('../src/App.vue', import.meta.url), 'utf8')
+  const apiSource = await readFile(new URL('../src/services/api.js', import.meta.url), 'utf8')
+  const editStart = componentSource.indexOf('function startFullscreenEdit')
+  const editEnd = componentSource.indexOf('function focusNode', editStart)
+  const editSource = componentSource.slice(editStart, editEnd)
+  const saveStart = appSource.indexOf('async function saveWorkflowCanvasNodeEdit')
+  const saveEnd = appSource.indexOf('function openWorkflowCanvasRun', saveStart)
+  const saveSource = appSource.slice(saveStart, saveEnd)
+
+  assert.match(componentSource, /defineEmits\(\[[^\]]*'edit-node'/)
+  assert.match(componentSource, /@click="startFullscreenEdit\(fullscreenNode\)"/)
+  assert.match(componentSource, /取消编辑/)
+  assert.match(componentSource, /保存/)
+  assert.match(componentSource, /<textarea[\s\S]*v-model="fullscreenEditSummary"/)
+  assert.match(componentSource, /<textarea[\s\S]*v-model="fullscreenEditContentText"/)
+  assert.match(componentSource, /<textarea[\s\S]*v-model="fullscreenEditDetailText"/)
+  assert.match(editSource, /emit\('edit-node'/)
+  assert.match(editSource, /editedSummary/)
+  assert.match(editSource, /editedContentText/)
+  assert.match(editSource, /editedDetailText/)
+  assert.match(appSource, /@edit-node="saveWorkflowCanvasNodeEdit"/)
+  assert.match(apiSource, /editWorkflowCanvasNode\(config,\s*runId,\s*nodeId,\s*payload = \{\}/)
+  assert.match(apiSource, /\/api\/workspace\/workflow-runs\/\$\{encodeURIComponent\(runId\)\}\/canvas-nodes\/\$\{encodeURIComponent\(nodeId\)\}\/edit/)
+  assert.match(saveSource, /workflowCanvasLoading\.value = true/)
+  assert.match(saveSource, /workflowCanvasRefreshingNodeId\.value = targetNodeId/)
+  assert.match(saveSource, /api\.workflows\.editWorkflowCanvasNode/)
+  assert.match(saveSource, /workflowAnalysisResult\.value = data\.analysis/)
+  assert.match(saveSource, /documentAnalysis:\s*data\.analysis/)
+  assert.match(saveSource, /workflowFullscreenNodeId\.value = targetNodeId/)
+  assert.match(saveSource, /finally \{[\s\S]*workflowCanvasLoading\.value = false[\s\S]*workflowCanvasRefreshingNodeId\.value = ''[\s\S]*\}/)
+})
+
+testAsync('backend canvas node edit route updates current node, downstream nodes, and version history', async () => {
+  const backendRoutes = workflowRoutes()
+  const created = await backendRoutes['POST /api/workspace/workflow-runs']({
+    id: 'run-canvas-node-edit',
+    workflowId: 'podcastor-product-flow',
+    input: '做一个登录注册弹窗',
+    model: 'gpt-5.5',
+    status: 'running',
+    steps: [{ id: 'page-structure', title: '页面结构树' }],
+    currentStepIndex: 0,
+    documentAnalysis: {
+      status: 'analyzed',
+      input: '做一个登录注册弹窗',
+      canvas: {
+        nodes: [
+          { id: 'page-structure', title: '页面结构树', summary: '旧结构', content: ['只有登录'] },
+          { id: 'form-validation', title: '表单校验', summary: '旧校验', content: ['只校验手机号'] },
+          { id: 'flow', title: '用户路径', summary: '旧路径', content: ['登录后结束'] }
+        ],
+        edges: []
+      },
+      versions: []
+    }
+  })
+
+  const edited = await backendRoutes['POST /api/workspace/workflow-runs/:id/canvas-nodes/:nodeId/edit']({
+    id: created.run.id,
+    nodeId: 'page-structure',
+    editedSummary: '用户编辑后的弹窗结构',
+    editedContentText: '登录 Tab\n注册 Tab\n找回密码入口',
+    editedDetailText: '需要覆盖账号密码登录、验证码登录和错误提示。'
+  })
+
+  assert.ok(edited.analysis?.canvas)
+  assert.equal(edited.appliedPatch.currentNodeId, 'page-structure')
+  assert.ok(edited.appliedPatch.changedNodeIds.includes('page-structure'))
+  assert.ok(edited.appliedPatch.changedNodeIds.includes('form-validation'))
+  assert.ok(edited.appliedPatch.changedNodeIds.includes('flow'))
+  assert.equal(edited.analysis.canvas.nodes[0].summary, '用户编辑后的弹窗结构')
+  assert.deepEqual(edited.analysis.canvas.nodes[0].content.slice(0, 3), ['登录 Tab', '注册 Tab', '找回密码入口'])
+  assert.match(edited.analysis.canvas.nodes[0].detailSections.at(-1).items.join('\n'), /账号密码登录/)
+  assert.match(edited.analysis.canvas.nodes[1].content.join('\n'), /上游 page-structure 已手动编辑/)
+  assert.match(edited.analysis.canvas.nodes[2].content.join('\n'), /上游 page-structure 已手动编辑/)
+  assert.equal(edited.analysis.versions[0].source, 'canvas-node-edit')
+  assert.equal(edited.analysis.versions[0].appliedPatch.changedNodeIds.length, edited.appliedPatch.changedNodeIds.length)
+  assert.equal(edited.run.documentAnalysis.canvas.nodes[0].summary, '用户编辑后的弹窗结构')
+})
+
+testAsync('backend canvas node edit route lets model rewrite current and downstream nodes from full canvas context', async () => {
+  const seenContexts = []
+  const backendRoutes = workflowRoutes(undefined, {
+    agentProvider: {
+      name: 'canvas-edit-provider',
+      async generate(context) {
+        seenContexts.push(context)
+        return {
+          content: JSON.stringify({
+            currentNode: {
+              summary: '模型重写后的娱乐小程序摘要',
+              content: ['模型结论：先定位线上娱乐互动场景', '模型结论：补齐目标用户与成功指标']
+            },
+            downstreamNodes: [
+              {
+                nodeId: 'insights',
+                summary: '模型重写后的核心观点',
+                content: ['模型补充：机会来自轻量娱乐玩法', '模型补充：约束包括合规、留存和内容安全']
+              },
+              {
+                nodeId: 'risk',
+                summary: '模型重写后的风险问题',
+                content: ['模型补充：需求范围不清会影响后续方案', '模型补充：需补充平台规则和审核边界']
+              }
+            ],
+            reason: '模型根据完整画布和用户编辑内容重写当前节点与后续节点。'
+          }),
+          provider: 'canvas-edit-provider',
+          model: context.model,
+          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 }
+        }
+      }
+    }
+  })
+  const created = await backendRoutes['POST /api/workspace/workflow-runs']({
+    id: 'run-canvas-node-edit-model',
+    workflowId: 'podcastor-product-flow',
+    input: '做一个娱乐小程序 项目蓝图',
+    model: 'gpt-5.5',
+    status: 'running',
+    steps: [{ id: 'summary', title: '文档摘要' }],
+    currentStepIndex: 0,
+    documentAnalysis: {
+      status: 'analyzed',
+      input: '做一个娱乐小程序 项目蓝图',
+      canvas: {
+        nodes: [
+          { id: 'summary', title: '文档摘要', summary: '旧摘要', content: ['旧内容'] },
+          { id: 'insights', title: '核心观点', summary: '旧观点', content: ['旧观点内容'] },
+          { id: 'risk', title: '风险问题', summary: '旧风险', content: ['旧风险内容'] }
+        ],
+        edges: []
+      },
+      versions: []
+    }
+  })
+
+  const edited = await backendRoutes['POST /api/workspace/workflow-runs/:id/canvas-nodes/:nodeId/edit']({
+    id: created.run.id,
+    nodeId: 'summary',
+    editedSummary: '用户编辑：这是一个娱乐小程序项目蓝图',
+    editedContentText: '需要明确娱乐类型\n需要补充用户和成功指标',
+    editedDetailText: '用户希望后续节点真正按这个方向重写。'
+  })
+
+  const context = seenContexts.find((item) => item.actionType === 'canvas-node-edit')
+  assert.ok(context)
+  assert.equal(context.currentNode.id, 'summary')
+  assert.deepEqual(context.downstreamNodes.map((node) => node.id), ['insights', 'risk'])
+  assert.match(context.userPrompt, /完整画布/)
+  assert.match(context.userPrompt, /用户编辑：这是一个娱乐小程序项目蓝图/)
+  assert.match(context.userPrompt, /需要明确娱乐类型/)
+  assert.match(context.systemPrompt, /只能更新当前节点和它之后的节点/)
+  assert.equal(edited.analysis.canvas.nodes[0].summary, '模型重写后的娱乐小程序摘要')
+  assert.deepEqual(edited.analysis.canvas.nodes[0].content, ['模型结论：先定位线上娱乐互动场景', '模型结论：补齐目标用户与成功指标'])
+  assert.equal(edited.analysis.canvas.nodes[1].summary, '模型重写后的核心观点')
+  assert.equal(edited.analysis.canvas.nodes[2].summary, '模型重写后的风险问题')
+  assert.equal(edited.appliedPatch.reason, '模型根据完整画布和用户编辑内容重写当前节点与后续节点。')
+  assert.equal(edited.appliedPatch.audit.source, 'canvas-node-edit')
+  assert.equal(edited.appliedPatch.audit.provider, 'canvas-edit-provider')
+  assert.equal(edited.analysis.versions[0].source, 'canvas-node-edit')
+})
+
+testAsync('workflow canvas small nodes clamp summary to three lines and scroll content inside the card', async () => {
+  const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8')
+  const cardRule = styles.match(/\.canvas-node-card\s*\{[\s\S]*?\}/)?.[0] || ''
+  const summaryRule = styles.match(/\.canvas-node-card p\s*\{[\s\S]*?\}/)?.[0] || ''
+  const contentRule = styles.match(/\.canvas-node-content\s*\{[\s\S]*?\}/)?.[0] || ''
+
+  assert.match(cardRule, /max-height:\s*\d+px;/)
+  assert.match(cardRule, /grid-template-rows:\s*auto auto minmax\(0,\s*1fr\) auto;/)
+  assert.match(summaryRule, /-webkit-line-clamp:\s*3;/)
+  assert.match(summaryRule, /overflow:\s*hidden;/)
+  assert.match(contentRule, /min-height:\s*0;/)
+  assert.match(contentRule, /overflow-y:\s*auto;/)
+  assert.doesNotMatch(summaryRule, /overflow-y:\s*auto/)
 })
 
 test('backend analysis repair can apply confirmed agent supplement and refresh downstream canvas', async () => {

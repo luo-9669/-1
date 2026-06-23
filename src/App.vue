@@ -1306,10 +1306,10 @@
                 accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.json"
                 @change="importMaterialFiles"
               />
-              <button class="primary" type="button" @click="openMaterialCreate">上传需求文件</button>
               <button type="button" @click="toggleMaterialBatchMode">
                 {{ materialBatchMode ? '退出管理' : '批量管理' }}
               </button>
+              <button class="primary" type="button" @click="openMaterialCreate">上传需求文件</button>
             </div>
           </div>
           <div class="requirements-source-tabs" role="tablist" aria-label="需求来源">
@@ -1393,12 +1393,12 @@
               </div>
               <div class="actions">
                 <button type="button" @click="openMaterialTool('website-import')">网站导入</button>
-                <button class="primary" type="button" @click="openMaterialCreate">导入文件</button>
                 <button type="button" @click="openMaterialTool('retrieval-test')">召回测试</button>
                 <button type="button" @click="openMaterialTool('parse-jobs')">解析任务</button>
                 <button type="button" @click="toggleMaterialBatchMode">
                   {{ materialBatchMode ? '退出管理' : '批量管理' }}
                 </button>
+                <button class="primary" type="button" @click="openMaterialCreate">导入文件</button>
               </div>
             </div>
             <div class="knowledge-primary-tabs" role="tablist" aria-label="知识库视图">
@@ -1878,6 +1878,7 @@
         @open-agent="openWorkflowAgentForNode"
         @fullscreen="workflowFullscreenNodeId = $event"
         @close-fullscreen="workflowFullscreenNodeId = ''"
+        @edit-node="saveWorkflowCanvasNodeEdit"
         @rollback-version="rollbackWorkflowAnalysisVersion"
         @persist-knowledge="importWorkflowAnalysisToKnowledge"
         @open-knowledge="openWorkflowKnowledgeBase"
@@ -8773,6 +8774,54 @@ async function repairWorkflowAnalysis(payload = {}) {
       : `已完成后端修复：${data.repair?.checkId || payload.checkId || '质量检查'}`)
   } catch (error) {
     setStatus(skillWorkbenchStatus, 'failed', error.message ? `后端修复分析结果失败：${error.message}` : '后端修复分析结果失败')
+  } finally {
+    workflowCanvasLoading.value = false
+    workflowCanvasRefreshingNodeId.value = ''
+  }
+}
+
+async function saveWorkflowCanvasNodeEdit(payload = {}) {
+  if (!workflowAnalysisResult.value || !state.activeWorkflowRun?.id) {
+    setStatus(skillWorkbenchStatus, 'failed', '当前没有可保存的分析画布')
+    return
+  }
+  const targetNodeId = workflowAgentResolvedNodeId(payload.nodeId)
+  if (!targetNodeId) {
+    setStatus(skillWorkbenchStatus, 'failed', '没有找到要编辑的画布节点')
+    return
+  }
+  selectWorkflowCanvasNode(targetNodeId)
+  workflowCanvasLoading.value = true
+  workflowCanvasRefreshingNodeId.value = targetNodeId
+  setStatus(skillWorkbenchStatus, 'loading', '后端正在保存当前节点并刷新后续画布...')
+  try {
+    const result = await api.workflows.editWorkflowCanvasNode(state.apiConfig, state.activeWorkflowRun.id, targetNodeId, {
+      nodeId: targetNodeId,
+      editedSummary: payload.editedSummary || '',
+      editedContentText: payload.editedContentText || '',
+      editedDetailText: payload.editedDetailText || '',
+      originalNode: payload.originalNode || null,
+      analysis: workflowAnalysisResult.value
+    }, {
+      timeoutMs: workflowAgentRequestTimeoutMs()
+    })
+    const data = applyApiResult(skillWorkbenchStatus, result, '保存画布节点失败')
+    if (!data?.analysis) return
+    workflowAnalysisResult.value = data.analysis
+    const nextRun = {
+      ...(state.activeWorkflowRun || {}),
+      ...(data.run || {}),
+      documentAnalysis: data.analysis,
+      projectBlueprint: data.analysis.blueprint || data.run?.projectBlueprint || state.activeWorkflowRun.projectBlueprint,
+      updatedAt: data.run?.updatedAt || new Date().toISOString()
+    }
+    state.activeWorkflowRun = nextRun
+    state.workflowRuns = upsertWorkflowRunRecord(state.workflowRuns, nextRun)
+    workflowAgentNodeId.value = targetNodeId
+    workflowFullscreenNodeId.value = targetNodeId
+    setStatus(skillWorkbenchStatus, 'success', '已保存当前节点并刷新后续画布')
+  } catch (error) {
+    setStatus(skillWorkbenchStatus, 'failed', error.message ? `保存画布节点失败：${error.message}` : '保存画布节点失败')
   } finally {
     workflowCanvasLoading.value = false
     workflowCanvasRefreshingNodeId.value = ''

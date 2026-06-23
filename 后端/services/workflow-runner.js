@@ -533,6 +533,315 @@ export async function confirmRunAgentProposal(store, payload = {}, options = {})
   }
 }
 
+function compactEditLine(value = '', max = 360) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+function editContentLines(text = '') {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 24)
+}
+
+function editDetailLines(text = '') {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 16)
+}
+
+function parseCanvasEditPatch(value) {
+  if (!value) return null
+  if (typeof value === 'object' && !Array.isArray(value)) return value
+  const text = String(value || '').trim()
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {}
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1])
+    } catch {}
+  }
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(text.slice(start, end + 1))
+    } catch {}
+  }
+  return null
+}
+
+function uniqueCanvasEditLines(lines = [], limit = 24) {
+  const seen = new Set()
+  return (Array.isArray(lines) ? lines : [])
+    .map((line) => compactEditLine(line, 360))
+    .filter((line) => {
+      if (!line || seen.has(line)) return false
+      seen.add(line)
+      return true
+    })
+    .slice(0, limit)
+}
+
+function normalizeCanvasEditModelPatch(rawPatch = {}, nodes = [], currentIndex = 0) {
+  const parsed = parseCanvasEditPatch(rawPatch)
+  if (!parsed) return null
+  const currentNode = parsed.currentNode && typeof parsed.currentNode === 'object' && !Array.isArray(parsed.currentNode)
+    ? parsed.currentNode
+    : null
+  const downstreamNodes = Array.isArray(parsed.downstreamNodes) ? parsed.downstreamNodes : []
+  const invalidTarget = downstreamNodes.some((node) => {
+    const nodeId = node?.nodeId || node?.id || ''
+    const index = nodes.findIndex((item) => item.id === nodeId)
+    return !nodeId || index < 0 || index <= currentIndex
+  })
+  if (invalidTarget || (!currentNode && !downstreamNodes.length)) return null
+  return {
+    currentNode: currentNode
+      ? {
+          summary: compactEditLine(currentNode.summary || '', 360),
+          content: uniqueCanvasEditLines(currentNode.content || currentNode.items || [], 24)
+        }
+      : null,
+    downstreamNodes: downstreamNodes
+      .map((node) => ({
+        nodeId: node.nodeId || node.id || '',
+        summary: compactEditLine(node.summary || '', 360),
+        content: uniqueCanvasEditLines(node.content || node.items || [], 24)
+      }))
+      .filter((node) => node.nodeId && (node.summary || node.content.length)),
+    reason: compactEditLine(parsed.reason || '模型根据完整画布和用户编辑内容重写当前节点与后续节点。', 360)
+  }
+}
+
+function applyCanvasEditModelPatch(nodes = [], currentIndex = 0, patch = {}) {
+  if (!patch) return null
+  const nextNodes = nodes.map((node) => ({ ...node }))
+  const changedNodeIds = []
+  if (patch.currentNode?.summary || patch.currentNode?.content?.length) {
+    nextNodes[currentIndex] = {
+      ...nextNodes[currentIndex],
+      ...(patch.currentNode.summary ? { summary: patch.currentNode.summary } : {}),
+      ...(patch.currentNode.content.length ? { content: patch.currentNode.content } : {}),
+      loading: false
+    }
+    changedNodeIds.push(nextNodes[currentIndex].id)
+  }
+  for (const downstreamPatch of patch.downstreamNodes || []) {
+    const index = nextNodes.findIndex((node) => node.id === downstreamPatch.nodeId)
+    if (index <= currentIndex) continue
+    nextNodes[index] = {
+      ...nextNodes[index],
+      ...(downstreamPatch.summary ? { summary: downstreamPatch.summary } : {}),
+      ...(downstreamPatch.content.length ? { content: downstreamPatch.content } : {}),
+      loading: false
+    }
+    changedNodeIds.push(nextNodes[index].id)
+  }
+  if (!changedNodeIds.length) return null
+  return {
+    nodes: nextNodes,
+    changedNodeIds: Array.from(new Set(changedNodeIds)),
+    reason: patch.reason
+  }
+}
+
+function buildCanvasNodeEditModelContext(run = {}, payload = {}, nodes = [], currentIndex = 0, edits = {}) {
+  const analysis = run.documentAnalysis || {}
+  const currentNode = nodes[currentIndex] || {}
+  const upstreamNodes = nodes.slice(0, currentIndex)
+  const downstreamNodes = nodes.slice(currentIndex + 1)
+  const canvasText = JSON.stringify(analysis.canvas || {}, null, 2)
+  return {
+    actionType: 'canvas-node-edit',
+    runId: run.id,
+    model: payload.model || run.model || analysis.generation?.model || 'gpt-5.5',
+    input: run.input || analysis.input || '',
+    fullCanvas: analysis.canvas || {},
+    currentNode,
+    upstreamNodes,
+    downstreamNodes,
+    editedSummary: edits.summary,
+    editedContent: edits.content,
+    editedDetail: edits.details,
+    systemPrompt: [
+      '你是流程通的画布节点编辑 Agent。',
+      '用户在全屏详情里手动编辑了当前节点。你必须基于原始需求、完整画布、当前节点、上游节点、后续节点和用户编辑内容生成 JSON patch。',
+      '只能更新当前节点和它之后的节点，不能修改上游节点，不能返回 Markdown。',
+      'JSON 结构：{"currentNode":{"summary":"","content":[]},"downstreamNodes":[{"nodeId":"","summary":"","content":[]}],"reason":""}。',
+      'content 必须是字符串数组，内容要比用户输入更结构化、更可交付，并让后续节点与当前编辑保持一致。'
+    ].join('\n'),
+    userPrompt: [
+      `原始需求：${run.input || analysis.input || ''}`,
+      `当前节点：${currentNode.title || currentNode.id}`,
+      `用户编辑摘要：${edits.summary}`,
+      `用户编辑条目：\n${edits.content.join('\n')}`,
+      `用户编辑详情：\n${edits.details.join('\n')}`,
+      `完整画布：\n${canvasText}`,
+      `上游节点：\n${JSON.stringify(upstreamNodes, null, 2)}`,
+      `后续节点：\n${JSON.stringify(downstreamNodes, null, 2)}`,
+      '请返回可直接应用的 JSON patch。'
+    ].join('\n\n')
+  }
+}
+
+function canvasNodeEditDiffs(beforeNodes = [], afterNodes = [], changedNodeIds = []) {
+  const changed = new Set(changedNodeIds)
+  return afterNodes
+    .filter((node) => changed.has(node.id))
+    .map((afterNode) => {
+      const beforeNode = beforeNodes.find((node) => node.id === afterNode.id) || {}
+      return {
+        nodeId: afterNode.id,
+        title: afterNode.title || beforeNode.title || afterNode.id,
+        before: {
+          summary: beforeNode.summary || '',
+          contentCount: Array.isArray(beforeNode.content) ? beforeNode.content.length : 0
+        },
+        after: {
+          summary: afterNode.summary || '',
+          contentCount: Array.isArray(afterNode.content) ? afterNode.content.length : 0
+        }
+      }
+    })
+}
+
+function buildCanvasNodeEditVersion(analysis = {}, previousVersions = [], appliedPatch = {}) {
+  const now = new Date().toISOString()
+  return {
+    id: `version-canvas-edit-${Date.now()}`,
+    label: `手动编辑 ${previousVersions.length + 1}`,
+    source: 'canvas-node-edit',
+    createdAt: now,
+    snapshot: {
+      canvas: analysis.canvas,
+      blueprint: analysis.blueprint || null,
+      qualityGate: analysis.qualityGate || null
+    },
+    appliedPatch,
+    qualityScore: analysis.qualityGate?.score
+  }
+}
+
+export async function editRunCanvasNode(store, payload = {}, options = {}) {
+  const run = findRun(store, payload.runId)
+  const analysis = run.documentAnalysis || {}
+  const canvas = analysis.canvas || {}
+  const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : []
+  if (!nodes.length) throw new Error('当前运行没有可编辑的画布节点')
+  const currentIndex = nodes.findIndex((node) => node?.id === payload.nodeId)
+  if (currentIndex < 0) throw new Error(`未找到画布节点：${payload.nodeId}`)
+  const currentNode = nodes[currentIndex]
+  const summary = compactEditLine(payload.editedSummary || currentNode.summary || '')
+  const content = editContentLines(payload.editedContentText || '')
+  const details = editDetailLines(payload.editedDetailText || '')
+  const provider = options.agentProvider
+  const now = new Date().toISOString()
+  const editSection = details.length
+    ? {
+        title: '用户编辑补充',
+        meta: `保存于 ${now}`,
+        items: details
+      }
+    : null
+  let modelResult = null
+  if (provider && typeof provider.generate === 'function') {
+    try {
+      const context = buildCanvasNodeEditModelContext(run, payload, nodes, currentIndex, { summary, content, details })
+      const generatedPatch = await provider.generate(context)
+      const normalizedPatch = normalizeCanvasEditModelPatch(
+        generatedPatch.patch || generatedPatch.canvasPatch || generatedPatch.content || generatedPatch.raw?.patch || generatedPatch,
+        nodes,
+        currentIndex
+      )
+      const appliedModelPatch = applyCanvasEditModelPatch(nodes, currentIndex, normalizedPatch)
+      if (appliedModelPatch) {
+        modelResult = {
+          ...appliedModelPatch,
+          provider: generatedPatch.provider || provider.name || '',
+          model: generatedPatch.model || context.model,
+          usage: generatedPatch.usage || null
+        }
+      }
+    } catch {
+      modelResult = null
+    }
+  }
+  const fallbackNodes = nodes.map((node, index) => {
+    if (index < currentIndex) return node
+    if (index === currentIndex) {
+      return {
+        ...node,
+        summary: summary || node.summary || '',
+        content: content.length ? content : (Array.isArray(node.content) ? node.content : []),
+        detailSections: [
+          ...(Array.isArray(node.detailSections) ? node.detailSections : []),
+          ...(editSection ? [editSection] : [])
+        ]
+      }
+    }
+    const syncLine = `上游 ${currentNode.id} 已手动编辑：${summary || '当前节点内容已更新'}，本节点需要按最新结论同步校准。`
+    return {
+      ...node,
+      summary: node.summary || '已根据上游编辑同步校准',
+      content: [
+        syncLine,
+        ...(Array.isArray(node.content) ? node.content : [])
+      ].slice(0, 24)
+    }
+  })
+  const nextNodes = modelResult?.nodes || fallbackNodes
+  const changedNodeIds = modelResult?.changedNodeIds || nodes.slice(currentIndex).map((node) => node.id).filter(Boolean)
+  const appliedPatch = {
+    currentNodeId: currentNode.id,
+    changedNodeIds,
+    reason: modelResult?.reason || `用户在全屏详情中编辑「${currentNode.title || currentNode.id}」，后端已同步标记当前及后续节点刷新。`,
+    nodeDiffs: canvasNodeEditDiffs(nodes, nextNodes, changedNodeIds),
+    audit: {
+      source: 'canvas-node-edit',
+      nodeId: currentNode.id,
+      model: modelResult?.model || run.model || payload.model || '',
+      provider: modelResult?.provider || '',
+      usage: modelResult?.usage || null,
+      editedAt: now
+    }
+  }
+  const nextAnalysis = {
+    ...analysis,
+    status: 'repaired',
+    canvas: {
+      ...canvas,
+      nodes: nextNodes,
+      edges: Array.isArray(canvas.edges) ? canvas.edges : [],
+      orderedTabs: Array.isArray(canvas.orderedTabs) ? canvas.orderedTabs : []
+    },
+    versions: []
+  }
+  const previousVersions = Array.isArray(analysis.versions) ? analysis.versions : []
+  const version = buildCanvasNodeEditVersion(nextAnalysis, previousVersions, appliedPatch)
+  nextAnalysis.versions = [version, ...previousVersions]
+  const nextRun = {
+    ...run,
+    documentAnalysis: nextAnalysis,
+    projectBlueprint: nextAnalysis.blueprint || run.projectBlueprint,
+    updatedAt: now
+  }
+  replaceRun(store, nextRun)
+  return {
+    run: nextRun,
+    analysis: nextAnalysis,
+    appliedPatch,
+    version
+  }
+}
+
 export function cancelRunMessage(store, payload = {}) {
   const run = findRun(store, payload.runId)
   const step = getCurrentStep(run)

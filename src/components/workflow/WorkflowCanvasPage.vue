@@ -183,13 +183,30 @@
         </div>
         <div class="actions">
           <button type="button" @click="$emit('open-agent', fullscreenNode.id)">Agent</button>
+          <button v-if="!isFullscreenEditing(fullscreenNode)" type="button" @click="startFullscreenEdit(fullscreenNode)">编辑</button>
+          <button v-else type="button" @click="cancelFullscreenEdit">取消编辑</button>
+          <button v-if="isFullscreenEditing(fullscreenNode)" type="button" :disabled="!canSaveFullscreenEdit" @click="saveFullscreenEdit(fullscreenNode)">保存</button>
           <button type="button" @click="$emit('close-fullscreen')">退出全屏</button>
         </div>
       </header>
       <div class="canvas-fullscreen-content">
         <section class="canvas-detail-overview">
-          <p>{{ fullscreenNode.summary }}</p>
-          <div v-if="hasPathGraph(fullscreenNode)" class="canvas-path-graph">
+          <div v-if="isFullscreenEditing(fullscreenNode)" class="canvas-fullscreen-edit-panel">
+            <label>
+              <span>摘要</span>
+              <textarea v-model="fullscreenEditSummary" rows="3"></textarea>
+            </label>
+            <label>
+              <span>内容条目</span>
+              <textarea v-model="fullscreenEditContentText" rows="8"></textarea>
+            </label>
+            <label>
+              <span>补充详情</span>
+              <textarea v-model="fullscreenEditDetailText" rows="6"></textarea>
+            </label>
+          </div>
+          <p v-else>{{ fullscreenNode.summary }}</p>
+          <div v-if="hasPathGraph(fullscreenNode)" v-show="!isFullscreenEditing(fullscreenNode)" class="canvas-path-graph">
             <div class="canvas-path-legend">
               <span v-for="item in pathGraphLegend(fullscreenNode)" :key="`${fullscreenNode.id}-legend-${item.type}`">
                 <i :class="`path-shape ${item.type}`"></i>{{ item.label }}
@@ -213,7 +230,7 @@
               </span>
             </div>
           </div>
-          <div v-if="hasPathGraph(fullscreenNode)" class="canvas-flow-insights">
+          <div v-if="hasPathGraph(fullscreenNode)" v-show="!isFullscreenEditing(fullscreenNode)" class="canvas-flow-insights">
             <div class="flow-metric-grid">
               <article
                 v-for="metric in flowDetailMetrics(fullscreenNode)"
@@ -306,7 +323,7 @@
               </section>
             </div>
           </div>
-          <div class="canvas-detail-tree">
+          <div v-show="!isFullscreenEditing(fullscreenNode)" class="canvas-detail-tree">
             <button
               v-for="treeItem in visibleTreeItems(fullscreenNode)"
               :key="`${fullscreenNode.id}-${treeItem.key}`"
@@ -321,7 +338,7 @@
             </button>
           </div>
         </section>
-        <article v-for="section in fullscreenNode.detailSections || []" :key="`${fullscreenNode.id}-detail-${section.title}`" class="canvas-detail-section">
+        <article v-for="section in fullscreenNode.detailSections || []" v-show="!isFullscreenEditing(fullscreenNode)" :key="`${fullscreenNode.id}-detail-${section.title}`" class="canvas-detail-section">
           <header>
             <strong>{{ section.title }}</strong>
             <small v-if="section.meta">{{ section.meta }}</small>
@@ -355,15 +372,26 @@ const props = defineProps({
   zoom: { type: Number, default: 1 }
 })
 
-const emit = defineEmits(['back', 'zoom', 'save', 'convert-requirement', 'persist-knowledge', 'open-knowledge', 'focus-node', 'open-agent', 'fullscreen', 'close-fullscreen', 'quick-action', 'rollback-version'])
+const emit = defineEmits(['back', 'zoom', 'save', 'convert-requirement', 'persist-knowledge', 'open-knowledge', 'focus-node', 'open-agent', 'fullscreen', 'close-fullscreen', 'edit-node', 'quick-action', 'rollback-version'])
 
 const viewportRef = ref(null)
 const spotlightNodeId = ref('')
 const expandedTreeItems = ref(new Set())
 const rollbackPreviewVersionId = ref('')
+const fullscreenEditingNodeId = ref('')
+const fullscreenEditSummary = ref('')
+const fullscreenEditContentText = ref('')
+const fullscreenEditDetailText = ref('')
 let spotlightTimer = null
 const analysisVersionMeta = computed(() => props.versionMeta || {})
 const analysisQualityGate = computed(() => props.qualityGate || {})
+const canSaveFullscreenEdit = computed(() =>
+  Boolean(fullscreenEditingNodeId.value && (
+    fullscreenEditSummary.value.trim() ||
+    fullscreenEditContentText.value.trim() ||
+    fullscreenEditDetailText.value.trim()
+  ))
+)
 
 function treeItemDepth(item = '') {
   const prefix = String(item).match(/^[\s│├└─—|]+/)?.[0] || ''
@@ -404,6 +432,47 @@ function visibleNodeQuickActions(node = {}) {
   return (Array.isArray(node.quickActions) ? node.quickActions : [])
     .map((action) => String(action || '').trim())
     .filter((action) => action && !isCanvasConfirmAction(action))
+}
+
+function nodeDetailText(node = {}) {
+  return (Array.isArray(node.detailSections) ? node.detailSections : [])
+    .flatMap((section) => [
+      section.title ? `【${section.title}】` : '',
+      ...(Array.isArray(section.items) ? section.items : [])
+    ])
+    .filter(Boolean)
+    .join('\n')
+}
+
+function isFullscreenEditing(node = {}) {
+  return Boolean(node?.id && fullscreenEditingNodeId.value === node.id)
+}
+
+function startFullscreenEdit(node = {}) {
+  if (!node?.id) return
+  fullscreenEditingNodeId.value = node.id
+  fullscreenEditSummary.value = node.summary || ''
+  fullscreenEditContentText.value = (Array.isArray(node.content) ? node.content : []).map((item) => treeItemLabel(item)).join('\n')
+  fullscreenEditDetailText.value = nodeDetailText(node)
+}
+
+function cancelFullscreenEdit() {
+  fullscreenEditingNodeId.value = ''
+  fullscreenEditSummary.value = ''
+  fullscreenEditContentText.value = ''
+  fullscreenEditDetailText.value = ''
+}
+
+function saveFullscreenEdit(node = {}) {
+  if (!node?.id || !canSaveFullscreenEdit.value) return
+  emit('edit-node', {
+    nodeId: node.id,
+    editedSummary: fullscreenEditSummary.value.trim(),
+    editedContentText: fullscreenEditContentText.value.trim(),
+    editedDetailText: fullscreenEditDetailText.value.trim(),
+    originalNode: node
+  })
+  cancelFullscreenEdit()
 }
 
 function hasPathGraph(node = {}) {
@@ -591,6 +660,13 @@ watch(
   (nodeId) => {
     if (!nodeId) return
     nextTick(() => focusNode(nodeId))
+  }
+)
+
+watch(
+  () => props.fullscreenNode?.id || '',
+  (nodeId) => {
+    if (!nodeId || (fullscreenEditingNodeId.value && fullscreenEditingNodeId.value !== nodeId)) cancelFullscreenEdit()
   }
 )
 

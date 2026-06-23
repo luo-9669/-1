@@ -664,6 +664,13 @@ export const api = {
         timeoutMs: options.timeoutMs || 30000
       })
     },
+    editWorkflowCanvasNode(config, runId, nodeId, payload = {}, options = {}) {
+      return request(config.apiBaseUrl, `/api/workspace/workflow-runs/${encodeURIComponent(runId)}/canvas-nodes/${encodeURIComponent(nodeId)}/edit`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+        timeoutMs: options.timeoutMs || 90000
+      })
+    },
     completeRun(config, runId, payload = {}) {
       return request(config.apiBaseUrl, `/api/workflows/runs/${runId}/complete`, {
         method: 'POST',

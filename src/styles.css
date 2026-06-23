@@ -308,7 +308,7 @@ label {
 
 .main {
   min-width: 0;
-  padding: 24px;
+  padding: 0;
   overflow: auto;
   position: relative;
 }
@@ -320,6 +320,15 @@ label {
 .analysis-focus .main {
   height: 100vh;
   overflow: hidden;
+  padding: 0;
+}
+
+.main:not(.edge-to-edge) {
+  padding: 24px;
+}
+
+.main.edge-to-edge,
+.analysis-focus .main {
   padding: 0;
 }
 
@@ -668,6 +677,11 @@ label {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.materials-toolbar-actions .primary,
+.knowledge-hub-head .actions .primary {
+  order: 10;
 }
 
 .requirements-workspace {
@@ -1524,6 +1538,10 @@ label {
   border-radius: 8px;
   background: #fff;
   padding: 16px;
+}
+
+.knowledge-hub-head .actions {
+  justify-content: flex-end;
 }
 
 .knowledge-hub-head h3 {
@@ -5999,7 +6017,10 @@ label {
   padding: 14px;
   box-shadow: 0 18px 46px rgba(34, 37, 41, 0.08);
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 10px;
+  max-height: 260px;
+  overflow: hidden;
 }
 
 .canvas-node-card.active {
@@ -6045,13 +6066,17 @@ label {
   margin: 0;
   color: #4c535c;
   line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .canvas-node-content {
   display: grid;
   gap: 6px;
-  max-height: 110px;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .canvas-node-content span,
@@ -6072,11 +6097,11 @@ label {
 
 .canvas-tree-node {
   width: 100%;
-  height: auto;
   min-height: 36px;
+  max-height: 128px;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   justify-items: start;
   gap: 8px;
   padding: 8px 10px;
@@ -6592,12 +6617,51 @@ label {
 }
 
 .canvas-tree-node span {
+  display: block;
   min-width: 0;
   max-width: 100%;
+  max-height: 96px;
+  overflow-y: auto;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;
   line-height: 1.6;
+  padding-right: 6px;
+}
+
+.canvas-fullscreen-edit-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.canvas-fullscreen-edit-panel label {
+  display: grid;
+  gap: 8px;
+}
+
+.canvas-fullscreen-edit-panel span {
+  color: #525a66;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.canvas-fullscreen-edit-panel textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #dfe4ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #23272f;
+  padding: 10px 12px;
+  font: inherit;
+  line-height: 1.6;
+  outline: none;
+}
+
+.canvas-fullscreen-edit-panel textarea:focus {
+  border-color: #8aa4ff;
+  box-shadow: 0 0 0 3px rgba(95, 125, 255, 0.12);
 }
 
 .canvas-detail-section {

@@ -7,6 +7,7 @@ import {
   completeRunStep,
   createRun,
   createWorkflowRunnerStore,
+  editRunCanvasNode,
   generateRunStep,
   regenerateRunStep
 } from '../services/workflow-runner.js'
@@ -285,6 +286,19 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     return result
   }
 
+  async function editCanvasNode(payload = {}) {
+    mirrorWorkspaceRuns(store, runnerStore)
+    const result = await editRunCanvasNode(runnerStore, {
+      ...payload,
+      runId: payload.runId || payload.id,
+      nodeId: payload.nodeId
+    }, {
+      agentProvider: await resolveAgentProvider(options)
+    })
+    await persistWorkspaceRun(store, result.run)
+    return result
+  }
+
   async function saveConfirmedProposal(payload = {}) {
     const result = {
       run: payload.run,
@@ -383,6 +397,7 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     'POST /api/workflows/runs/:runId/agent-proposals/:proposalId/confirm': confirmProposal,
     'POST /api/workflows/runs/:runId/agent-proposals/:proposalId/confirm/save': saveConfirmedProposal,
     'POST /api/workflows/runs/:runId/agent-proposals/:proposalId/confirm/stream': confirmProposalStream,
+    'POST /api/workflows/runs/:runId/canvas-nodes/:nodeId/edit': editCanvasNode,
     'POST /api/workflows/runs/:runId/complete': complete,
     'POST /api/workspace/workflow-runs': create,
     'POST /api/workspace/workflow-runs/:id/generate': generate,
@@ -394,6 +409,7 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     'POST /api/workspace/workflow-runs/:id/agent-proposals/:proposalId/confirm': confirmProposal,
     'POST /api/workspace/workflow-runs/:id/agent-proposals/:proposalId/confirm/save': saveConfirmedProposal,
     'POST /api/workspace/workflow-runs/:id/agent-proposals/:proposalId/confirm/stream': confirmProposalStream,
+    'POST /api/workspace/workflow-runs/:id/canvas-nodes/:nodeId/edit': editCanvasNode,
     'POST /api/workspace/workflow-runs/:id/complete-step': complete
   }
 }
