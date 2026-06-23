@@ -1,0 +1,25 @@
+{
+  "name": "liuchengtong",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "api": "node server/mock-api.mjs",
+    "api:restart": "node server/restart-api.mjs",
+    "dev:all": "node server/restart-api.mjs & vite --host 0.0.0.0",
+    "start:all": "node server/mock-api.mjs & vite --host 0.0.0.0",
+    "test": "node tests/workflows.test.mjs",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
+    "playwright-core": "^1.61.0",
+    "single-file-cli": "^2.0.83",
+    "vite": "^5.4.19",
+    "vue": "^3.5.17"
+  }
+}

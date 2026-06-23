@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.DS_Store
+
+storage/workspace/*.local.json
+storage/workspace/*.backup-*.json
+storage/workspace/*.bak-*.json
+storage/workspace/*.corrupt-*.json
+
+tmp-*
+*.timestamp-*.mjs
+*.log

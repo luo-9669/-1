@@ -1,0 +1,14 @@
+{
+  "projects": [
+    {
+      "id": "project-flow",
+      "name": "流程通默认项目",
+      "description": "本地默认项目，用于承接旧数据和快速试用。",
+      "stage": "design",
+      "createdAt": "2026-06-20T00:00:00.000Z",
+      "updatedAt": "2026-06-20T00:00:00.000Z"
+    }
+  ],
+  "assets": [],
+  "skillRuns": []
+}
