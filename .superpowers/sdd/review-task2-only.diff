@@ -1,0 +1,313 @@
+# Review package: 4a1c0a9..a126769
+
+## Commits
+a126769 feat: add capture compiler and diagnostics
+
+## Files changed
+ .superpowers/sdd/task-2-report.md       | 120 ++++++++++++++++++++++++++++++++
+ backend/services/capture-compiler.js    |  47 +++++++++++++
+ backend/services/capture-diagnostics.js |  41 +++++++++++
+ tests/workflows.test.mjs                |  49 +++++++++++++
+ 4 files changed, 257 insertions(+)
+
+## Diff
+diff --git a/.superpowers/sdd/task-2-report.md b/.superpowers/sdd/task-2-report.md
+new file mode 100644
+index 0000000..4802607
+--- /dev/null
++++ b/.superpowers/sdd/task-2-report.md
+@@ -0,0 +1,120 @@
++# Task 2 Report: Capture Compiler And Diagnostic Classifier
++
++## Scope
++
++- Implemented only the Task 2 files allowed for write access:
++  - `tests/workflows.test.mjs`
++  - `backend/services/capture-compiler.js`
++  - `backend/services/capture-diagnostics.js`
++- Did not modify capture runner, capture task store, routes, or frontend.
++- Kept phase-one scope as web URL capture only.
++- Kept auth mode constrained to `public | browser | cookie`.
++- Kept diagnostics constrained to:
++  - `LOGIN_REQUIRED`
++  - `COOKIE_EXPIRED`
++  - `DOM_NOT_RESTORABLE`
++  - `ANTI_BOT_SUSPECTED`
++- Did not introduce any free-form Playwright script generation or persistence.
++
++## TDD Evidence
++
++### RED
++
++1. Added the exact contract test from the brief to `tests/workflows.test.mjs`.
++2. Ran the focused test command:
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++3. Observed the expected failure:
++
++```text
++FAIL compiles relay capture tasks and classifies capture diagnostics
++Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../backend/services/capture-compiler.js'
++```
++
++This confirmed the new behavior was not already implemented and the failing test was exercising the missing compiler/diagnostics layer.
++
++### GREEN
++
++1. Implemented `compileCaptureTask(input)` in `backend/services/capture-compiler.js`.
++2. Implemented `classifyCaptureDiagnostics(input)` in `backend/services/capture-diagnostics.js`.
++3. Re-ran the same focused test command and observed:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++## Implementation Summary
++
++### `compileCaptureTask`
++
++- Normalizes auth mode to `public | browser | cookie`, defaulting invalid values to `public`.
++- Compiles declarative relay data from:
++  - request payload
++  - URL analysis result
++  - template match result
++- Produces:
++  - `taskType: 'web-capture'`
++  - `projectId`
++  - `templateId`
++  - `source.url`
++  - auth payload limited to `sessionId` for browser mode and `cookieText` for cookie mode
++  - execution settings copied from declarative template navigation/page strategy
++  - artifact flags copied from declarative template
++  - fixed diagnostics policy flags
++  - relay metadata including match reason, page class, and auth requirement hint
++
++### `classifyCaptureDiagnostics`
++
++- Detects and returns only the allowed diagnostic codes.
++- Maps auth-required public captures to `LOGIN_REQUIRED`.
++- Maps fetch errors containing cookie/auth expiration signals to `COOKIE_EXPIRED`.
++- Maps empty HTML/static/layout output to `DOM_NOT_RESTORABLE`.
++- Maps blocked HTML or blocked fetch messages (`405`, `异常访问`, `access denied`, `forbidden`, etc.) to `ANTI_BOT_SUSPECTED`.
++- Returns:
++  - `status: 'blocked'` when any diagnostic is present
++  - `diagnostics`
++  - deduplicated `recoveryActions`
++
++## Verification
++
++### Focused test
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++Result:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++### Full test suite
++
++```bash
++npm test
++```
++
++Result:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++The full suite completed green after the Task 2 changes.
++
++## Commit
++
++Committed with the brief-required message:
++
++```text
++feat: add capture compiler and diagnostics
++```
++
++## Concerns
++
++- The current anti-bot and cookie-expired detection is intentionally heuristic and string-based, which matches the brief and current task boundary.
++- No runner or route integration was added in this task by design; this commit only establishes the compiler/diagnostics contract and tests.
+diff --git a/backend/services/capture-compiler.js b/backend/services/capture-compiler.js
+new file mode 100644
+index 0000000..16671fe
+--- /dev/null
++++ b/backend/services/capture-compiler.js
+@@ -0,0 +1,47 @@
++function normalizeAuthMode(authMode = 'public') {
++  return ['public', 'browser', 'cookie'].includes(authMode) ? authMode : 'public'
++}
++
++export function compileCaptureTask(input = {}) {
++  const payload = input.payload || {}
++  const analysis = input.analysis || {}
++  const templateMatch = input.templateMatch || {}
++  const template = templateMatch.template || {}
++  const authMode = normalizeAuthMode(payload.authMode || analysis.authMode)
++
++  return {
++    taskType: 'web-capture',
++    projectId: payload.projectId || 'default',
++    templateId: templateMatch.templateId || 'generic-public-page',
++    source: { url: analysis.normalizedUrl || String(payload.url || '').trim() },
++    auth: {
++      mode: authMode,
++      sessionId: authMode === 'browser' ? payload.sessionId || '' : '',
++      cookieText: authMode === 'cookie' ? payload.cookieText || '' : ''
++    },
++    execution: {
++      waitUntil: template.navigation?.waitUntil || 'networkidle',
++      timeoutMs: template.navigation?.timeoutMs || 15000,
++      extraWaitMs: template.navigation?.extraWaitMs || 0,
++      scrollMode: template.pageStrategy?.scrollMode || 'full-page',
++      maxScrollSteps: template.pageStrategy?.maxScrollSteps || 4,
++      includeIframes: Boolean(template.pageStrategy?.includeIframes)
++    },
++    artifacts: {
++      screenshot: Boolean(template.artifacts?.screenshot),
++      singleFile: Boolean(template.artifacts?.singleFile),
++      domSnapshot: Boolean(template.artifacts?.domSnapshot),
++      networkLogs: Boolean(template.artifacts?.networkLogs)
++    },
++    diagnosticsPolicy: {
++      classifyLoginPage: true,
++      classifyBotBlock: true,
++      classifyEmptyDom: true
++    },
++    relay: {
++      matchReason: templateMatch.matchReason || '',
++      pageClass: analysis.traits?.pageClass || 'public-page',
++      requiresAuth: Boolean(analysis.authHints?.requiresAuth)
++    }
++  }
++}
+diff --git a/backend/services/capture-diagnostics.js b/backend/services/capture-diagnostics.js
+new file mode 100644
+index 0000000..04bfac7
+--- /dev/null
++++ b/backend/services/capture-diagnostics.js
+@@ -0,0 +1,41 @@
++function hasBlockedHtml(text = '') {
++  return /405|异常访问|请求有异常行为|access denied|forbidden/i.test(String(text || ''))
++}
++
++export function classifyCaptureDiagnostics(input = {}) {
++  const compiledTask = input.compiledTask || {}
++  const captureResult = input.captureResult || {}
++  const raw = captureResult.raw || {}
++  const diagnostics = []
++  const recoveryActions = new Set()
++
++  if (compiledTask.relay?.requiresAuth && compiledTask.auth?.mode === 'public') {
++    diagnostics.push({ code: 'LOGIN_REQUIRED', message: '目标页面需要登录后采集。' })
++    recoveryActions.add('打开授权浏览器')
++    recoveryActions.add('重新导入 Cookie')
++  }
++
++  if (/cookie|expired|401|403/i.test(raw.fetchError || '')) {
++    diagnostics.push({ code: 'COOKIE_EXPIRED', message: '当前 Cookie 或登录态已失效。' })
++    recoveryActions.add('重新导入 Cookie')
++    recoveryActions.add('打开授权浏览器')
++  }
++
++  if (!captureResult.singleFileHtml && !captureResult.staticHtml && !raw.layoutNodeCount) {
++    diagnostics.push({ code: 'DOM_NOT_RESTORABLE', message: '当前页面没有可还原 DOM 数据。' })
++    recoveryActions.add('上传网页快照包')
++    recoveryActions.add('上传截图走图片转代码')
++  }
++
++  if (hasBlockedHtml(captureResult.singleFileHtml) || hasBlockedHtml(raw.fetchError)) {
++    diagnostics.unshift({ code: 'ANTI_BOT_SUSPECTED', message: '当前页面疑似被风控或异常访问拦截。' })
++    recoveryActions.add('打开授权浏览器')
++    recoveryActions.add('重新导入 Cookie')
++  }
++
++  return {
++    status: diagnostics.length ? 'blocked' : (captureResult.status || 'completed'),
++    diagnostics,
++    recoveryActions: [...recoveryActions]
++  }
++}
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index 806db6c..bfd50cb 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8730,20 +8730,69 @@ test('analyzes capture URLs and matches phase-one relay templates', async () =>
+ 
+   const matched = matchCaptureTemplate({
+     analysis: dashboard,
+     authMode: 'browser'
+   })
+   assert.equal(matched.templateId, 'generic-saas-dashboard')
+   assert.equal(matched.template.navigation.waitUntil, 'networkidle')
+   assert.match(matched.matchReason, /saas-dashboard/)
+ })
+ 
++test('compiles relay capture tasks and classifies capture diagnostics', async () => {
++  const { analyzeCaptureUrl } = await import('../backend/services/capture-url-analyzer.js')
++  const { matchCaptureTemplate } = await import('../backend/services/capture-template-matcher.js')
++  const { compileCaptureTask } = await import('../backend/services/capture-compiler.js')
++  const { classifyCaptureDiagnostics } = await import('../backend/services/capture-diagnostics.js')
++
++  const analysis = analyzeCaptureUrl({
++    url: 'https://example.com/app/home',
++    authMode: 'browser'
++  })
++  const templateMatch = matchCaptureTemplate({ analysis, authMode: 'browser' })
++  const compiled = compileCaptureTask({
++    payload: {
++      projectId: 'project-flow',
++      url: 'https://example.com/app/home',
++      authMode: 'browser',
++      sessionId: 'session-1'
++    },
++    analysis,
++    templateMatch
++  })
++
++  assert.equal(compiled.taskType, 'web-capture')
++  assert.equal(compiled.templateId, 'generic-saas-dashboard')
++  assert.equal(compiled.auth.mode, 'browser')
++  assert.equal(compiled.execution.waitUntil, 'networkidle')
++  assert.equal(compiled.artifacts.domSnapshot, true)
++
++  const blocked = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html><body><h1>405 异常访问</h1></body></html>',
++      staticHtml: '',
++      layoutNodes: [],
++      raw: {
++        fetchError: '目标网页未能完整抓取',
++        screenshotCaptured: true,
++        singleFileCaptured: true,
++        layoutNodeCount: 0
++      }
++    }
++  })
++
++  assert.equal(blocked.status, 'blocked')
++  assert.equal(blocked.diagnostics[0].code, 'ANTI_BOT_SUSPECTED')
++  assert.ok(blocked.recoveryActions.includes('打开授权浏览器'))
++})
++
+ testAsync('mock api delegates capture generation to backend capture service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /import \{ generatePageFromCapturePayload \} from '\.\.\/services\/capture-service\.js'/)
+   assert.doesNotMatch(source, /async function generatePageFromCapturePayload/)
+   assert.match(source, /generatePageFromCapturePayload\(payload,\s*\{[\s\S]*generatedPageHtml[\s\S]*verifyGeneratedPage[\s\S]*\}\)/)
+ })
+ 
+ testAsync('mock api injects restored page persistence into capture generation service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')

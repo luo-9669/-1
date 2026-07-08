@@ -1,0 +1,179 @@
+# Review package: b5c150d..46afa8a
+
+## Commits
+46afa8a fix: persist blocked relay task status
+
+## Files changed
+ .superpowers/sdd/task-3-report.md      | 42 ++++++++++++++++++++++++++++++++++
+ backend/services/capture-task-store.js |  8 ++++++-
+ tests/workflows.test.mjs               | 31 +++++++++++++++++++++++++
+ 3 files changed, 80 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-3-report.md b/.superpowers/sdd/task-3-report.md
+index 2a663fb..83f3932 100644
+--- a/.superpowers/sdd/task-3-report.md
++++ b/.superpowers/sdd/task-3-report.md
+@@ -118,10 +118,52 @@ Result:
+ Committed with:
+ 
+ ```bash
+ git commit -m "feat: dispatch compiled relay tasks through capture store"
+ ```
+ 
+ ## Concerns
+ 
+ - No additional route wiring was added by design; this task only introduced dispatcher/store/runner compatibility.
+ - Dispatcher currently assumes injected dependencies are present and valid, matching the existing lightweight service style.
++
++## Reviewer Fix: Blocked Task Status Persistence
++
++Reviewer feedback identified that `runTask()` persisted every non-throwing executor result as task status `success`, even when the executor returned a semantic result status like `blocked`.
++
++### RED
++
++1. Added regression test:
++   - `backend capture task store persists blocked dispatcher results as blocked status`
++2. Ran focused test command:
++
++```bash
++npm test -- --test-name-pattern="backend capture task store persists blocked dispatcher results as blocked status"
++```
++
++3. Observed expected failure:
++   - assertion failure on stored task status
++   - actual: `success`
++   - expected: `blocked`
++
++This confirmed the persistence layer was overwriting dispatcher result semantics.
++
++### GREEN
++
++Implemented a minimal task-store status normalization step so persisted task status now follows result semantics:
++
++- `blocked` -> `blocked`
++- `failed` -> `failed`
++- all other non-throwing result statuses -> `success`
++
++Ran focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture task store persists blocked dispatcher results as blocked status|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks|backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++Observed:
++
++- blocked regression test passed
++- existing success path task-store test passed
++- existing thrown failure path task-store test passed
++- dispatcher integration test still passed
+diff --git a/backend/services/capture-task-store.js b/backend/services/capture-task-store.js
+index 46421d6..e70d519 100644
+--- a/backend/services/capture-task-store.js
++++ b/backend/services/capture-task-store.js
+@@ -19,20 +19,26 @@ function publicTask(task = {}) {
+     sourceType: task.sourceType,
+     url: task.url,
+     status: task.status,
+     createdAt: task.createdAt,
+     updatedAt: task.updatedAt,
+     result: task.result,
+     error: task.error
+   }
+ }
+ 
++function normalizeTaskStatus(resultStatus = '') {
++  if (resultStatus === 'blocked') return 'blocked'
++  if (resultStatus === 'failed') return 'failed'
++  return 'success'
++}
++
+ export function createCaptureTaskStore(options = {}) {
+   const uuid = options.uuid || randomUUID
+   const now = options.now || Date.now
+   const tasks = new Map()
+   const order = []
+ 
+   function createTask(payload = {}) {
+     const taskId = uuid()
+     const timestamp = isoTime(now)
+     const task = {
+@@ -100,21 +106,21 @@ export function createCaptureTaskStore(options = {}) {
+       const captureResult = await execute({
+         ...payload,
+         taskId: task.taskId
+       })
+       const resultPayload = {
+         ...captureResult,
+         taskId: task.taskId,
+         projectId: task.projectId
+       }
+       const completed = updateTask(task.taskId, {
+-        status: 'success',
++        status: normalizeTaskStatus(captureResult?.status),
+         result: resultPayload,
+         error: null
+       })
+       return completed.result
+     } catch (error) {
+       updateTask(task.taskId, {
+         status: 'failed',
+         result: null,
+         error: {
+           message: error.message || '采集任务失败',
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index 3572431..20bc40e 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8552,20 +8552,51 @@ testAsync('backend capture dispatcher compiles relay metadata before task-store
+     authMode: 'browser',
+     sessionId: 'session-7'
+   }, dispatcher)
+ 
+   assert.equal(result.templateId, 'generic-saas-dashboard')
+   assert.equal(result.relay.compiledTask.execution.waitUntil, 'networkidle')
+   assert.equal(result.relay.analysis.traits.pageClass, 'saas-dashboard')
+   assert.deepEqual(result.diagnostics, [])
+ })
+ 
++testAsync('backend capture task store persists blocked dispatcher results as blocked status', async () => {
++  const { createCaptureTaskStore } = await import('../backend/services/capture-task-store.js')
++  const taskStore = createCaptureTaskStore({
++    uuid: () => 'task-blocked',
++    now: () => 1000
++  })
++
++  const dispatcher = {
++    execute: async (payload) => ({
++      taskId: payload.taskId,
++      url: payload.url,
++      status: 'blocked',
++      title: 'Blocked Capture',
++      diagnostics: [{ category: 'auth', severity: 'warning', message: 'login required' }],
++      recoveryActions: ['use browser auth']
++    })
++  }
++
++  const result = await taskStore.runTask({
++    projectId: 'project-flow',
++    url: 'https://example.com/private'
++  }, dispatcher)
++
++  const stored = taskStore.result('task-blocked')
++
++  assert.equal(result.status, 'blocked')
++  assert.equal(stored.status, 'blocked')
++  assert.equal(stored.result.status, 'blocked')
++  assert.deepEqual(stored.result.diagnostics, [{ category: 'auth', severity: 'warning', message: 'login required' }])
++})
++
+ testAsync('mock api mounts capture routes from backend route module', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+   const routesStart = source.indexOf('export function createMockApiRoutes')
+   const routesEnd = source.indexOf("'POST /api/generate/react-vite'", routesStart)
+   const routeSource = source.slice(routesStart, routesEnd)
+ 
+   assert.match(source, /import \{ captureRoutes \} from '\.\.\/routes\/capture\.js'/)
+   assert.match(source, /const captureApiRoutes = captureRoutes\(/)
+   assert.match(source, /export const routes = createMockApiRoutes/)
+   assert.match(routeSource, /\.\.\.captureApiRoutes/)

@@ -1,0 +1,406 @@
+# Review package: be69a29..b5c150d
+
+## Commits
+b5c150d feat: dispatch compiled relay tasks through capture store
+
+## Files changed
+ .superpowers/sdd/task-3-report.md      | 127 +++++++++++++++++++++++++++++++++
+ backend/services/capture-dispatcher.js |  55 ++++++++++++++
+ backend/services/capture-runner.js     |   2 +
+ backend/services/capture-task-store.js |  12 +++-
+ tests/workflows.test.mjs               |  77 +++++++++++++++++++-
+ 5 files changed, 269 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-3-report.md b/.superpowers/sdd/task-3-report.md
+new file mode 100644
+index 0000000..2a663fb
+--- /dev/null
++++ b/.superpowers/sdd/task-3-report.md
+@@ -0,0 +1,127 @@
++# Task 3 Report: URL Relay Dispatcher
++
++## Scope
++
++- Implemented `backend/services/capture-dispatcher.js`
++- Updated `backend/services/capture-task-store.js` to support executors exposing either `execute()` or `makeCaptureResult()`
++- Updated `backend/services/capture-runner.js` to preserve relay metadata in `raw`
++- Added workflow coverage in `tests/workflows.test.mjs`
++- Kept within phase-one constraints:
++  - web URL capture only
++  - auth mode constrained to `public|browser|cookie`
++  - declarative template flow preserved
++  - diagnostics left to existing four-category classifier
++  - reused existing runner/task-store flow without mock-api wiring or frontend changes
++
++## TDD Evidence
++
++### RED
++
++1. Added failing integration test:
++   - `backend capture dispatcher compiles relay metadata before task-store execution`
++2. Ran focused test command:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++3. Observed expected failure:
++   - `Error [ERR_MODULE_NOT_FOUND]: Cannot find module .../backend/services/capture-dispatcher.js`
++
++This confirmed the test was exercising missing dispatcher behavior rather than passing on existing code.
++
++### GREEN
++
++Implemented:
++
++- `createCaptureDispatcher(deps).execute(payload)`
++- task-store executor compatibility branch
++- relay metadata passthrough into runner result `raw.templateId` and `raw.relayMatchReason`
++
++Ran focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution|backend capture runner assembles capture result from injected target capture|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks"
++```
++
++Observed:
++
++- dispatcher integration test passed
++- existing task-store success/failure tests passed
++- runner assembly test passed with new relay assertions
++
++## Implementation Notes
++
++### Dispatcher
++
++`createCaptureDispatcher()` now orchestrates:
++
++1. URL analysis
++2. template matching
++3. task compilation
++4. capture execution through existing runner
++5. diagnostics classification
++
++It returns the original capture result plus:
++
++- `templateId`
++- classified `diagnostics`
++- `recoveryActions`
++- `relay.analysis`
++- `relay.compiledTask`
++- `relay.matchReason`
++
++If diagnostics classify the result as blocked, the returned status is normalized to `blocked`.
++
++### Task Store Compatibility
++
++`runTask()` now accepts either:
++
++- a dispatcher-like executor with `execute(input)`
++- the legacy runner contract with `makeCaptureResult(input)`
++
++This preserves existing behavior while allowing relay orchestration to plug into the same store lifecycle.
++
++### Runner Relay Metadata
++
++`capture-runner` now includes:
++
++- `raw.templateId`
++- `raw.relayMatchReason`
++
++when `payload.relay` is present, preserving relay provenance for downstream consumers without replacing the current result shape.
++
++## Verification
++
++Focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution|backend capture runner assembles capture result from injected target capture|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks"
++```
++
++Result:
++
++- exit code `0`
++
++Full suite verification:
++
++```bash
++npm test
++```
++
++Result:
++
++- exit code `0`
++
++## Commit
++
++Committed with:
++
++```bash
++git commit -m "feat: dispatch compiled relay tasks through capture store"
++```
++
++## Concerns
++
++- No additional route wiring was added by design; this task only introduced dispatcher/store/runner compatibility.
++- Dispatcher currently assumes injected dependencies are present and valid, matching the existing lightweight service style.
+diff --git a/backend/services/capture-dispatcher.js b/backend/services/capture-dispatcher.js
+new file mode 100644
+index 0000000..9a6abb5
+--- /dev/null
++++ b/backend/services/capture-dispatcher.js
+@@ -0,0 +1,55 @@
++export function createCaptureDispatcher(deps = {}) {
++  const {
++    analyzeCaptureUrl,
++    matchCaptureTemplate,
++    compileCaptureTask,
++    classifyCaptureDiagnostics,
++    captureRunner
++  } = deps
++
++  return {
++    async execute(payload = {}) {
++      const analysis = analyzeCaptureUrl({
++        url: payload.url,
++        authMode: payload.authMode
++      })
++      const templateMatch = matchCaptureTemplate({
++        analysis,
++        authMode: payload.authMode
++      })
++      const compiledTask = compileCaptureTask({
++        payload,
++        analysis,
++        templateMatch
++      })
++      const captureResult = await captureRunner.makeCaptureResult({
++        ...payload,
++        url: compiledTask.source.url,
++        authMode: compiledTask.auth.mode,
++        relay: {
++          templateId: compiledTask.templateId,
++          matchReason: compiledTask.relay?.matchReason || '',
++          compiledTask,
++          analysis
++        }
++      })
++      const classified = classifyCaptureDiagnostics({
++        compiledTask,
++        captureResult
++      })
++
++      return {
++        ...captureResult,
++        status: classified.status === 'blocked' ? 'blocked' : captureResult.status,
++        templateId: compiledTask.templateId,
++        diagnostics: classified.diagnostics,
++        recoveryActions: classified.recoveryActions,
++        relay: {
++          analysis,
++          compiledTask,
++          matchReason: compiledTask.relay?.matchReason || ''
++        }
++      }
++    }
++  }
++}
+diff --git a/backend/services/capture-runner.js b/backend/services/capture-runner.js
+index 1678484..e999c1e 100644
+--- a/backend/services/capture-runner.js
++++ b/backend/services/capture-runner.js
+@@ -132,20 +132,22 @@ export function createCaptureRunner(options = {}) {
+           designRules.colors.canvas,
+           designRules.colors.accentCyan
+         ],
+         fonts: ['PingFang SC', 'Microsoft YaHei', 'Arial'],
+         radius: [6, 8, 12, 16, 999],
+         spacing: designRules.layout.spacing
+       },
+       raw: {
+         scope: payload.scope,
+         authMode,
++        templateId: payload.relay?.templateId || '',
++        relayMatchReason: payload.relay?.matchReason || '',
+         captureKind: payload.captureKind || 'internal-web-snapshot',
+         snapshotPackage: 'internal-web-snapshot',
+         requestedOutput: payload.output || null,
+         captureMode: hasDomLayout ? 'screenshot-with-dom-data' : 'screenshot-only',
+         capturedAt: new Date(completedAt).toISOString(),
+         startedAt: timing.startedAt,
+         completedAt: timing.completedAt,
+         fetched: Boolean(fetched),
+         fetchStatus: fetched?.statusCode || null,
+         transport: fetched?.transport || null,
+diff --git a/backend/services/capture-task-store.js b/backend/services/capture-task-store.js
+index f2ebf10..46421d6 100644
+--- a/backend/services/capture-task-store.js
++++ b/backend/services/capture-task-store.js
+@@ -77,28 +77,34 @@ export function createCaptureTaskStore(options = {}) {
+       throw error
+     }
+     return task
+   }
+ 
+   function latestResult() {
+     const latestId = order[order.length - 1]
+     return latestId ? result(latestId) : null
+   }
+ 
+-  async function runTask(payload = {}, runner) {
+-    if (!runner || typeof runner.makeCaptureResult !== 'function') {
++  async function runTask(payload = {}, executor) {
++    const execute = typeof executor?.execute === 'function'
++      ? (input) => executor.execute(input)
++      : typeof executor?.makeCaptureResult === 'function'
++        ? (input) => executor.makeCaptureResult(input)
++        : null
++
++    if (!execute) {
+       throw new Error('Capture runner is not configured')
+     }
+     const task = createTask(payload)
+     updateTask(task.taskId, { status: 'capturing' })
+     try {
+-      const captureResult = await runner.makeCaptureResult({
++      const captureResult = await execute({
+         ...payload,
+         taskId: task.taskId
+       })
+       const resultPayload = {
+         ...captureResult,
+         taskId: task.taskId,
+         projectId: task.projectId
+       }
+       const completed = updateTask(task.taskId, {
+         status: 'success',
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index e91e23a..3572431 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8483,20 +8483,89 @@ testAsync('backend capture task store persists failed capture tasks', async () =
+     /capture exploded/
+   )
+ 
+   const stored = taskStore.result('task-failed')
+   assert.equal(stored.taskId, 'task-failed')
+   assert.equal(stored.status, 'failed')
+   assert.equal(stored.error.message, 'capture exploded')
+   assert.equal(stored.result, null)
+ })
+ 
++testAsync('backend capture dispatcher compiles relay metadata before task-store execution', async () => {
++  const { createCaptureDispatcher } = await import('../backend/services/capture-dispatcher.js')
++  const { createCaptureTaskStore } = await import('../backend/services/capture-task-store.js')
++
++  const dispatcher = createCaptureDispatcher({
++    analyzeCaptureUrl: ({ url, authMode }) => ({
++      normalizedUrl: url,
++      authMode,
++      traits: { pageClass: 'saas-dashboard' },
++      authHints: { requiresAuth: true, preferredAuthMode: 'browser' }
++    }),
++    matchCaptureTemplate: () => ({
++      templateId: 'generic-saas-dashboard',
++      template: {
++        navigation: { waitUntil: 'networkidle', timeoutMs: 20000, extraWaitMs: 3000 },
++        pageStrategy: { scrollMode: 'full-page', maxScrollSteps: 8, includeIframes: false },
++        artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true }
++      },
++      matchReason: 'unit-test-match'
++    }),
++    compileCaptureTask: ({ payload }) => ({
++      taskType: 'web-capture',
++      templateId: 'generic-saas-dashboard',
++      source: { url: payload.url },
++      auth: { mode: payload.authMode, sessionId: payload.sessionId || '' },
++      execution: {
++        waitUntil: 'networkidle',
++        timeoutMs: 20000,
++        extraWaitMs: 3000,
++        scrollMode: 'full-page',
++        maxScrollSteps: 8,
++        includeIframes: false
++      },
++      artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true },
++      relay: { matchReason: 'unit-test-match', pageClass: 'saas-dashboard', requiresAuth: true }
++    }),
++    classifyCaptureDiagnostics: () => ({ status: 'completed', diagnostics: [], recoveryActions: [] }),
++    captureRunner: {
++      makeCaptureResult: async (payload) => ({
++        taskId: payload.taskId,
++        url: payload.url,
++        status: 'completed',
++        title: 'Compiled Capture',
++        raw: { authMode: payload.authMode, transport: 'unit' }
++      })
++    }
++  })
++
++  const taskStore = createCaptureTaskStore({
++    uuid: (() => {
++      let id = 0
++      return () => `relay-task-${++id}`
++    })(),
++    now: () => 1000
++  })
++
++  const result = await taskStore.runTask({
++    projectId: 'project-flow',
++    url: 'https://example.com/dashboard',
++    authMode: 'browser',
++    sessionId: 'session-7'
++  }, dispatcher)
++
++  assert.equal(result.templateId, 'generic-saas-dashboard')
++  assert.equal(result.relay.compiledTask.execution.waitUntil, 'networkidle')
++  assert.equal(result.relay.analysis.traits.pageClass, 'saas-dashboard')
++  assert.deepEqual(result.diagnostics, [])
++})
++
+ testAsync('mock api mounts capture routes from backend route module', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+   const routesStart = source.indexOf('export function createMockApiRoutes')
+   const routesEnd = source.indexOf("'POST /api/generate/react-vite'", routesStart)
+   const routeSource = source.slice(routesStart, routesEnd)
+ 
+   assert.match(source, /import \{ captureRoutes \} from '\.\.\/routes\/capture\.js'/)
+   assert.match(source, /const captureApiRoutes = captureRoutes\(/)
+   assert.match(source, /export const routes = createMockApiRoutes/)
+   assert.match(routeSource, /\.\.\.captureApiRoutes/)
+@@ -8638,27 +8707,33 @@ testAsync('backend capture runner assembles capture result from injected target
+         viewport: { width: 1280, height: 720 },
+         pageBackground: '#fafafa'
+       }
+     })
+   })
+ 
+   const result = await runner.makeCaptureResult({
+     url: 'https://example.com',
+     authMode: 'none',
+     captureKind: 'internal-web-snapshot',
+-    output: 'html'
++    output: 'html',
++    relay: {
++      templateId: 'generic-saas-dashboard',
++      matchReason: 'unit-test-match'
++    }
+   })
+ 
+   assert.equal(result.taskId, 'capture-test-id')
+   assert.equal(result.status, 'completed')
+   assert.equal(result.title, 'Runner Page')
+   assert.equal(result.raw.authMode, 'public')
++  assert.equal(result.raw.templateId, 'generic-saas-dashboard')
++  assert.equal(result.raw.relayMatchReason, 'unit-test-match')
+   assert.equal(result.raw.transport, 'unit-capture')
+   assert.equal(result.raw.durationMs, 4400)
+   assert.equal(result.timing.estimatedSeconds, 11)
+   assert.equal(result.raw.singleFileCaptured, true)
+   assert.equal(result.raw.domSnapshotCaptured, true)
+   assert.equal(result.layoutNodes.length, 1)
+   assert.equal(result.designTree.id, 'root')
+   assert.equal(result.pageBackground, '#fafafa')
+   assert.match(result.pages[0].summary, /SingleFile/)
+   assert.match(result.pages[0].summary, /DOMSnapshot/)

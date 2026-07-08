@@ -1,0 +1,287 @@
+# Review package: 46afa8a..f6b8a27
+
+## Commits
+f6b8a27 feat: wire capture start through relay dispatcher
+
+## Files changed
+ .superpowers/sdd/task-4-report.md | 115 ++++++++++++++++++++++++++++++++++++++
+ backend/README.md                 |   7 ++-
+ backend/server/mock-api.mjs       |  14 ++++-
+ tests/workflows.test.mjs          |  17 +++++-
+ 4 files changed, 149 insertions(+), 4 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-4-report.md b/.superpowers/sdd/task-4-report.md
+new file mode 100644
+index 0000000..becea72
+--- /dev/null
++++ b/.superpowers/sdd/task-4-report.md
+@@ -0,0 +1,115 @@
++# Task 4 Report
++
++## Scope
++
++Implemented Task 4 only:
++
++- wired `POST /api/capture/start` in `backend/server/mock-api.mjs` through the existing relay dispatcher chain
++- updated backend capture responsibility docs in `backend/README.md`
++- added/updated tests in `tests/workflows.test.mjs`
++
++Did not change frontend code, capture-service quality gate ownership, or any files outside the allowed write set.
++
++## TDD Evidence
++
++### RED
++
++Added the required route-wiring test in `tests/workflows.test.mjs` and ran:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++Observed failure:
++
++- test: `mock api wires capture start through the relay dispatcher and returns relay metadata`
++- assertion failed because `backend/server/mock-api.mjs` did not import `createCaptureDispatcher`
++- the source still wired `captureTaskStore.runTask(payload, captureRunner)` directly
++
++Relevant failure excerpt:
++
++```text
++FAIL mock api wires capture start through the relay dispatcher and returns relay metadata
++AssertionError [ERR_ASSERTION]: The input did not match the regular expression /import \{ createCaptureDispatcher \} from '\.\.\/services\/capture-dispatcher\.js'/
++...
++captureStart: async (payload) => captureTaskStore.runTask(payload, captureRunner)
++```
++
++### GREEN
++
++Updated `backend/server/mock-api.mjs` to:
++
++- import `createCaptureDispatcher`
++- import `analyzeCaptureUrl`
++- import `matchCaptureTemplate`
++- import `compileCaptureTask`
++- import `classifyCaptureDiagnostics`
++- create `captureDispatcher` with those dependencies plus `captureRunner`
++- wire `captureStart` through `captureTaskStore.runTask(payload, captureDispatcher)`
++
++Re-ran focused tests:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution|backend readme documents materials and restored page APIs"
++```
++
++Result: pass.
++
++## Implementation Notes
++
++### Backend entrypoint wiring
++
++`backend/server/mock-api.mjs` now assembles the phase-one relay backend chain exactly at the capture entrypoint:
++
++1. analyzer: `analyzeCaptureUrl`
++2. matcher: `matchCaptureTemplate`
++3. compiler: `compileCaptureTask`
++4. diagnostics: `classifyCaptureDiagnostics`
++5. executor: existing `captureRunner`
++6. task persistence: existing `captureTaskStore`
++
++This preserves the existing task store and runner behavior while making `/api/capture/start` return relay metadata such as `templateId`, `diagnostics`, and `recoveryActions`.
++
++### README update
++
++Updated `backend/README.md` capture backend responsibilities to document:
++
++- `capture-url-analyzer.js`
++- `capture-template-matcher.js`
++- `capture-compiler.js`
++- `capture-dispatcher.js`
++- `capture-diagnostics.js`
++
++and clarified that `server/mock-api.mjs` now composes the relay dispatcher for `capture/start`.
++
++## Verification
++
++Focused test run:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution|backend readme documents materials and restored page APIs"
++```
++
++Result: passed.
++
++Full suite:
++
++```bash
++npm test
++```
++
++Result: passed.
++
++## Commit
++
++Created commit:
++
++```text
++feat: wire capture start through relay dispatcher
++```
++
++## Concerns
++
++No blocking concerns within Task 4 scope.
++
++The relay chain is now only wired at the backend entrypoint as requested; deeper service extraction or expanded capture modes remain intentionally untouched.
+diff --git a/backend/README.md b/backend/README.md
+index 57f1294..c52aac8 100644
+--- a/backend/README.md
++++ b/backend/README.md
+@@ -168,23 +168,28 @@ POST /api/admin/records/:collection/batch-delete
+ - `POST /api/browser-sessions/preview`：读取授权浏览器当前截图和 URL。
+ - `POST /api/browser-sessions/action`：执行授权浏览器导航、点击、输入、滚动、前进后退。
+ - `POST /api/browser-sessions/close`：关闭授权浏览器会话。
+ - `POST /api/capture/start`：启动网页采集，返回 SingleFile、DOMSnapshot、截图和节点摘要。
+ - `POST /api/capture/generate-page`：基于采集结果生成 HTML，并执行质量门禁和视觉校验。
+ - `GET /api/capture/tasks/latest/result`：读取最近一次采集结果示例。
+ 
+ 网页工厂后端分工：
+ 
+ - `routes/capture.js`：只暴露 HTTP 路由，所有能力通过 handlers 注入。
++- `services/capture-url-analyzer.js`：规范化 URL，判断页面类型和鉴权倾向。
++- `services/capture-template-matcher.js`：基于 URL 特征与 authMode 选择规则模板。
++- `services/capture-compiler.js`：将 URL、模板与默认策略编译成标准采集任务。
++- `services/capture-dispatcher.js`：在执行前串联 analyzer、matcher、compiler、diagnostics，并把任务交给 `capture-runner`。
++- `services/capture-diagnostics.js`：输出稳定的诊断码和恢复动作，供前端直接展示。
+ - `services/capture-runner.js`：接管 `capture/start` 的采集编排结果组装，包括授权模式归一化、真实采集/兜底采集调用、耗时与预计时间、SingleFile/DOMSnapshot 元数据、summary、raw 诊断信息。
+ - `services/capture-service.js`：接管 `generate-page` 的业务规则，包括 readiness 检查、quality gate、阻断响应、正式 HTML 响应和 `visualVerification` 聚合。
+-- `server/mock-api.mjs`：当前仍负责本地采集执行器、SingleFile/DOMSnapshot/Playwright 渲染能力，并把采集执行器注入给 `capture-runner`，把 `generatedPageHtml`、`verifyGeneratedPage` 注入给 `capture-service`。该入口位于 `backend/server/mock-api.mjs`，后续接真实 Node 服务时迁移这些执行器，不改前端契约。
++- `server/mock-api.mjs`：当前仍负责本地采集执行器、SingleFile/DOMSnapshot/Playwright 渲染能力，把 analyzer/matcher/compiler/diagnostics 与 `capture-runner` 组装成 relay dispatcher 注入 `capture/start`，并把 `generatedPageHtml`、`verifyGeneratedPage` 注入给 `capture-service`。该入口位于 `backend/server/mock-api.mjs`，后续接真实 Node 服务时迁移这些执行器，不改前端契约。
+ 
+ ## Workflow Agent Provider
+ 
+ 右侧 Agent 的按钮和输入框统一走后端 Agent 消息接口。前端只负责交互、草稿态、请求取消标记和画布刷新 loading；后端负责 action 分类、上下文构建、Provider 调用、消息持久化、重试/编辑元信息、取消状态和错误恢复。
+ 
+ Agent 消息接口：
+ 
+ - `POST /api/workspace/workflow-runs/:id/messages`：非流式发送消息，返回完整 `run` 和 `assistantMessage`。
+ - `POST /api/workspace/workflow-runs/:id/messages/stream`：SSE 流式发送消息，事件包含 `status`、`delta`、`message`、`done`、`error`。成功时 `message` 事件携带 `assistantMessage`；取消时不发送空 `assistantMessage`，只在 `done` 中返回 `cancelled: true`。
+ - `POST /api/workspace/workflow-runs/:id/messages/cancel`：按 `stepId + clientMessageId` 取消当前生成；Provider 支持中断时会 abort 请求，不支持时后端记录取消，前端丢弃迟到回复。
+diff --git a/backend/server/mock-api.mjs b/backend/server/mock-api.mjs
+index 393c660..c249762 100644
+--- a/backend/server/mock-api.mjs
++++ b/backend/server/mock-api.mjs
+@@ -12,20 +12,25 @@ import { buildVisualVerificationReport } from '../../frontend/src/services/visua
+ import { compareImageDataUrls } from '../../frontend/src/services/visualVerification.node.js'
+ import { createRestoredPageAsset } from '../../frontend/src/services/factoryWorkspace.js'
+ import { createWorkspaceStore, workspaceRoutes } from '../routes/workspace.js'
+ import { addModelCallLog, addRestoredPage, getModelSettingsRaw, saveModelSettings } from '../services/workspace-store.js'
+ import { uploadRoutes } from '../routes/uploads.js'
+ import { captureRoutes } from '../routes/capture.js'
+ import { adminRoutes } from '../routes/admin.js'
+ import { generatePageFromCapturePayload } from '../services/capture-service.js'
+ import { createCaptureRunner } from '../services/capture-runner.js'
+ import { createCaptureTaskStore } from '../services/capture-task-store.js'
++import { createCaptureDispatcher } from '../services/capture-dispatcher.js'
++import { analyzeCaptureUrl } from '../services/capture-url-analyzer.js'
++import { matchCaptureTemplate } from '../services/capture-template-matcher.js'
++import { compileCaptureTask } from '../services/capture-compiler.js'
++import { classifyCaptureDiagnostics } from '../services/capture-diagnostics.js'
+ import { createAgentProviderFromEnv, createAgentProviderFromModelSettings } from '../services/llm-provider.js'
+ import { renderAdminConsoleHtml } from '../services/admin-console.js'
+ import { createBrowserSessionManager } from './browser-session-manager.mjs'
+ 
+ const PORT = Number(process.env.PORT || 5299)
+ const execFileAsync = promisify(execFile)
+ const DEFAULT_HEADERS = {
+   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+ }
+@@ -147,30 +152,37 @@ const captureRunner = createCaptureRunner({
+       return isTestRuntime
+         ? await fetchTargetPage(payload.url)
+         : await captureWithRemoteBrowser(payload.url, browserSession)
+     }
+     return ['cookie'].includes(payload.authMode) && (cookieSession.storageState || cookieSession.cookies?.length)
+         ? await captureWithChromeAndSession(payload.url, cookieSession)
+         : await captureWithChrome(payload.url)
+   },
+   fallbackCaptureTarget: async (payload) => fetchTargetPage(payload.url)
+ })
++const captureDispatcher = createCaptureDispatcher({
++  analyzeCaptureUrl,
++  matchCaptureTemplate,
++  compileCaptureTask,
++  classifyCaptureDiagnostics,
++  captureRunner
++})
+ const captureTaskStore = createCaptureTaskStore()
+ const captureApiRoutes = captureRoutes({
+   createBrowserSession: async (payload) => browserSessions.createSession({
+     projectId: payload.projectId || 'default',
+     url: payload.url || 'about:blank'
+   }),
+   previewBrowserSession: async (payload) => browserSessionPreview(browserSessions.getSession(payload.sessionId)),
+   browserSessionAction: async (payload) => browserSessionAction(browserSessions.getSession(payload.sessionId), payload),
+   closeBrowserSession: async (payload) => browserSessions.closeSession(payload.sessionId),
+-  captureStart: async (payload) => captureTaskStore.runTask(payload, captureRunner),
++  captureStart: async (payload) => captureTaskStore.runTask(payload, captureDispatcher),
+   generatePage: async (payload) => generatePageFromCapturePayload(payload, {
+     generatedPageHtml,
+     verifyGeneratedPage,
+     persistRestoredPage: async (asset) => addRestoredPage(workspaceStore, asset)
+   }),
+   captureResult: async (payload) => captureTaskStore.result(payload.taskId),
+   latestResult: async () => captureTaskStore.latestResult()
+ })
+ const adminApiRoutes = adminRoutes(workspaceStore, {
+   apiPort: PORT,
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index 20bc40e..f43f448 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8967,30 +8967,43 @@ testAsync('mock api delegates capture generation to backend capture service', as
+   assert.doesNotMatch(source, /async function generatePageFromCapturePayload/)
+   assert.match(source, /generatePageFromCapturePayload\(payload,\s*\{[\s\S]*generatedPageHtml[\s\S]*verifyGeneratedPage[\s\S]*\}\)/)
+ })
+ 
+ testAsync('mock api injects restored page persistence into capture generation service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /persistRestoredPage:\s*async\s*\(asset\)\s*=>\s*addRestoredPage\(workspaceStore,\s*asset\)/)
+ })
+ 
+-testAsync('mock api delegates capture start to backend capture runner', async () => {
++testAsync('mock api wires capture start through the relay dispatcher and returns relay metadata', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
++  const result = await routes['POST /api/capture/start']({
++    url: 'https://example.com',
++    authMode: 'public'
++  })
+ 
+   assert.match(source, /import \{ createCaptureRunner \} from '\.\.\/services\/capture-runner\.js'/)
+   assert.match(source, /import \{ createCaptureTaskStore \} from '\.\.\/services\/capture-task-store\.js'/)
++  assert.match(source, /import \{ createCaptureDispatcher \} from '\.\.\/services\/capture-dispatcher\.js'/)
++  assert.match(source, /import \{ analyzeCaptureUrl \} from '\.\.\/services\/capture-url-analyzer\.js'/)
++  assert.match(source, /import \{ matchCaptureTemplate \} from '\.\.\/services\/capture-template-matcher\.js'/)
++  assert.match(source, /import \{ compileCaptureTask \} from '\.\.\/services\/capture-compiler\.js'/)
++  assert.match(source, /import \{ classifyCaptureDiagnostics \} from '\.\.\/services\/capture-diagnostics\.js'/)
+   assert.match(source, /const captureRunner = createCaptureRunner\(/)
++  assert.match(source, /const captureDispatcher = createCaptureDispatcher\(/)
+   assert.match(source, /const captureTaskStore = createCaptureTaskStore\(/)
+-  assert.match(source, /captureStart: async \(payload\) => captureTaskStore\.runTask\(payload,\s*captureRunner\)/)
++  assert.match(source, /captureStart: async \(payload\) => captureTaskStore\.runTask\(payload,\s*captureDispatcher\)/)
+   assert.match(source, /captureResult: async \(payload\) => captureTaskStore\.result\(payload\.taskId\)/)
+   assert.match(source, /latestResult: async \(\) => captureTaskStore\.latestResult\(\)/)
++  assert.equal(typeof result.templateId, 'string')
++  assert.ok(Array.isArray(result.diagnostics))
++  assert.ok(Array.isArray(result.recoveryActions))
+   assert.doesNotMatch(source, /export async function makeCaptureResult/)
+ })
+ 
+ testAsync('browser session routes create reusable project scoped login sessions', async () => {
+   const created = await routes['POST /api/browser-sessions/create']({
+     projectId: 'project-flow',
+     url: 'https://example.com/login'
+   })
+ 
+   assert.equal(created.status, 'active')

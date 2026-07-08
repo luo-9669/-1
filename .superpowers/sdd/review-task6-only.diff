@@ -1,0 +1,281 @@
+# Review package: 6f20df7..98ed625
+
+## Commits
+98ed625 feat: show capture relay diagnostics in web factory
+
+## Files changed
+ .superpowers/sdd/task-6-report.md | 95 +++++++++++++++++++++++++++++++++++++++
+ frontend/src/App.vue              | 21 +++++++++
+ frontend/src/styles.css           | 36 +++++++++++++++
+ tests/workflows.test.mjs          | 14 ++++++
+ 4 files changed, 166 insertions(+)
+
+## Diff
+diff --git a/.superpowers/sdd/task-6-report.md b/.superpowers/sdd/task-6-report.md
+new file mode 100644
+index 0000000..f14b666
+--- /dev/null
++++ b/.superpowers/sdd/task-6-report.md
+@@ -0,0 +1,95 @@
++# Task 6 Report: Expose Relay Metadata In The Frontend Capture Result UI
++
++## Scope
++
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/frontend/src/App.vue`
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/frontend/src/styles.css`
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/tests/workflows.test.mjs`
++
++No backend contract changes were made. The frontend only renders backend-provided `templateId`, `diagnostics`, and `recoveryActions` inside the existing capture detail area.
++
++## TDD Evidence
++
++### RED
++
++1. Added the required source test:
++   - `web factory capture detail renders backend relay diagnostics and recovery actions`
++2. Ran:
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++3. Observed expected failure:
++   - `AssertionError [ERR_ASSERTION]: The input did not match the regular expression /const captureRelayDiagnostics = computed/`
++
++This confirmed the relay display hooks and markup were missing before implementation.
++
++### GREEN
++
++Implemented the minimum UI needed to satisfy the brief:
++
++- Added computed helpers:
++  - `captureRelayDiagnostics`
++  - `captureRelayActions`
++  - `captureRelayTemplateId`
++- Added a compact relay diagnostics panel inside capture detail
++- Added compact relay panel styles
++
++Re-ran:
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++Observed:
++
++- The new relay test passed
++
++## Implementation Notes
++
++- The panel only renders when at least one of these backend fields is present:
++  - `templateId`
++  - `diagnostics`
++  - `recoveryActions`
++- The UI does not infer relay status or synthesize rules on the client
++- The template label falls back to `未命中模板` only when the section is shown without a backend `templateId`
++- The panel was inserted after the existing capture diagnostics block to keep the change localized
++
++## Verification
++
++### Focused test
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++- PASS
++
++### Full test suite
++
++```bash
++npm test
++```
++
++- PASS
++
++### Production build
++
++```bash
++npm run build
++```
++
++- PASS
++
++## Commit
++
++Expected commit message from brief:
++
++```bash
++feat: show capture relay diagnostics in web factory
++```
++
++## Concerns
++
++- Current coverage is source-structure based, consistent with the existing frontend test style in this repo, but it does not mount the Vue component at runtime.
+diff --git a/frontend/src/App.vue b/frontend/src/App.vue
+index 36aac2c..8a5f84a 100644
+--- a/frontend/src/App.vue
++++ b/frontend/src/App.vue
+@@ -977,20 +977,38 @@
+                 <span>方式：{{ state.captureResult.raw?.transport || '未知' }}</span>
+                 <span>快照：{{ state.captureResult.raw?.snapshotPackage || state.captureResult.raw?.captureKind || '内部网页快照' }}</span>
+                 <span>授权：{{ state.captureResult.raw?.authMode || 'public' }}</span>
+                 <span>截图：{{ state.captureResult.raw?.screenshotCaptured ? '已采集' : '未采集' }}</span>
+                 <span>SingleFile：{{ state.captureResult.raw?.singleFileCaptured ? '已采集' : '未采集' }}</span>
+                 <span>DOMSnapshot：{{ state.captureResult.raw?.domSnapshotCaptured ? '已采集' : '未采集' }}</span>
+                 <span>DOM：{{ state.captureResult.raw?.layoutNodeCount || captureSummary.layoutNodes }} 个节点</span>
+                 <span v-if="state.captureResult.raw?.source === 'web-snapshot-import'">解析包：{{ state.captureResult.raw?.pageCount || 1 }} 页</span>
+               </div>
+             </details>
++            <section
++              v-if="captureRelayTemplateId || captureRelayDiagnostics.length || captureRelayActions.length"
++              class="capture-relay-diagnostics"
++            >
++              <div class="capture-relay-head">
++                <span class="eyebrow">Relay</span>
++                <strong>{{ state.captureResult?.templateId || '未命中模板' }}</strong>
++              </div>
++              <ul v-if="captureRelayDiagnostics.length" class="capture-relay-diagnostic-list">
++                <li v-for="diagnostic in captureRelayDiagnostics" :key="`${diagnostic.code}-${diagnostic.message}`">
++                  <strong>{{ diagnostic.code }}</strong>
++                  <span>{{ diagnostic.message }}</span>
++                </li>
++              </ul>
++              <ul v-if="captureRelayActions.length" class="capture-relay-action-list">
++                <li v-for="action in captureRelayActions" :key="action">{{ action }}</li>
++              </ul>
++            </section>
+             <div v-if="state.captureResult && !captureReadiness.canRestore" class="capture-readiness-warning">
+                 <strong>采集不足或目标站返回错误页，暂不能生成高保真 HTML</strong>
+               <p>{{ captureReadiness.reason }}</p>
+               <div>
+                 <span v-for="action in captureReadiness.actions" :key="action">{{ action }}</span>
+               </div>
+             </div>
+             <div v-else-if="captureAction.loading" class="capture-loading-state">
+               <span class="loading-spinner-large"></span>
+               <strong>正在生成网页快照</strong>
+@@ -3898,20 +3916,23 @@ const captureSummary = computed(() => {
+     layoutNodes: result?.layoutNodes?.length || 0
+   }
+ })
+ const captureReadiness = computed(() => captureRestoreReadiness(state.captureResult || {}))
+ const captureResultPanelStatus = computed(() => {
+   if (captureStatus.value.status === 'loading') return 'loading'
+   if (captureStatus.value.status === 'failed' && !state.captureResult) return 'failed'
+   if (!state.captureResult) return 'idle'
+   return captureReadiness.value.canRestore ? 'success' : 'unconfigured'
+ })
++const captureRelayDiagnostics = computed(() => state.captureResult?.diagnostics || [])
++const captureRelayActions = computed(() => state.captureResult?.recoveryActions || [])
++const captureRelayTemplateId = computed(() => state.captureResult?.templateId || '')
+ const captureJson = computed(() => JSON.stringify(state.captureResult || {
+   status: 'pending',
+   message: '暂无快照结果。配置网页快照服务后会展示真实返回数据。',
+   designSource: designRules.source,
+   expectedShape: ['pages', 'components', 'assets', 'apiCalls', 'designTokens']
+ }, null, 2))
+ const componentLibraryJson = computed(() => JSON.stringify({
+   designSource: designRules.source,
+   rules: designRules,
+   componentLibrary: state.componentLibrary
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 1e0f24b..8aebf4d 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3804,20 +3804,56 @@ label {
+ .diagnostic strong {
+   color: #222529;
+ }
+ 
+ .diagnostic span {
+   border-radius: 999px;
+   background: #f6f7f9;
+   padding: 4px 8px;
+ }
+ 
++.capture-relay-diagnostics {
++  margin-top: 16px;
++  padding: 16px 18px;
++  border: 1px solid #d9dde3;
++  border-radius: 14px;
++  background: #f8fafc;
++}
++
++.capture-relay-head {
++  display: flex;
++  align-items: baseline;
++  gap: 10px;
++  margin-bottom: 10px;
++}
++
++.capture-relay-diagnostic-list,
++.capture-relay-action-list {
++  margin: 0;
++  padding-left: 18px;
++  color: #44505f;
++}
++
++.capture-relay-diagnostic-list li,
++.capture-relay-action-list li {
++  margin-top: 6px;
++}
++
++.capture-relay-diagnostic-list li:first-child,
++.capture-relay-action-list li:first-child {
++  margin-top: 0;
++}
++
++.capture-relay-diagnostic-list strong {
++  margin-right: 8px;
++}
++
+ .capture-readiness-warning {
+   margin: 12px 0;
+   border: 1px solid #f5c078;
+   border-radius: 10px;
+   background: #fff8ed;
+   padding: 14px;
+   color: #7a4d00;
+ }
+ 
+ .capture-readiness-warning strong {
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index b62cdf4..26eabab 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -10011,20 +10011,34 @@ testAsync('web factory capture detail exposes recovery actions when html generat
+ 
+   assert.match(captureDetailSource, /pageGenerationStatus\.status === 'failed'/)
+   assert.match(captureDetailSource, /restore-generation-recovery/)
+   assert.match(captureDetailSource, /captureRecoveryFlows/)
+   assert.match(captureDetailSource, /goRecoveryFlow\(flow\.id\)/)
+   assert.match(captureDetailSource, /没有生成正式 HTML/)
+   assert.match(styles, /\.restore-generation-recovery\s*\{/)
+   assert.match(styles, /\.restore-generation-recovery-actions\s*\{/)
+ })
+ 
++testAsync('web factory capture detail renders backend relay diagnostics and recovery actions', async () => {
++  const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
++  const cssSource = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
++
++  assert.match(appSource, /const captureRelayDiagnostics = computed/)
++  assert.match(appSource, /const captureRelayActions = computed/)
++  assert.match(appSource, /capture-relay-diagnostics/)
++  assert.match(appSource, /state\.captureResult\?\.templateId/)
++  assert.match(appSource, /v-for="diagnostic in captureRelayDiagnostics"/)
++  assert.match(appSource, /v-for="action in captureRelayActions"/)
++  assert.match(cssSource, /\.capture-relay-diagnostics/)
++  assert.match(cssSource, /\.capture-relay-action-list/)
++})
++
+ testAsync('web factory capture result status is not overwritten by html generation failures', async () => {
+   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
+   const captureDetailStart = appSource.indexOf("state.currentFactoryRoute === 'capture-detail'")
+   const captureDetailEnd = appSource.indexOf("state.currentFactoryRoute === 'restored-detail'")
+   const captureDetailSource = appSource.slice(captureDetailStart, captureDetailEnd)
+   const panelHeadStart = captureDetailSource.indexOf('<div class="panel-head">')
+   const panelHeadEnd = captureDetailSource.indexOf('<div class="metric-grid">', panelHeadStart)
+   const panelHeadSource = captureDetailSource.slice(panelHeadStart, panelHeadEnd)
+ 
+   assert.match(appSource, /const captureResultPanelStatus = computed/)

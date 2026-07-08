@@ -1,0 +1,15 @@
+{
+  "name": "liuchengtong-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "node server/mock-api.mjs",
+    "api:restart": "node server/restart-api.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.61.0",
+    "single-file-cli": "^2.0.83",
+    "vue": "^3.5.17"
+  }
+}

@@ -1,0 +1,219 @@
+# Review package: a126769..be69a29
+
+## Commits
+be69a29 fix: tighten capture diagnostics classification
+
+## Files changed
+ .superpowers/sdd/task-2-report.md       | 48 +++++++++++++++++++++++
+ backend/services/capture-diagnostics.js | 14 ++++++-
+ tests/workflows.test.mjs                | 68 +++++++++++++++++++++++++++++++++
+ 3 files changed, 128 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-2-report.md b/.superpowers/sdd/task-2-report.md
+index 4802607..f936d90 100644
+--- a/.superpowers/sdd/task-2-report.md
++++ b/.superpowers/sdd/task-2-report.md
+@@ -111,10 +111,58 @@ The full suite completed green after the Task 2 changes.
+ Committed with the brief-required message:
+ 
+ ```text
+ feat: add capture compiler and diagnostics
+ ```
+ 
+ ## Concerns
+ 
+ - The current anti-bot and cookie-expired detection is intentionally heuristic and string-based, which matches the brief and current task boundary.
+ - No runner or route integration was added in this task by design; this commit only establishes the compiler/diagnostics contract and tests.
++
++## Reviewer Fix Follow-up
++
++### Additional RED
++
++1. Extended the Task 2 test to lock the other three allowed diagnostics:
++   - `LOGIN_REQUIRED`
++   - `COOKIE_EXPIRED`
++   - `DOM_NOT_RESTORABLE`
++2. Added a regression case where top-level `captureResult.layoutNodes` contains data while `raw.layoutNodeCount` stays `0`, to ensure this does not get misclassified as `DOM_NOT_RESTORABLE`.
++3. Added a structured auth-expiry case using `raw.fetchStatus = 403`.
++4. Ran the focused test again:
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++5. Observed the expected failure:
++
++```text
++FAIL compiles relay capture tasks and classifies capture diagnostics
++AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+++ actual - expected
++
+++ 'completed'
++- 'blocked'
++```
++
++This failure came from the new `COOKIE_EXPIRED` regression using structured `raw.fetchStatus`, confirming the missing branch before the fix.
++
++### Additional GREEN
++
++1. Updated `classifyCaptureDiagnostics(input)` to:
++   - treat top-level `captureResult.layoutNodes` as restorable DOM evidence
++   - treat `raw.fetchStatus === 401 || 403` as `COOKIE_EXPIRED`
++2. Re-ran the same focused command and confirmed:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++3. Re-ran the full suite:
++
++```bash
++npm test
++```
++
++4. Confirmed the full suite stayed green after the follow-up fix.
+diff --git a/backend/services/capture-diagnostics.js b/backend/services/capture-diagnostics.js
+index 04bfac7..b433c5a 100644
+--- a/backend/services/capture-diagnostics.js
++++ b/backend/services/capture-diagnostics.js
+@@ -1,34 +1,44 @@
+ function hasBlockedHtml(text = '') {
+   return /405|异常访问|请求有异常行为|access denied|forbidden/i.test(String(text || ''))
+ }
+ 
++function hasRestorableLayoutNodes(captureResult = {}, raw = {}) {
++  if (Array.isArray(captureResult.layoutNodes) && captureResult.layoutNodes.length > 0) return true
++  return Number(raw.layoutNodeCount || 0) > 0
++}
++
++function hasExpiredAuth(raw = {}) {
++  if (/cookie|expired|401|403/i.test(raw.fetchError || '')) return true
++  return raw.fetchStatus === 401 || raw.fetchStatus === 403
++}
++
+ export function classifyCaptureDiagnostics(input = {}) {
+   const compiledTask = input.compiledTask || {}
+   const captureResult = input.captureResult || {}
+   const raw = captureResult.raw || {}
+   const diagnostics = []
+   const recoveryActions = new Set()
+ 
+   if (compiledTask.relay?.requiresAuth && compiledTask.auth?.mode === 'public') {
+     diagnostics.push({ code: 'LOGIN_REQUIRED', message: '目标页面需要登录后采集。' })
+     recoveryActions.add('打开授权浏览器')
+     recoveryActions.add('重新导入 Cookie')
+   }
+ 
+-  if (/cookie|expired|401|403/i.test(raw.fetchError || '')) {
++  if (hasExpiredAuth(raw)) {
+     diagnostics.push({ code: 'COOKIE_EXPIRED', message: '当前 Cookie 或登录态已失效。' })
+     recoveryActions.add('重新导入 Cookie')
+     recoveryActions.add('打开授权浏览器')
+   }
+ 
+-  if (!captureResult.singleFileHtml && !captureResult.staticHtml && !raw.layoutNodeCount) {
++  if (!captureResult.singleFileHtml && !captureResult.staticHtml && !hasRestorableLayoutNodes(captureResult, raw)) {
+     diagnostics.push({ code: 'DOM_NOT_RESTORABLE', message: '当前页面没有可还原 DOM 数据。' })
+     recoveryActions.add('上传网页快照包')
+     recoveryActions.add('上传截图走图片转代码')
+   }
+ 
+   if (hasBlockedHtml(captureResult.singleFileHtml) || hasBlockedHtml(raw.fetchError)) {
+     diagnostics.unshift({ code: 'ANTI_BOT_SUSPECTED', message: '当前页面疑似被风控或异常访问拦截。' })
+     recoveryActions.add('打开授权浏览器')
+     recoveryActions.add('重新导入 Cookie')
+   }
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index bfd50cb..e91e23a 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8777,20 +8777,88 @@ test('compiles relay capture tasks and classifies capture diagnostics', async ()
+         screenshotCaptured: true,
+         singleFileCaptured: true,
+         layoutNodeCount: 0
+       }
+     }
+   })
+ 
+   assert.equal(blocked.status, 'blocked')
+   assert.equal(blocked.diagnostics[0].code, 'ANTI_BOT_SUSPECTED')
+   assert.ok(blocked.recoveryActions.includes('打开授权浏览器'))
++
++  const loginRequired = classifyCaptureDiagnostics({
++    compiledTask: {
++      ...compiled,
++      auth: { ...compiled.auth, mode: 'public' }
++    },
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html><body><div>login required</div></body></html>',
++      staticHtml: '',
++      layoutNodes: [{ id: 'n1' }],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 1
++      }
++    }
++  })
++  assert.equal(loginRequired.status, 'blocked')
++  assert.deepEqual(loginRequired.diagnostics.map((item) => item.code), ['LOGIN_REQUIRED'])
++
++  const cookieExpired = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html></html>',
++      staticHtml: '',
++      layoutNodes: [{ id: 'n2' }],
++      raw: {
++        fetchError: '',
++        fetchStatus: 403,
++        layoutNodeCount: 1
++      }
++    }
++  })
++  assert.equal(cookieExpired.status, 'blocked')
++  assert.deepEqual(cookieExpired.diagnostics.map((item) => item.code), ['COOKIE_EXPIRED'])
++
++  const domNotRestorable = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '',
++      staticHtml: '',
++      layoutNodes: [],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 0
++      }
++    }
++  })
++  assert.equal(domNotRestorable.status, 'blocked')
++  assert.deepEqual(domNotRestorable.diagnostics.map((item) => item.code), ['DOM_NOT_RESTORABLE'])
++
++  const hasTopLevelLayoutNodes = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '',
++      staticHtml: '',
++      layoutNodes: [{ id: 'top-level-only' }],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 0
++      }
++    }
++  })
++  assert.equal(hasTopLevelLayoutNodes.status, 'completed')
++  assert.deepEqual(hasTopLevelLayoutNodes.diagnostics.map((item) => item.code), [])
+ })
+ 
+ testAsync('mock api delegates capture generation to backend capture service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /import \{ generatePageFromCapturePayload \} from '\.\.\/services\/capture-service\.js'/)
+   assert.doesNotMatch(source, /async function generatePageFromCapturePayload/)
+   assert.match(source, /generatePageFromCapturePayload\(payload,\s*\{[\s\S]*generatedPageHtml[\s\S]*verifyGeneratedPage[\s\S]*\}\)/)
+ })
+ 

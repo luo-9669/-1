@@ -1,0 +1,2401 @@
+# Review package: a5cf4e394bb48ac0e6468216185432a3c170896c..HEAD
+
+## Commits
+12f0e86 test: align relay panel template helper usage
+98ed625 feat: show capture relay diagnostics in web factory
+6f20df7 refactor: move capture quality gate logic into backend services
+f6b8a27 feat: wire capture start through relay dispatcher
+46afa8a fix: persist blocked relay task status
+b5c150d feat: dispatch compiled relay tasks through capture store
+be69a29 fix: tighten capture diagnostics classification
+a126769 feat: add capture compiler and diagnostics
+4a1c0a9 feat: add capture URL analyzer and template matcher
+5a4024d test: restore green baseline for url relay work
+
+## Files changed
+ .superpowers/sdd/task-1-report.md            | 160 ++++++++++++++
+ .superpowers/sdd/task-2-report.md            | 168 ++++++++++++++
+ .superpowers/sdd/task-3-report.md            | 169 +++++++++++++++
+ .superpowers/sdd/task-4-report.md            | 115 ++++++++++
+ .superpowers/sdd/task-5-report.md            |  82 +++++++
+ .superpowers/sdd/task-6-report.md            |  95 ++++++++
+ backend/README.md                            |   7 +-
+ backend/server/mock-api.mjs                  |  14 +-
+ backend/services/capture-compiler.js         |  47 ++++
+ backend/services/capture-diagnostics.js      |  51 +++++
+ backend/services/capture-dispatcher.js       |  55 +++++
+ backend/services/capture-quality-gate.js     | 302 ++++++++++++++++++++++++++
+ backend/services/capture-runner.js           |   2 +
+ backend/services/capture-service.js          |   2 +-
+ backend/services/capture-task-store.js       |  20 +-
+ backend/services/capture-template-matcher.js |  17 ++
+ backend/services/capture-templates.js        |  62 ++++++
+ backend/services/capture-url-analyzer.js     |  32 +++
+ frontend/src/App.vue                         |  21 ++
+ frontend/src/styles.css                      |  51 +++++
+ tests/workflows.test.mjs                     | 313 ++++++++++++++++++++++++++-
+ 21 files changed, 1774 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-1-report.md b/.superpowers/sdd/task-1-report.md
+new file mode 100644
+index 0000000..ee269d4
+--- /dev/null
++++ b/.superpowers/sdd/task-1-report.md
+@@ -0,0 +1,160 @@
++# Task 1 Report: Declarative Template Library, URL Analyzer, And Template Matcher
++
++## Scope
++
++Implemented Task 1 for the URL relay plan inside the allowed backend/template analysis surface only:
++
++- `tests/workflows.test.mjs`
++- `backend/services/capture-templates.js`
++- `backend/services/capture-url-analyzer.js`
++- `backend/services/capture-template-matcher.js`
++
++Also wrote this report file after explicit authorization.
++
++No changes were made to capture runner, capture task store, or capture routes.
++
++## Requirements Checklist
++
++- Phase-one web URL capture only: satisfied
++- Auth mode limited to `public|browser|cookie`: satisfied
++- Templates are declarative: satisfied
++- Templates limited to `generic-public-page`, `generic-login-page`, `generic-saas-dashboard`: satisfied
++- Backend owns URL analysis, template matching, parameter completion surface: satisfied for Task 1 scope
++- No free-form Playwright script generation or persistence: satisfied
++- Frontend kept unchanged: satisfied
++
++## TDD Record
++
++### RED
++
++First, added the required test block to `tests/workflows.test.mjs`:
++
++- `analyzes capture URLs and matches phase-one relay templates`
++
++Then ran the focused verification command:
++
++```bash
++npm test -- --test-name-pattern "analyzes capture URLs and matches phase-one relay templates"
++```
++
++Observed expected failure:
++
++- Exit code: `1`
++- Failure type: `ERR_MODULE_NOT_FOUND`
++- Missing module: `../backend/services/capture-url-analyzer.js`
++
++This confirmed the test was genuinely exercising missing Task 1 functionality before implementation.
++
++### GREEN
++
++Implemented the minimum production code required to satisfy the failing test:
++
++1. `backend/services/capture-templates.js`
++   - Added declarative `CAPTURE_TEMPLATES` registry
++   - Included only:
++     - `generic-public-page`
++     - `generic-login-page`
++     - `generic-saas-dashboard`
++
++2. `backend/services/capture-url-analyzer.js`
++   - Added `analyzeCaptureUrl(input)`
++   - Normalizes auth mode to the allowed set
++   - Infers page class from URL path/query
++   - Returns analysis with `traits` and `authHints`
++
++3. `backend/services/capture-template-matcher.js`
++   - Added `matchCaptureTemplate(input)`
++   - Matches declarative template by `pageClass` and `authMode`
++   - Returns `templateId`, `template`, and `matchReason`
++
++Re-ran the focused verification command:
++
++```bash
++npm test -- --test-name-pattern "analyzes capture URLs and matches phase-one relay templates"
++```
++
++Observed passing result:
++
++- Exit code: `0`
++- Target test: `PASS analyzes capture URLs and matches phase-one relay templates`
++
++## Full Verification
++
++After the focused test passed, ran the full suite:
++
++```bash
++npm test
++```
++
++Observed passing result:
++
++- Exit code: `0`
++- Full suite completed with the new Task 1 test included
++- No failing tests remained
++
++## Behavior Implemented
++
++### URL Analyzer
++
++`analyzeCaptureUrl(input)` now produces:
++
++- `normalizedUrl`
++- `hostname`
++- `pathname`
++- `query`
++- normalized `authMode`
++- `traits.pageClass`
++- `traits.loginSignals`
++- `traits.dynamicSignals`
++- `authHints.requiresAuth`
++- `authHints.preferredAuthMode`
++
++Current inference rules:
++
++- Login-like paths/query -> `login-page`
++- Dashboard/app/admin/workspace/console paths -> `saas-dashboard`
++- Everything else -> `public-page`
++
++### Template Registry
++
++Each template is declarative and contains:
++
++- `id`
++- `name`
++- `pageClasses`
++- `match.authModes`
++- `preconditions`
++- `navigation`
++- `pageStrategy`
++- `artifacts`
++- `fallbacks`
++
++### Template Matcher
++
++`matchCaptureTemplate(input)` now:
++
++- Uses analysis traits to choose the correct template
++- Honors the allowed auth modes
++- Falls back to the first declarative template when no exact match exists
++- Emits a readable `matchReason`
++
++## Files Changed
++
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/tests/workflows.test.mjs`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-templates.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-url-analyzer.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-template-matcher.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/.superpowers/sdd/task-1-report.md`
++
++## Commit
++
++Committed with the required message:
++
++```text
++feat: add capture URL analyzer and template matcher
++```
++
++## Notes / Concerns
++
++- The focused test command still executes the single test runner file and reports many passing tests because this repository’s test harness filters inside one large script rather than spawning an isolated test file.
++- `capture-url-analyzer.js` currently relies on the built-in `URL` constructor and will throw on invalid or empty URLs. This is acceptable for Task 1 because the brief only required the specified interface and exact test behavior; broader validation can be added by later tasks if needed.
+diff --git a/.superpowers/sdd/task-2-report.md b/.superpowers/sdd/task-2-report.md
+new file mode 100644
+index 0000000..f936d90
+--- /dev/null
++++ b/.superpowers/sdd/task-2-report.md
+@@ -0,0 +1,168 @@
++# Task 2 Report: Capture Compiler And Diagnostic Classifier
++
++## Scope
++
++- Implemented only the Task 2 files allowed for write access:
++  - `tests/workflows.test.mjs`
++  - `backend/services/capture-compiler.js`
++  - `backend/services/capture-diagnostics.js`
++- Did not modify capture runner, capture task store, routes, or frontend.
++- Kept phase-one scope as web URL capture only.
++- Kept auth mode constrained to `public | browser | cookie`.
++- Kept diagnostics constrained to:
++  - `LOGIN_REQUIRED`
++  - `COOKIE_EXPIRED`
++  - `DOM_NOT_RESTORABLE`
++  - `ANTI_BOT_SUSPECTED`
++- Did not introduce any free-form Playwright script generation or persistence.
++
++## TDD Evidence
++
++### RED
++
++1. Added the exact contract test from the brief to `tests/workflows.test.mjs`.
++2. Ran the focused test command:
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++3. Observed the expected failure:
++
++```text
++FAIL compiles relay capture tasks and classifies capture diagnostics
++Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../backend/services/capture-compiler.js'
++```
++
++This confirmed the new behavior was not already implemented and the failing test was exercising the missing compiler/diagnostics layer.
++
++### GREEN
++
++1. Implemented `compileCaptureTask(input)` in `backend/services/capture-compiler.js`.
++2. Implemented `classifyCaptureDiagnostics(input)` in `backend/services/capture-diagnostics.js`.
++3. Re-ran the same focused test command and observed:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++## Implementation Summary
++
++### `compileCaptureTask`
++
++- Normalizes auth mode to `public | browser | cookie`, defaulting invalid values to `public`.
++- Compiles declarative relay data from:
++  - request payload
++  - URL analysis result
++  - template match result
++- Produces:
++  - `taskType: 'web-capture'`
++  - `projectId`
++  - `templateId`
++  - `source.url`
++  - auth payload limited to `sessionId` for browser mode and `cookieText` for cookie mode
++  - execution settings copied from declarative template navigation/page strategy
++  - artifact flags copied from declarative template
++  - fixed diagnostics policy flags
++  - relay metadata including match reason, page class, and auth requirement hint
++
++### `classifyCaptureDiagnostics`
++
++- Detects and returns only the allowed diagnostic codes.
++- Maps auth-required public captures to `LOGIN_REQUIRED`.
++- Maps fetch errors containing cookie/auth expiration signals to `COOKIE_EXPIRED`.
++- Maps empty HTML/static/layout output to `DOM_NOT_RESTORABLE`.
++- Maps blocked HTML or blocked fetch messages (`405`, `异常访问`, `access denied`, `forbidden`, etc.) to `ANTI_BOT_SUSPECTED`.
++- Returns:
++  - `status: 'blocked'` when any diagnostic is present
++  - `diagnostics`
++  - deduplicated `recoveryActions`
++
++## Verification
++
++### Focused test
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++Result:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++### Full test suite
++
++```bash
++npm test
++```
++
++Result:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++The full suite completed green after the Task 2 changes.
++
++## Commit
++
++Committed with the brief-required message:
++
++```text
++feat: add capture compiler and diagnostics
++```
++
++## Concerns
++
++- The current anti-bot and cookie-expired detection is intentionally heuristic and string-based, which matches the brief and current task boundary.
++- No runner or route integration was added in this task by design; this commit only establishes the compiler/diagnostics contract and tests.
++
++## Reviewer Fix Follow-up
++
++### Additional RED
++
++1. Extended the Task 2 test to lock the other three allowed diagnostics:
++   - `LOGIN_REQUIRED`
++   - `COOKIE_EXPIRED`
++   - `DOM_NOT_RESTORABLE`
++2. Added a regression case where top-level `captureResult.layoutNodes` contains data while `raw.layoutNodeCount` stays `0`, to ensure this does not get misclassified as `DOM_NOT_RESTORABLE`.
++3. Added a structured auth-expiry case using `raw.fetchStatus = 403`.
++4. Ran the focused test again:
++
++```bash
++npm test -- --test-name-pattern="compiles relay capture tasks and classifies capture diagnostics"
++```
++
++5. Observed the expected failure:
++
++```text
++FAIL compiles relay capture tasks and classifies capture diagnostics
++AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+++ actual - expected
++
+++ 'completed'
++- 'blocked'
++```
++
++This failure came from the new `COOKIE_EXPIRED` regression using structured `raw.fetchStatus`, confirming the missing branch before the fix.
++
++### Additional GREEN
++
++1. Updated `classifyCaptureDiagnostics(input)` to:
++   - treat top-level `captureResult.layoutNodes` as restorable DOM evidence
++   - treat `raw.fetchStatus === 401 || 403` as `COOKIE_EXPIRED`
++2. Re-ran the same focused command and confirmed:
++
++```text
++PASS compiles relay capture tasks and classifies capture diagnostics
++```
++
++3. Re-ran the full suite:
++
++```bash
++npm test
++```
++
++4. Confirmed the full suite stayed green after the follow-up fix.
+diff --git a/.superpowers/sdd/task-3-report.md b/.superpowers/sdd/task-3-report.md
+new file mode 100644
+index 0000000..83f3932
+--- /dev/null
++++ b/.superpowers/sdd/task-3-report.md
+@@ -0,0 +1,169 @@
++# Task 3 Report: URL Relay Dispatcher
++
++## Scope
++
++- Implemented `backend/services/capture-dispatcher.js`
++- Updated `backend/services/capture-task-store.js` to support executors exposing either `execute()` or `makeCaptureResult()`
++- Updated `backend/services/capture-runner.js` to preserve relay metadata in `raw`
++- Added workflow coverage in `tests/workflows.test.mjs`
++- Kept within phase-one constraints:
++  - web URL capture only
++  - auth mode constrained to `public|browser|cookie`
++  - declarative template flow preserved
++  - diagnostics left to existing four-category classifier
++  - reused existing runner/task-store flow without mock-api wiring or frontend changes
++
++## TDD Evidence
++
++### RED
++
++1. Added failing integration test:
++   - `backend capture dispatcher compiles relay metadata before task-store execution`
++2. Ran focused test command:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++3. Observed expected failure:
++   - `Error [ERR_MODULE_NOT_FOUND]: Cannot find module .../backend/services/capture-dispatcher.js`
++
++This confirmed the test was exercising missing dispatcher behavior rather than passing on existing code.
++
++### GREEN
++
++Implemented:
++
++- `createCaptureDispatcher(deps).execute(payload)`
++- task-store executor compatibility branch
++- relay metadata passthrough into runner result `raw.templateId` and `raw.relayMatchReason`
++
++Ran focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution|backend capture runner assembles capture result from injected target capture|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks"
++```
++
++Observed:
++
++- dispatcher integration test passed
++- existing task-store success/failure tests passed
++- runner assembly test passed with new relay assertions
++
++## Implementation Notes
++
++### Dispatcher
++
++`createCaptureDispatcher()` now orchestrates:
++
++1. URL analysis
++2. template matching
++3. task compilation
++4. capture execution through existing runner
++5. diagnostics classification
++
++It returns the original capture result plus:
++
++- `templateId`
++- classified `diagnostics`
++- `recoveryActions`
++- `relay.analysis`
++- `relay.compiledTask`
++- `relay.matchReason`
++
++If diagnostics classify the result as blocked, the returned status is normalized to `blocked`.
++
++### Task Store Compatibility
++
++`runTask()` now accepts either:
++
++- a dispatcher-like executor with `execute(input)`
++- the legacy runner contract with `makeCaptureResult(input)`
++
++This preserves existing behavior while allowing relay orchestration to plug into the same store lifecycle.
++
++### Runner Relay Metadata
++
++`capture-runner` now includes:
++
++- `raw.templateId`
++- `raw.relayMatchReason`
++
++when `payload.relay` is present, preserving relay provenance for downstream consumers without replacing the current result shape.
++
++## Verification
++
++Focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture dispatcher compiles relay metadata before task-store execution|backend capture runner assembles capture result from injected target capture|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks"
++```
++
++Result:
++
++- exit code `0`
++
++Full suite verification:
++
++```bash
++npm test
++```
++
++Result:
++
++- exit code `0`
++
++## Commit
++
++Committed with:
++
++```bash
++git commit -m "feat: dispatch compiled relay tasks through capture store"
++```
++
++## Concerns
++
++- No additional route wiring was added by design; this task only introduced dispatcher/store/runner compatibility.
++- Dispatcher currently assumes injected dependencies are present and valid, matching the existing lightweight service style.
++
++## Reviewer Fix: Blocked Task Status Persistence
++
++Reviewer feedback identified that `runTask()` persisted every non-throwing executor result as task status `success`, even when the executor returned a semantic result status like `blocked`.
++
++### RED
++
++1. Added regression test:
++   - `backend capture task store persists blocked dispatcher results as blocked status`
++2. Ran focused test command:
++
++```bash
++npm test -- --test-name-pattern="backend capture task store persists blocked dispatcher results as blocked status"
++```
++
++3. Observed expected failure:
++   - assertion failure on stored task status
++   - actual: `success`
++   - expected: `blocked`
++
++This confirmed the persistence layer was overwriting dispatcher result semantics.
++
++### GREEN
++
++Implemented a minimal task-store status normalization step so persisted task status now follows result semantics:
++
++- `blocked` -> `blocked`
++- `failed` -> `failed`
++- all other non-throwing result statuses -> `success`
++
++Ran focused verification:
++
++```bash
++npm test -- --test-name-pattern="backend capture task store persists blocked dispatcher results as blocked status|backend capture task store persists every run and resolves latest result|backend capture task store persists failed capture tasks|backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++Observed:
++
++- blocked regression test passed
++- existing success path task-store test passed
++- existing thrown failure path task-store test passed
++- dispatcher integration test still passed
+diff --git a/.superpowers/sdd/task-4-report.md b/.superpowers/sdd/task-4-report.md
+new file mode 100644
+index 0000000..becea72
+--- /dev/null
++++ b/.superpowers/sdd/task-4-report.md
+@@ -0,0 +1,115 @@
++# Task 4 Report
++
++## Scope
++
++Implemented Task 4 only:
++
++- wired `POST /api/capture/start` in `backend/server/mock-api.mjs` through the existing relay dispatcher chain
++- updated backend capture responsibility docs in `backend/README.md`
++- added/updated tests in `tests/workflows.test.mjs`
++
++Did not change frontend code, capture-service quality gate ownership, or any files outside the allowed write set.
++
++## TDD Evidence
++
++### RED
++
++Added the required route-wiring test in `tests/workflows.test.mjs` and ran:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution"
++```
++
++Observed failure:
++
++- test: `mock api wires capture start through the relay dispatcher and returns relay metadata`
++- assertion failed because `backend/server/mock-api.mjs` did not import `createCaptureDispatcher`
++- the source still wired `captureTaskStore.runTask(payload, captureRunner)` directly
++
++Relevant failure excerpt:
++
++```text
++FAIL mock api wires capture start through the relay dispatcher and returns relay metadata
++AssertionError [ERR_ASSERTION]: The input did not match the regular expression /import \{ createCaptureDispatcher \} from '\.\.\/services\/capture-dispatcher\.js'/
++...
++captureStart: async (payload) => captureTaskStore.runTask(payload, captureRunner)
++```
++
++### GREEN
++
++Updated `backend/server/mock-api.mjs` to:
++
++- import `createCaptureDispatcher`
++- import `analyzeCaptureUrl`
++- import `matchCaptureTemplate`
++- import `compileCaptureTask`
++- import `classifyCaptureDiagnostics`
++- create `captureDispatcher` with those dependencies plus `captureRunner`
++- wire `captureStart` through `captureTaskStore.runTask(payload, captureDispatcher)`
++
++Re-ran focused tests:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution|backend readme documents materials and restored page APIs"
++```
++
++Result: pass.
++
++## Implementation Notes
++
++### Backend entrypoint wiring
++
++`backend/server/mock-api.mjs` now assembles the phase-one relay backend chain exactly at the capture entrypoint:
++
++1. analyzer: `analyzeCaptureUrl`
++2. matcher: `matchCaptureTemplate`
++3. compiler: `compileCaptureTask`
++4. diagnostics: `classifyCaptureDiagnostics`
++5. executor: existing `captureRunner`
++6. task persistence: existing `captureTaskStore`
++
++This preserves the existing task store and runner behavior while making `/api/capture/start` return relay metadata such as `templateId`, `diagnostics`, and `recoveryActions`.
++
++### README update
++
++Updated `backend/README.md` capture backend responsibilities to document:
++
++- `capture-url-analyzer.js`
++- `capture-template-matcher.js`
++- `capture-compiler.js`
++- `capture-dispatcher.js`
++- `capture-diagnostics.js`
++
++and clarified that `server/mock-api.mjs` now composes the relay dispatcher for `capture/start`.
++
++## Verification
++
++Focused test run:
++
++```bash
++npm test -- --test-name-pattern "mock api wires capture start through the relay dispatcher and returns relay metadata|capture API returns backend timing metadata|backend capture dispatcher compiles relay metadata before task-store execution|backend readme documents materials and restored page APIs"
++```
++
++Result: passed.
++
++Full suite:
++
++```bash
++npm test
++```
++
++Result: passed.
++
++## Commit
++
++Created commit:
++
++```text
++feat: wire capture start through relay dispatcher
++```
++
++## Concerns
++
++No blocking concerns within Task 4 scope.
++
++The relay chain is now only wired at the backend entrypoint as requested; deeper service extraction or expanded capture modes remain intentionally untouched.
+diff --git a/.superpowers/sdd/task-5-report.md b/.superpowers/sdd/task-5-report.md
+new file mode 100644
+index 0000000..30d5bae
+--- /dev/null
++++ b/.superpowers/sdd/task-5-report.md
+@@ -0,0 +1,82 @@
++# Task 5 Report
++
++## Scope
++
++- Task: Move backend page-generation gates off the frontend service file.
++- Allowed write targets only:
++  - `backend/services/capture-quality-gate.js`
++  - `backend/services/capture-service.js`
++  - `tests/workflows.test.mjs`
++  - `.superpowers/sdd/task-5-report.md`
++
++## Requirement Note
++
++- The brief listed legacy helper names `semanticCaptureNodes`, `semanticPreviewNodes`, and `captureActionRecommendations`.
++- Those helpers do not exist in the current worktree, including `frontend/src/services/factoryWorkspace.js`.
++- User confirmed implementation should extract the helpers that actually exist today and are truly used by `captureRestoreReadiness()` and `captureQualityGate()`.
++
++## TDD Evidence
++
++### RED
++
++1. Added failing test:
++   - `backend capture service imports readiness and quality gate from backend services`
++2. Ran focused check:
++   - `node --input-type=module -e "...import('./backend/services/capture-quality-gate.js')..."`
++   - Result: failed with `ERR_MODULE_NOT_FOUND` because `backend/services/capture-quality-gate.js` did not exist.
++3. Ran full suite:
++   - `npm test`
++   - Result: failed at `backend capture service imports readiness and quality gate from backend services`
++   - Failure reason: missing backend gate module import target.
++
++### GREEN
++
++1. Created `backend/services/capture-quality-gate.js` with backend-owned copies of the currently used helpers:
++   - `captureRestoreReadiness`
++   - `countMeaningfulTreeNodes`
++   - `duplicateTextRatio`
++   - `singleFilePlainText`
++   - `detectInvalidCapturePage`
++   - `capturePageHeight`
++   - `captureQualityGate`
++2. Switched `backend/services/capture-service.js` import from frontend `factoryWorkspace.js` to local `./capture-quality-gate.js`.
++3. Re-ran focused check:
++   - `node --input-type=module -e "..."`
++   - Result: `PASS focus capture gate extraction`
++4. Re-ran full suite:
++   - `npm test`
++   - Result: pass, including:
++     - `backend capture service imports readiness and quality gate from backend services`
++     - existing capture readiness / quality gate / page generation tests
++
++## Changes Made
++
++### `backend/services/capture-quality-gate.js`
++
++- Added backend-owned readiness and quality gate logic.
++- Kept behavior aligned with the current frontend implementation.
++- Did not introduce new diagnostics, capture modes, or auth modes.
++
++### `backend/services/capture-service.js`
++
++- Removed backend dependency on `../../frontend/src/services/factoryWorkspace.js`.
++- Now imports:
++  - `captureRestoreReadiness`
++  - `captureQualityGate`
++  from `./capture-quality-gate.js`.
++
++### `tests/workflows.test.mjs`
++
++- Added import-ownership regression test to ensure:
++  - backend service imports from `./capture-quality-gate.js`
++  - backend service no longer imports frontend `factoryWorkspace.js`
++  - extracted functions preserve expected screenshot-only / denied-page behavior
++
++## Verification Summary
++
++- Focused check: passed
++- Full `npm test`: passed
++
++## Commit
++
++- `refactor: move capture quality gate logic into backend services`
+diff --git a/.superpowers/sdd/task-6-report.md b/.superpowers/sdd/task-6-report.md
+new file mode 100644
+index 0000000..f14b666
+--- /dev/null
++++ b/.superpowers/sdd/task-6-report.md
+@@ -0,0 +1,95 @@
++# Task 6 Report: Expose Relay Metadata In The Frontend Capture Result UI
++
++## Scope
++
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/frontend/src/App.vue`
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/frontend/src/styles.css`
++- Modified `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/tests/workflows.test.mjs`
++
++No backend contract changes were made. The frontend only renders backend-provided `templateId`, `diagnostics`, and `recoveryActions` inside the existing capture detail area.
++
++## TDD Evidence
++
++### RED
++
++1. Added the required source test:
++   - `web factory capture detail renders backend relay diagnostics and recovery actions`
++2. Ran:
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++3. Observed expected failure:
++   - `AssertionError [ERR_ASSERTION]: The input did not match the regular expression /const captureRelayDiagnostics = computed/`
++
++This confirmed the relay display hooks and markup were missing before implementation.
++
++### GREEN
++
++Implemented the minimum UI needed to satisfy the brief:
++
++- Added computed helpers:
++  - `captureRelayDiagnostics`
++  - `captureRelayActions`
++  - `captureRelayTemplateId`
++- Added a compact relay diagnostics panel inside capture detail
++- Added compact relay panel styles
++
++Re-ran:
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++Observed:
++
++- The new relay test passed
++
++## Implementation Notes
++
++- The panel only renders when at least one of these backend fields is present:
++  - `templateId`
++  - `diagnostics`
++  - `recoveryActions`
++- The UI does not infer relay status or synthesize rules on the client
++- The template label falls back to `未命中模板` only when the section is shown without a backend `templateId`
++- The panel was inserted after the existing capture diagnostics block to keep the change localized
++
++## Verification
++
++### Focused test
++
++```bash
++npm test -- --grep "web factory capture detail renders backend relay diagnostics and recovery actions"
++```
++
++- PASS
++
++### Full test suite
++
++```bash
++npm test
++```
++
++- PASS
++
++### Production build
++
++```bash
++npm run build
++```
++
++- PASS
++
++## Commit
++
++Expected commit message from brief:
++
++```bash
++feat: show capture relay diagnostics in web factory
++```
++
++## Concerns
++
++- Current coverage is source-structure based, consistent with the existing frontend test style in this repo, but it does not mount the Vue component at runtime.
+diff --git a/backend/README.md b/backend/README.md
+index 57f1294..c52aac8 100644
+--- a/backend/README.md
++++ b/backend/README.md
+@@ -168,23 +168,28 @@ POST /api/admin/records/:collection/batch-delete
+ - `POST /api/browser-sessions/preview`：读取授权浏览器当前截图和 URL。
+ - `POST /api/browser-sessions/action`：执行授权浏览器导航、点击、输入、滚动、前进后退。
+ - `POST /api/browser-sessions/close`：关闭授权浏览器会话。
+ - `POST /api/capture/start`：启动网页采集，返回 SingleFile、DOMSnapshot、截图和节点摘要。
+ - `POST /api/capture/generate-page`：基于采集结果生成 HTML，并执行质量门禁和视觉校验。
+ - `GET /api/capture/tasks/latest/result`：读取最近一次采集结果示例。
+ 
+ 网页工厂后端分工：
+ 
+ - `routes/capture.js`：只暴露 HTTP 路由，所有能力通过 handlers 注入。
++- `services/capture-url-analyzer.js`：规范化 URL，判断页面类型和鉴权倾向。
++- `services/capture-template-matcher.js`：基于 URL 特征与 authMode 选择规则模板。
++- `services/capture-compiler.js`：将 URL、模板与默认策略编译成标准采集任务。
++- `services/capture-dispatcher.js`：在执行前串联 analyzer、matcher、compiler、diagnostics，并把任务交给 `capture-runner`。
++- `services/capture-diagnostics.js`：输出稳定的诊断码和恢复动作，供前端直接展示。
+ - `services/capture-runner.js`：接管 `capture/start` 的采集编排结果组装，包括授权模式归一化、真实采集/兜底采集调用、耗时与预计时间、SingleFile/DOMSnapshot 元数据、summary、raw 诊断信息。
+ - `services/capture-service.js`：接管 `generate-page` 的业务规则，包括 readiness 检查、quality gate、阻断响应、正式 HTML 响应和 `visualVerification` 聚合。
+-- `server/mock-api.mjs`：当前仍负责本地采集执行器、SingleFile/DOMSnapshot/Playwright 渲染能力，并把采集执行器注入给 `capture-runner`，把 `generatedPageHtml`、`verifyGeneratedPage` 注入给 `capture-service`。该入口位于 `backend/server/mock-api.mjs`，后续接真实 Node 服务时迁移这些执行器，不改前端契约。
++- `server/mock-api.mjs`：当前仍负责本地采集执行器、SingleFile/DOMSnapshot/Playwright 渲染能力，把 analyzer/matcher/compiler/diagnostics 与 `capture-runner` 组装成 relay dispatcher 注入 `capture/start`，并把 `generatedPageHtml`、`verifyGeneratedPage` 注入给 `capture-service`。该入口位于 `backend/server/mock-api.mjs`，后续接真实 Node 服务时迁移这些执行器，不改前端契约。
+ 
+ ## Workflow Agent Provider
+ 
+ 右侧 Agent 的按钮和输入框统一走后端 Agent 消息接口。前端只负责交互、草稿态、请求取消标记和画布刷新 loading；后端负责 action 分类、上下文构建、Provider 调用、消息持久化、重试/编辑元信息、取消状态和错误恢复。
+ 
+ Agent 消息接口：
+ 
+ - `POST /api/workspace/workflow-runs/:id/messages`：非流式发送消息，返回完整 `run` 和 `assistantMessage`。
+ - `POST /api/workspace/workflow-runs/:id/messages/stream`：SSE 流式发送消息，事件包含 `status`、`delta`、`message`、`done`、`error`。成功时 `message` 事件携带 `assistantMessage`；取消时不发送空 `assistantMessage`，只在 `done` 中返回 `cancelled: true`。
+ - `POST /api/workspace/workflow-runs/:id/messages/cancel`：按 `stepId + clientMessageId` 取消当前生成；Provider 支持中断时会 abort 请求，不支持时后端记录取消，前端丢弃迟到回复。
+diff --git a/backend/server/mock-api.mjs b/backend/server/mock-api.mjs
+index 393c660..c249762 100644
+--- a/backend/server/mock-api.mjs
++++ b/backend/server/mock-api.mjs
+@@ -12,20 +12,25 @@ import { buildVisualVerificationReport } from '../../frontend/src/services/visua
+ import { compareImageDataUrls } from '../../frontend/src/services/visualVerification.node.js'
+ import { createRestoredPageAsset } from '../../frontend/src/services/factoryWorkspace.js'
+ import { createWorkspaceStore, workspaceRoutes } from '../routes/workspace.js'
+ import { addModelCallLog, addRestoredPage, getModelSettingsRaw, saveModelSettings } from '../services/workspace-store.js'
+ import { uploadRoutes } from '../routes/uploads.js'
+ import { captureRoutes } from '../routes/capture.js'
+ import { adminRoutes } from '../routes/admin.js'
+ import { generatePageFromCapturePayload } from '../services/capture-service.js'
+ import { createCaptureRunner } from '../services/capture-runner.js'
+ import { createCaptureTaskStore } from '../services/capture-task-store.js'
++import { createCaptureDispatcher } from '../services/capture-dispatcher.js'
++import { analyzeCaptureUrl } from '../services/capture-url-analyzer.js'
++import { matchCaptureTemplate } from '../services/capture-template-matcher.js'
++import { compileCaptureTask } from '../services/capture-compiler.js'
++import { classifyCaptureDiagnostics } from '../services/capture-diagnostics.js'
+ import { createAgentProviderFromEnv, createAgentProviderFromModelSettings } from '../services/llm-provider.js'
+ import { renderAdminConsoleHtml } from '../services/admin-console.js'
+ import { createBrowserSessionManager } from './browser-session-manager.mjs'
+ 
+ const PORT = Number(process.env.PORT || 5299)
+ const execFileAsync = promisify(execFile)
+ const DEFAULT_HEADERS = {
+   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+ }
+@@ -147,30 +152,37 @@ const captureRunner = createCaptureRunner({
+       return isTestRuntime
+         ? await fetchTargetPage(payload.url)
+         : await captureWithRemoteBrowser(payload.url, browserSession)
+     }
+     return ['cookie'].includes(payload.authMode) && (cookieSession.storageState || cookieSession.cookies?.length)
+         ? await captureWithChromeAndSession(payload.url, cookieSession)
+         : await captureWithChrome(payload.url)
+   },
+   fallbackCaptureTarget: async (payload) => fetchTargetPage(payload.url)
+ })
++const captureDispatcher = createCaptureDispatcher({
++  analyzeCaptureUrl,
++  matchCaptureTemplate,
++  compileCaptureTask,
++  classifyCaptureDiagnostics,
++  captureRunner
++})
+ const captureTaskStore = createCaptureTaskStore()
+ const captureApiRoutes = captureRoutes({
+   createBrowserSession: async (payload) => browserSessions.createSession({
+     projectId: payload.projectId || 'default',
+     url: payload.url || 'about:blank'
+   }),
+   previewBrowserSession: async (payload) => browserSessionPreview(browserSessions.getSession(payload.sessionId)),
+   browserSessionAction: async (payload) => browserSessionAction(browserSessions.getSession(payload.sessionId), payload),
+   closeBrowserSession: async (payload) => browserSessions.closeSession(payload.sessionId),
+-  captureStart: async (payload) => captureTaskStore.runTask(payload, captureRunner),
++  captureStart: async (payload) => captureTaskStore.runTask(payload, captureDispatcher),
+   generatePage: async (payload) => generatePageFromCapturePayload(payload, {
+     generatedPageHtml,
+     verifyGeneratedPage,
+     persistRestoredPage: async (asset) => addRestoredPage(workspaceStore, asset)
+   }),
+   captureResult: async (payload) => captureTaskStore.result(payload.taskId),
+   latestResult: async () => captureTaskStore.latestResult()
+ })
+ const adminApiRoutes = adminRoutes(workspaceStore, {
+   apiPort: PORT,
+diff --git a/backend/services/capture-compiler.js b/backend/services/capture-compiler.js
+new file mode 100644
+index 0000000..16671fe
+--- /dev/null
++++ b/backend/services/capture-compiler.js
+@@ -0,0 +1,47 @@
++function normalizeAuthMode(authMode = 'public') {
++  return ['public', 'browser', 'cookie'].includes(authMode) ? authMode : 'public'
++}
++
++export function compileCaptureTask(input = {}) {
++  const payload = input.payload || {}
++  const analysis = input.analysis || {}
++  const templateMatch = input.templateMatch || {}
++  const template = templateMatch.template || {}
++  const authMode = normalizeAuthMode(payload.authMode || analysis.authMode)
++
++  return {
++    taskType: 'web-capture',
++    projectId: payload.projectId || 'default',
++    templateId: templateMatch.templateId || 'generic-public-page',
++    source: { url: analysis.normalizedUrl || String(payload.url || '').trim() },
++    auth: {
++      mode: authMode,
++      sessionId: authMode === 'browser' ? payload.sessionId || '' : '',
++      cookieText: authMode === 'cookie' ? payload.cookieText || '' : ''
++    },
++    execution: {
++      waitUntil: template.navigation?.waitUntil || 'networkidle',
++      timeoutMs: template.navigation?.timeoutMs || 15000,
++      extraWaitMs: template.navigation?.extraWaitMs || 0,
++      scrollMode: template.pageStrategy?.scrollMode || 'full-page',
++      maxScrollSteps: template.pageStrategy?.maxScrollSteps || 4,
++      includeIframes: Boolean(template.pageStrategy?.includeIframes)
++    },
++    artifacts: {
++      screenshot: Boolean(template.artifacts?.screenshot),
++      singleFile: Boolean(template.artifacts?.singleFile),
++      domSnapshot: Boolean(template.artifacts?.domSnapshot),
++      networkLogs: Boolean(template.artifacts?.networkLogs)
++    },
++    diagnosticsPolicy: {
++      classifyLoginPage: true,
++      classifyBotBlock: true,
++      classifyEmptyDom: true
++    },
++    relay: {
++      matchReason: templateMatch.matchReason || '',
++      pageClass: analysis.traits?.pageClass || 'public-page',
++      requiresAuth: Boolean(analysis.authHints?.requiresAuth)
++    }
++  }
++}
+diff --git a/backend/services/capture-diagnostics.js b/backend/services/capture-diagnostics.js
+new file mode 100644
+index 0000000..b433c5a
+--- /dev/null
++++ b/backend/services/capture-diagnostics.js
+@@ -0,0 +1,51 @@
++function hasBlockedHtml(text = '') {
++  return /405|异常访问|请求有异常行为|access denied|forbidden/i.test(String(text || ''))
++}
++
++function hasRestorableLayoutNodes(captureResult = {}, raw = {}) {
++  if (Array.isArray(captureResult.layoutNodes) && captureResult.layoutNodes.length > 0) return true
++  return Number(raw.layoutNodeCount || 0) > 0
++}
++
++function hasExpiredAuth(raw = {}) {
++  if (/cookie|expired|401|403/i.test(raw.fetchError || '')) return true
++  return raw.fetchStatus === 401 || raw.fetchStatus === 403
++}
++
++export function classifyCaptureDiagnostics(input = {}) {
++  const compiledTask = input.compiledTask || {}
++  const captureResult = input.captureResult || {}
++  const raw = captureResult.raw || {}
++  const diagnostics = []
++  const recoveryActions = new Set()
++
++  if (compiledTask.relay?.requiresAuth && compiledTask.auth?.mode === 'public') {
++    diagnostics.push({ code: 'LOGIN_REQUIRED', message: '目标页面需要登录后采集。' })
++    recoveryActions.add('打开授权浏览器')
++    recoveryActions.add('重新导入 Cookie')
++  }
++
++  if (hasExpiredAuth(raw)) {
++    diagnostics.push({ code: 'COOKIE_EXPIRED', message: '当前 Cookie 或登录态已失效。' })
++    recoveryActions.add('重新导入 Cookie')
++    recoveryActions.add('打开授权浏览器')
++  }
++
++  if (!captureResult.singleFileHtml && !captureResult.staticHtml && !hasRestorableLayoutNodes(captureResult, raw)) {
++    diagnostics.push({ code: 'DOM_NOT_RESTORABLE', message: '当前页面没有可还原 DOM 数据。' })
++    recoveryActions.add('上传网页快照包')
++    recoveryActions.add('上传截图走图片转代码')
++  }
++
++  if (hasBlockedHtml(captureResult.singleFileHtml) || hasBlockedHtml(raw.fetchError)) {
++    diagnostics.unshift({ code: 'ANTI_BOT_SUSPECTED', message: '当前页面疑似被风控或异常访问拦截。' })
++    recoveryActions.add('打开授权浏览器')
++    recoveryActions.add('重新导入 Cookie')
++  }
++
++  return {
++    status: diagnostics.length ? 'blocked' : (captureResult.status || 'completed'),
++    diagnostics,
++    recoveryActions: [...recoveryActions]
++  }
++}
+diff --git a/backend/services/capture-dispatcher.js b/backend/services/capture-dispatcher.js
+new file mode 100644
+index 0000000..9a6abb5
+--- /dev/null
++++ b/backend/services/capture-dispatcher.js
+@@ -0,0 +1,55 @@
++export function createCaptureDispatcher(deps = {}) {
++  const {
++    analyzeCaptureUrl,
++    matchCaptureTemplate,
++    compileCaptureTask,
++    classifyCaptureDiagnostics,
++    captureRunner
++  } = deps
++
++  return {
++    async execute(payload = {}) {
++      const analysis = analyzeCaptureUrl({
++        url: payload.url,
++        authMode: payload.authMode
++      })
++      const templateMatch = matchCaptureTemplate({
++        analysis,
++        authMode: payload.authMode
++      })
++      const compiledTask = compileCaptureTask({
++        payload,
++        analysis,
++        templateMatch
++      })
++      const captureResult = await captureRunner.makeCaptureResult({
++        ...payload,
++        url: compiledTask.source.url,
++        authMode: compiledTask.auth.mode,
++        relay: {
++          templateId: compiledTask.templateId,
++          matchReason: compiledTask.relay?.matchReason || '',
++          compiledTask,
++          analysis
++        }
++      })
++      const classified = classifyCaptureDiagnostics({
++        compiledTask,
++        captureResult
++      })
++
++      return {
++        ...captureResult,
++        status: classified.status === 'blocked' ? 'blocked' : captureResult.status,
++        templateId: compiledTask.templateId,
++        diagnostics: classified.diagnostics,
++        recoveryActions: classified.recoveryActions,
++        relay: {
++          analysis,
++          compiledTask,
++          matchReason: compiledTask.relay?.matchReason || ''
++        }
++      }
++    }
++  }
++}
+diff --git a/backend/services/capture-quality-gate.js b/backend/services/capture-quality-gate.js
+new file mode 100644
+index 0000000..a8ff45e
+--- /dev/null
++++ b/backend/services/capture-quality-gate.js
+@@ -0,0 +1,302 @@
++export function captureRestoreReadiness(captureResult = {}) {
++  const nodes = Array.isArray(captureResult.layoutNodes) ? captureResult.layoutNodes : []
++  const rawNodeCount = Number(captureResult.raw?.layoutNodeCount) || nodes.length
++  const hasSingleFileHtml = Boolean(String(captureResult.singleFileHtml || '').trim())
++  const hasStaticHtml = Boolean(String(captureResult.staticHtml || '').trim())
++  const hasDomSnapshot = Boolean(captureResult.domSnapshot || captureResult.raw?.domSnapshotCaptured)
++  const hasScreenshot = Boolean(captureResult.screenshot || captureResult.pages?.some((page) => page?.screenshot))
++  const visibleNodes = nodes.filter((node) => Number(node?.width) > 0 && Number(node?.height) > 0)
++  const semanticNodes = visibleNodes.filter((node) => {
++    const type = String(node.type || '').toLowerCase()
++    const text = String(node.text || node.placeholder || node.alt || '').trim()
++    return ['text', 'image', 'control', 'svg', 'pseudo'].includes(type) || text
++  })
++  const hasDesignTree = Boolean(captureResult.designTree)
++  const canRestore = hasDesignTree || semanticNodes.length >= 3 || visibleNodes.length >= 12
++  const actions = [
++    '使用登录态或远程浏览器重新采集',
++    '等待目标页面加载完成后重新采集',
++    '上传包含 DOM 与样式的网页快照包'
++  ]
++
++  if (hasSingleFileHtml || hasStaticHtml) {
++    return {
++      canRestore: true,
++      status: hasSingleFileHtml ? 'singlefile-ready' : 'static-html-ready',
++      nodeCount: rawNodeCount,
++      semanticNodeCount: semanticNodes.length,
++      hasScreenshot,
++      hasSingleFileHtml,
++      hasStaticHtml,
++      hasDomSnapshot,
++      reason: hasSingleFileHtml
++        ? '已采集到 SingleFile 高保真静态 HTML，可以直接生成可预览页面。'
++        : '已采集到授权浏览器当前页 HTML，可以直接生成可预览页面。',
++      actions: []
++    }
++  }
++
++  if (canRestore) {
++    return {
++      canRestore: true,
++      status: 'ready',
++      nodeCount: rawNodeCount,
++      semanticNodeCount: semanticNodes.length,
++      hasScreenshot,
++      hasSingleFileHtml,
++      hasStaticHtml,
++      hasDomSnapshot,
++      reason: '已采集到可还原 DOM 与样式节点，可以生成静态 HTML。',
++      actions: []
++    }
++  }
++
++  const reason = rawNodeCount <= 0
++    ? '没有采集到可还原 DOM 节点，当前只有截图或空快照，不能生成 1:1 HTML。'
++    : `只采集到 ${rawNodeCount} 个 DOM 节点，其中可用于还原的文本/图片/控件不足，继续生成会变成猜测页面。`
++
++  return {
++    canRestore: false,
++    status: hasScreenshot ? 'screenshot-only' : 'insufficient',
++    nodeCount: rawNodeCount,
++    semanticNodeCount: semanticNodes.length,
++    hasScreenshot,
++    hasSingleFileHtml,
++    hasStaticHtml,
++    hasDomSnapshot,
++    reason,
++    actions
++  }
++}
++
++function countMeaningfulTreeNodes(node = {}) {
++  if (!node || typeof node !== 'object') return 0
++  const text = String(node.text || node.placeholder || node.alt || '').trim()
++  const type = String(node.type || '').toLowerCase()
++  const src = String(node.src || node.href || '').trim()
++  const isMeaningful = Boolean(text || src || ['text', 'image', 'control', 'svg', 'pseudo'].includes(type))
++  const children = Array.isArray(node.children) ? node.children : []
++  return (isMeaningful ? 1 : 0) + children.reduce((sum, child) => sum + countMeaningfulTreeNodes(child), 0)
++}
++
++function duplicateTextRatio(nodes = []) {
++  const texts = nodes
++    .map((node) => String(node?.text || node?.placeholder || node?.alt || '').trim())
++    .filter(Boolean)
++  if (texts.length <= 1) return 0
++  const unique = new Set(texts)
++  return Number(((texts.length - unique.size) / texts.length).toFixed(2))
++}
++
++function singleFilePlainText(html = '') {
++  return String(html || '')
++    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
++    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
++    .replace(/<[^>]+>/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim()
++}
++
++function detectInvalidCapturePage(captureResult = {}, ...htmlSources) {
++  const textBlocks = Array.isArray(captureResult.textBlocks)
++    ? captureResult.textBlocks.map((item) => item.text || item.content || item).join(' ')
++    : ''
++  const source = [
++    captureResult.title,
++    captureResult.url,
++    ...htmlSources.map((html) => singleFilePlainText(html)),
++    textBlocks
++  ].join('\n')
++
++  const patterns = [
++    { label: '405 异常访问', pattern: /405\s*异常访问|异常访问|请求有异常行为|您的请求地址/i },
++    { label: '403 / Access Denied', pattern: /403|access denied|forbidden|request blocked/i },
++    { label: '安全验证页', pattern: /安全验证|人机验证|验证码|captcha|robot check|verify you are human/i },
++    { label: '登录拦截页', pattern: /请先登录|登录后访问|sign in required|login required/i }
++  ]
++  return patterns.find((item) => item.pattern.test(source)) || null
++}
++
++function capturePageHeight(captureResult = {}) {
++  const raw = captureResult.raw || {}
++  return Number(raw.capturedPageHeight || raw.pageHeight || captureResult.viewport?.pageHeight || captureResult.designTree?.height || 0)
++}
++
++export function captureQualityGate(captureResult = {}, options = {}) {
++  const nodes = Array.isArray(captureResult.layoutNodes) ? captureResult.layoutNodes : []
++  const semanticNodeCount = nodes.filter((node) => {
++    const type = String(node?.type || '').toLowerCase()
++    const text = String(node?.text || node?.placeholder || node?.alt || '').trim()
++    return ['text', 'image', 'control', 'svg', 'pseudo'].includes(type) || text
++  }).length
++  const singleFileHtml = String(captureResult.singleFileHtml || '').trim()
++  const singleFileLength = singleFileHtml.length
++  const staticHtml = String(captureResult.staticHtml || '').trim()
++  const staticHtmlLength = staticHtml.length
++  const invalidPage = detectInvalidCapturePage(captureResult, singleFileHtml, staticHtml)
++  const meaningfulTreeNodes = countMeaningfulTreeNodes(captureResult.designTree)
++  const flatNodeCount = nodes.length
++  const duplicateRatio = duplicateTextRatio(nodes)
++  const pageHeight = capturePageHeight(captureResult)
++  const viewportHeight = Number(captureResult.viewport?.height || captureResult.raw?.viewportHeight || 900)
++  const heightCoverage = pageHeight ? Number((viewportHeight / pageHeight).toFixed(2)) : 1
++  const hasScreenshot = Boolean(captureResult.screenshot || captureResult.pages?.some((page) => page?.screenshot))
++  const minSingleFileLength = Number(options.minSingleFileLength) || 40
++  const minStaticHtmlLength = Number(options.minStaticHtmlLength) || minSingleFileLength
++  const reasons = []
++  const actions = [
++    '使用授权浏览器等待页面加载完成后重新采集',
++    '优先生成 SingleFile 静态 HTML 快照',
++    '重新采集包含父子层级、滚动容器和完整页面高度的数据'
++  ]
++
++  if (invalidPage) {
++    return {
++      passed: false,
++      status: 'blocked',
++      mode: 'access-denied-page',
++      score: 0,
++      reasons: [`目标站返回 ${invalidPage.label}，这是风控、登录或错误页，不是可还原的目标页面。`],
++      actions: ['使用远程浏览器登录后再采集', '提供 Cookie / 登录态', '上传网页快照包', '上传截图走“图片转代码”'],
++      metrics: {
++        singleFileLength,
++        staticHtmlLength,
++        meaningfulTreeNodes,
++        flatNodeCount,
++        semanticNodeCount,
++        duplicateTextRatio: duplicateRatio,
++        pageHeight,
++        viewportHeight,
++        heightCoverage,
++        hasScreenshot,
++        invalidPage: invalidPage.label
++      }
++    }
++  }
++
++  if (singleFileLength >= minSingleFileLength) {
++    return {
++      passed: true,
++      status: 'passed',
++      mode: 'singlefile-static',
++      score: 100,
++      reasons: [],
++      actions: [],
++      metrics: {
++        singleFileLength,
++        staticHtmlLength,
++        meaningfulTreeNodes,
++        flatNodeCount,
++        semanticNodeCount,
++        duplicateTextRatio: duplicateRatio,
++        pageHeight,
++        viewportHeight,
++        heightCoverage,
++        hasScreenshot
++      }
++    }
++  }
++
++  if (staticHtmlLength >= minStaticHtmlLength) {
++    return {
++      passed: true,
++      status: 'passed',
++      mode: 'static-html',
++      score: 94,
++      reasons: [],
++      actions: [],
++      metrics: {
++        singleFileLength,
++        staticHtmlLength,
++        meaningfulTreeNodes,
++        flatNodeCount,
++        semanticNodeCount,
++        duplicateTextRatio: duplicateRatio,
++        pageHeight,
++        viewportHeight,
++        heightCoverage,
++        hasScreenshot
++      }
++    }
++  }
++
++  if (!flatNodeCount && hasScreenshot) {
++    reasons.push('当前只有截图，没有可还原的 HTML 或 DOM 层级数据。')
++    return {
++      passed: false,
++      status: 'blocked',
++      mode: 'screenshot-only',
++      score: 0,
++      reasons,
++      actions,
++      metrics: {
++        singleFileLength,
++        staticHtmlLength,
++        meaningfulTreeNodes,
++        flatNodeCount,
++        semanticNodeCount,
++        duplicateTextRatio: duplicateRatio,
++        pageHeight,
++        viewportHeight,
++        heightCoverage,
++        hasScreenshot
++      }
++    }
++  }
++
++  const hasEnoughSemanticFlatNodes = semanticNodeCount >= 3 && duplicateRatio < 0.35 && (!pageHeight || heightCoverage >= 0.5)
++
++  if (!meaningfulTreeNodes && flatNodeCount && !hasEnoughSemanticFlatNodes) {
++    reasons.push('采集结果缺少可用父子层级，真实内容只存在于扁平绝对定位节点中。')
++  }
++  if (duplicateRatio >= 0.35) {
++    reasons.push(`重复文本比例 ${Math.round(duplicateRatio * 100)}%，存在较高遮挡或重复采样风险。`)
++  }
++  if (pageHeight && heightCoverage < 0.5) {
++    reasons.push(`当前节点只覆盖约 ${Math.round(heightCoverage * 100)}% 页面高度，长页面采集不完整。`)
++  }
++
++  if (reasons.length) {
++    return {
++      passed: false,
++      status: 'blocked',
++      mode: meaningfulTreeNodes ? 'incomplete-structure' : 'flat-nodes-only',
++      score: Math.max(0, 40 - reasons.length * 10),
++      reasons,
++      actions,
++      metrics: {
++        singleFileLength,
++        staticHtmlLength,
++        meaningfulTreeNodes,
++        flatNodeCount,
++        semanticNodeCount,
++        duplicateTextRatio: duplicateRatio,
++        pageHeight,
++        viewportHeight,
++        heightCoverage,
++        hasScreenshot
++      }
++    }
++  }
++
++  return {
++    passed: true,
++    status: 'passed',
++    mode: 'structured-dom',
++    score: 78,
++    reasons: [],
++    actions: [],
++    metrics: {
++      singleFileLength,
++      staticHtmlLength,
++      meaningfulTreeNodes,
++      flatNodeCount,
++      semanticNodeCount,
++      duplicateTextRatio: duplicateRatio,
++      pageHeight,
++      viewportHeight,
++      heightCoverage,
++      hasScreenshot
++    }
++  }
++}
+diff --git a/backend/services/capture-runner.js b/backend/services/capture-runner.js
+index 1678484..e999c1e 100644
+--- a/backend/services/capture-runner.js
++++ b/backend/services/capture-runner.js
+@@ -132,20 +132,22 @@ export function createCaptureRunner(options = {}) {
+           designRules.colors.canvas,
+           designRules.colors.accentCyan
+         ],
+         fonts: ['PingFang SC', 'Microsoft YaHei', 'Arial'],
+         radius: [6, 8, 12, 16, 999],
+         spacing: designRules.layout.spacing
+       },
+       raw: {
+         scope: payload.scope,
+         authMode,
++        templateId: payload.relay?.templateId || '',
++        relayMatchReason: payload.relay?.matchReason || '',
+         captureKind: payload.captureKind || 'internal-web-snapshot',
+         snapshotPackage: 'internal-web-snapshot',
+         requestedOutput: payload.output || null,
+         captureMode: hasDomLayout ? 'screenshot-with-dom-data' : 'screenshot-only',
+         capturedAt: new Date(completedAt).toISOString(),
+         startedAt: timing.startedAt,
+         completedAt: timing.completedAt,
+         fetched: Boolean(fetched),
+         fetchStatus: fetched?.statusCode || null,
+         transport: fetched?.transport || null,
+diff --git a/backend/services/capture-service.js b/backend/services/capture-service.js
+index fe1de52..60c859b 100644
+--- a/backend/services/capture-service.js
++++ b/backend/services/capture-service.js
+@@ -1,15 +1,15 @@
+ import { randomUUID } from 'node:crypto'
+ import {
+   captureQualityGate,
+   captureRestoreReadiness
+-} from '../../frontend/src/services/factoryWorkspace.js'
++} from './capture-quality-gate.js'
+ 
+ function blockedVisualVerification(captureResult = {}, recommendations = []) {
+   return {
+     url: captureResult?.url || '',
+     status: 'blocked',
+     thresholds: {},
+     summary: { total: 0, passed: 0, failed: 0, averageScore: 0 },
+     results: [],
+     recommendations
+   }
+diff --git a/backend/services/capture-task-store.js b/backend/services/capture-task-store.js
+index f2ebf10..e70d519 100644
+--- a/backend/services/capture-task-store.js
++++ b/backend/services/capture-task-store.js
+@@ -19,20 +19,26 @@ function publicTask(task = {}) {
+     sourceType: task.sourceType,
+     url: task.url,
+     status: task.status,
+     createdAt: task.createdAt,
+     updatedAt: task.updatedAt,
+     result: task.result,
+     error: task.error
+   }
+ }
+ 
++function normalizeTaskStatus(resultStatus = '') {
++  if (resultStatus === 'blocked') return 'blocked'
++  if (resultStatus === 'failed') return 'failed'
++  return 'success'
++}
++
+ export function createCaptureTaskStore(options = {}) {
+   const uuid = options.uuid || randomUUID
+   const now = options.now || Date.now
+   const tasks = new Map()
+   const order = []
+ 
+   function createTask(payload = {}) {
+     const taskId = uuid()
+     const timestamp = isoTime(now)
+     const task = {
+@@ -77,38 +83,44 @@ export function createCaptureTaskStore(options = {}) {
+       throw error
+     }
+     return task
+   }
+ 
+   function latestResult() {
+     const latestId = order[order.length - 1]
+     return latestId ? result(latestId) : null
+   }
+ 
+-  async function runTask(payload = {}, runner) {
+-    if (!runner || typeof runner.makeCaptureResult !== 'function') {
++  async function runTask(payload = {}, executor) {
++    const execute = typeof executor?.execute === 'function'
++      ? (input) => executor.execute(input)
++      : typeof executor?.makeCaptureResult === 'function'
++        ? (input) => executor.makeCaptureResult(input)
++        : null
++
++    if (!execute) {
+       throw new Error('Capture runner is not configured')
+     }
+     const task = createTask(payload)
+     updateTask(task.taskId, { status: 'capturing' })
+     try {
+-      const captureResult = await runner.makeCaptureResult({
++      const captureResult = await execute({
+         ...payload,
+         taskId: task.taskId
+       })
+       const resultPayload = {
+         ...captureResult,
+         taskId: task.taskId,
+         projectId: task.projectId
+       }
+       const completed = updateTask(task.taskId, {
+-        status: 'success',
++        status: normalizeTaskStatus(captureResult?.status),
+         result: resultPayload,
+         error: null
+       })
+       return completed.result
+     } catch (error) {
+       updateTask(task.taskId, {
+         status: 'failed',
+         result: null,
+         error: {
+           message: error.message || '采集任务失败',
+diff --git a/backend/services/capture-template-matcher.js b/backend/services/capture-template-matcher.js
+new file mode 100644
+index 0000000..d6d1f64
+--- /dev/null
++++ b/backend/services/capture-template-matcher.js
+@@ -0,0 +1,17 @@
++import { CAPTURE_TEMPLATES } from './capture-templates.js'
++
++export function matchCaptureTemplate(input = {}) {
++  const analysis = input.analysis || {}
++  const pageClass = analysis.traits?.pageClass || 'public-page'
++  const authMode = input.authMode || analysis.authMode || 'public'
++  const template = CAPTURE_TEMPLATES.find((candidate) =>
++    candidate.pageClasses.includes(pageClass)
++      && candidate.match.authModes.includes(authMode)
++  ) || CAPTURE_TEMPLATES[0]
++
++  return {
++    templateId: template.id,
++    template,
++    matchReason: `matched ${template.id} from ${pageClass} using ${authMode}`
++  }
++}
+diff --git a/backend/services/capture-templates.js b/backend/services/capture-templates.js
+new file mode 100644
+index 0000000..60a8114
+--- /dev/null
++++ b/backend/services/capture-templates.js
+@@ -0,0 +1,62 @@
++export const CAPTURE_TEMPLATES = [
++  {
++    id: 'generic-public-page',
++    name: 'Generic Public Page',
++    pageClasses: ['public-page'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: false, preferAuthMode: 'public' },
++    navigation: { waitUntil: 'networkidle', timeoutMs: 15000, extraWaitMs: 1200 },
++    pageStrategy: {
++      scrollMode: 'full-page',
++      maxScrollSteps: 4,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: false },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'retry-with-scroll',
++      onBotDetected: 'manual-review'
++    }
++  },
++  {
++    id: 'generic-login-page',
++    name: 'Generic Login Page',
++    pageClasses: ['login-page'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: true, preferAuthMode: 'browser' },
++    navigation: { waitUntil: 'domcontentloaded', timeoutMs: 15000, extraWaitMs: 800 },
++    pageStrategy: {
++      scrollMode: 'viewport-only',
++      maxScrollSteps: 1,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: false },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'switch-to-browser-auth',
++      onBotDetected: 'manual-review'
++    }
++  },
++  {
++    id: 'generic-saas-dashboard',
++    name: 'Generic SaaS Dashboard',
++    pageClasses: ['saas-dashboard'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: true, preferAuthMode: 'browser' },
++    navigation: { waitUntil: 'networkidle', timeoutMs: 20000, extraWaitMs: 3000 },
++    pageStrategy: {
++      scrollMode: 'full-page',
++      maxScrollSteps: 8,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'retry-with-scroll',
++      onBotDetected: 'manual-review'
++    }
++  }
++]
+diff --git a/backend/services/capture-url-analyzer.js b/backend/services/capture-url-analyzer.js
+new file mode 100644
+index 0000000..3e5deb6
+--- /dev/null
++++ b/backend/services/capture-url-analyzer.js
+@@ -0,0 +1,32 @@
++function normalizeAuthMode(authMode = 'public') {
++  return ['public', 'browser', 'cookie'].includes(authMode) ? authMode : 'public'
++}
++
++function inferPageClass(pathname = '', search = '') {
++  const value = `${pathname}${search}`.toLowerCase()
++  if (/(login|signin|signup|auth|oauth|passport)/.test(value)) return 'login-page'
++  if (/\/(app|dashboard|admin|workspace|console)(\/|$)/.test(value)) return 'saas-dashboard'
++  return 'public-page'
++}
++
++export function analyzeCaptureUrl(input = {}) {
++  const parsed = new URL(String(input.url || '').trim())
++  const pageClass = inferPageClass(parsed.pathname, parsed.search)
++  const requiresAuth = pageClass !== 'public-page'
++  return {
++    normalizedUrl: parsed.href,
++    hostname: parsed.hostname,
++    pathname: parsed.pathname,
++    query: parsed.search,
++    authMode: normalizeAuthMode(input.authMode),
++    traits: {
++      pageClass,
++      loginSignals: pageClass === 'login-page' ? ['auth-path'] : [],
++      dynamicSignals: pageClass === 'saas-dashboard' ? ['app-shell-route'] : []
++    },
++    authHints: {
++      requiresAuth,
++      preferredAuthMode: requiresAuth ? 'browser' : 'public'
++    }
++  }
++}
+diff --git a/frontend/src/App.vue b/frontend/src/App.vue
+index 36aac2c..7841f6a 100644
+--- a/frontend/src/App.vue
++++ b/frontend/src/App.vue
+@@ -977,20 +977,38 @@
+                 <span>方式：{{ state.captureResult.raw?.transport || '未知' }}</span>
+                 <span>快照：{{ state.captureResult.raw?.snapshotPackage || state.captureResult.raw?.captureKind || '内部网页快照' }}</span>
+                 <span>授权：{{ state.captureResult.raw?.authMode || 'public' }}</span>
+                 <span>截图：{{ state.captureResult.raw?.screenshotCaptured ? '已采集' : '未采集' }}</span>
+                 <span>SingleFile：{{ state.captureResult.raw?.singleFileCaptured ? '已采集' : '未采集' }}</span>
+                 <span>DOMSnapshot：{{ state.captureResult.raw?.domSnapshotCaptured ? '已采集' : '未采集' }}</span>
+                 <span>DOM：{{ state.captureResult.raw?.layoutNodeCount || captureSummary.layoutNodes }} 个节点</span>
+                 <span v-if="state.captureResult.raw?.source === 'web-snapshot-import'">解析包：{{ state.captureResult.raw?.pageCount || 1 }} 页</span>
+               </div>
+             </details>
++            <section
++              v-if="captureRelayTemplateId || captureRelayDiagnostics.length || captureRelayActions.length"
++              class="capture-relay-diagnostics"
++            >
++              <div class="capture-relay-head">
++                <span class="eyebrow">Relay</span>
++                <strong>{{ captureRelayTemplateId || '未命中模板' }}</strong>
++              </div>
++              <ul v-if="captureRelayDiagnostics.length" class="capture-relay-diagnostic-list">
++                <li v-for="diagnostic in captureRelayDiagnostics" :key="`${diagnostic.code}-${diagnostic.message}`">
++                  <strong>{{ diagnostic.code }}</strong>
++                  <span>{{ diagnostic.message }}</span>
++                </li>
++              </ul>
++              <ul v-if="captureRelayActions.length" class="capture-relay-action-list">
++                <li v-for="action in captureRelayActions" :key="action">{{ action }}</li>
++              </ul>
++            </section>
+             <div v-if="state.captureResult && !captureReadiness.canRestore" class="capture-readiness-warning">
+                 <strong>采集不足或目标站返回错误页，暂不能生成高保真 HTML</strong>
+               <p>{{ captureReadiness.reason }}</p>
+               <div>
+                 <span v-for="action in captureReadiness.actions" :key="action">{{ action }}</span>
+               </div>
+             </div>
+             <div v-else-if="captureAction.loading" class="capture-loading-state">
+               <span class="loading-spinner-large"></span>
+               <strong>正在生成网页快照</strong>
+@@ -3898,20 +3916,23 @@ const captureSummary = computed(() => {
+     layoutNodes: result?.layoutNodes?.length || 0
+   }
+ })
+ const captureReadiness = computed(() => captureRestoreReadiness(state.captureResult || {}))
+ const captureResultPanelStatus = computed(() => {
+   if (captureStatus.value.status === 'loading') return 'loading'
+   if (captureStatus.value.status === 'failed' && !state.captureResult) return 'failed'
+   if (!state.captureResult) return 'idle'
+   return captureReadiness.value.canRestore ? 'success' : 'unconfigured'
+ })
++const captureRelayDiagnostics = computed(() => state.captureResult?.diagnostics || [])
++const captureRelayActions = computed(() => state.captureResult?.recoveryActions || [])
++const captureRelayTemplateId = computed(() => state.captureResult?.templateId || '')
+ const captureJson = computed(() => JSON.stringify(state.captureResult || {
+   status: 'pending',
+   message: '暂无快照结果。配置网页快照服务后会展示真实返回数据。',
+   designSource: designRules.source,
+   expectedShape: ['pages', 'components', 'assets', 'apiCalls', 'designTokens']
+ }, null, 2))
+ const componentLibraryJson = computed(() => JSON.stringify({
+   designSource: designRules.source,
+   rules: designRules,
+   componentLibrary: state.componentLibrary
+diff --git a/frontend/src/styles.css b/frontend/src/styles.css
+index 98297e6..8aebf4d 100644
+--- a/frontend/src/styles.css
++++ b/frontend/src/styles.css
+@@ -3804,20 +3804,56 @@ label {
+ .diagnostic strong {
+   color: #222529;
+ }
+ 
+ .diagnostic span {
+   border-radius: 999px;
+   background: #f6f7f9;
+   padding: 4px 8px;
+ }
+ 
++.capture-relay-diagnostics {
++  margin-top: 16px;
++  padding: 16px 18px;
++  border: 1px solid #d9dde3;
++  border-radius: 14px;
++  background: #f8fafc;
++}
++
++.capture-relay-head {
++  display: flex;
++  align-items: baseline;
++  gap: 10px;
++  margin-bottom: 10px;
++}
++
++.capture-relay-diagnostic-list,
++.capture-relay-action-list {
++  margin: 0;
++  padding-left: 18px;
++  color: #44505f;
++}
++
++.capture-relay-diagnostic-list li,
++.capture-relay-action-list li {
++  margin-top: 6px;
++}
++
++.capture-relay-diagnostic-list li:first-child,
++.capture-relay-action-list li:first-child {
++  margin-top: 0;
++}
++
++.capture-relay-diagnostic-list strong {
++  margin-right: 8px;
++}
++
+ .capture-readiness-warning {
+   margin: 12px 0;
+   border: 1px solid #f5c078;
+   border-radius: 10px;
+   background: #fff8ed;
+   padding: 14px;
+   color: #7a4d00;
+ }
+ 
+ .capture-readiness-warning strong {
+@@ -6114,20 +6150,21 @@ label {
+   padding: 8px;
+   color: #4c535c;
+   line-height: 1.45;
+   overflow-wrap: anywhere;
+   word-break: break-word;
+   white-space: normal;
+ }
+ 
+ .canvas-tree-node {
+   width: 100%;
++  height: auto;
+   min-height: 36px;
+   max-height: 128px;
+   display: grid;
+   grid-template-columns: 18px minmax(0, 1fr);
+   align-items: start;
+   justify-items: start;
+   gap: 8px;
+   padding: 8px 10px;
+   padding-left: calc(12px + var(--tree-depth) * 22px);
+   text-align: left;
+@@ -6247,20 +6284,25 @@ label {
+ }
+ 
+ .canvas-detail-tree {
+   display: grid;
+   gap: 8px;
+   max-height: 300px;
+   overflow: auto;
+   padding-right: 2px;
+ }
+ 
++.canvas-fullscreen-content .canvas-detail-tree {
++  max-height: clamp(420px, 54vh, 620px);
++  overflow-y: auto;
++}
++
+ .canvas-path-graph {
+   border: 1px solid #e8eaec;
+   border-radius: 10px;
+   background: #f7f8fa;
+   padding: 14px;
+   display: grid;
+   gap: 12px;
+ }
+ 
+ .canvas-path-legend {
+@@ -6646,20 +6688,29 @@ label {
+   max-width: 100%;
+   max-height: 96px;
+   overflow-y: auto;
+   overflow-wrap: anywhere;
+   word-break: break-word;
+   white-space: normal;
+   line-height: 1.6;
+   padding-right: 6px;
+ }
+ 
++.canvas-fullscreen-content .canvas-tree-node {
++  max-height: none;
++}
++
++.canvas-fullscreen-content .canvas-tree-node span {
++  max-height: none;
++  overflow: visible;
++}
++
+ .canvas-fullscreen-edit-panel {
+   display: grid;
+   gap: 14px;
+ }
+ 
+ .canvas-fullscreen-edit-panel label {
+   display: grid;
+   gap: 8px;
+ }
+ 
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index 5c82201..20f2b32 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -240,20 +240,21 @@ test('workspace startup script launches frontend and backend projects together',
+   assert.match(source, /--prefix', 'backend', 'run', 'api'/)
+   assert.match(source, /--prefix', 'frontend', 'run', 'dev'/)
+ })
+ 
+ test('root folder keeps only shared project files', async () => {
+   const root = process.cwd()
+   const allowed = new Set([
+     '.env.example',
+     '.git',
+     '.gitignore',
++    '.superpowers',
+     'backend',
+     'docs',
+     'frontend',
+     'package.json',
+     'scripts',
+     'tests'
+   ])
+   const entries = await readdir(root)
+   const unexpected = entries
+     .filter((entry) => !allowed.has(entry))
+@@ -3008,21 +3009,21 @@ testAsync('image to code opens standalone browser result page without app sideba
+   assert.match(previewSource, /进度反馈/)
+   assert.match(previewSource, /jump-game/)
+   assert.match(previewSource, /按住蓄力/)
+   assert.match(previewSource, /跳一跳/)
+   assert.match(previewSource, /const interactive = Boolean\(options\.interactive\)/)
+   assert.match(previewSource, /grid-template-columns:\s*1fr/)
+   assert.doesNotMatch(previewSource, /class="box"/)
+   assert.doesNotMatch(previewSource, /grid-template-columns:\s*minmax\(0,\s*\.92fr\)\s+minmax\(320px,\s*\.78fr\)/)
+   assert.match(previewSource, /生成骨架/)
+   assert.match(previewSource, /补齐样式/)
+-  assert.match(previewSource, /写入交互/)
++  assert.match(previewSource, /后端验收/)
+   assert.match(previewSource, /页面生成中/)
+   assert.match(generateSource, /buildStaticHtmlStatusPage\(title,\s*event\.data\.label/)
+   assert.match(generateSource, /buildStaticHtmlFailurePage\('生成失败'/)
+   assert.match(previewSource, /重新上传/)
+   assert.match(previewSource, /重新生成/)
+   assert.match(previewSource, /模型设置/)
+   assert.match(previewSource, /const backTargetUrl = '\/#\$\{escapeHtmlAttr\(homeUrl\)\}'/)
+   assert.match(previewSource, /window\.top\.location\.href = backTargetUrl/)
+   assert.match(previewSource, /window\.top\.location\.href = convertTargetUrl/)
+   assert.doesNotMatch(previewSource, /app-shell/)
+@@ -8482,20 +8483,120 @@ testAsync('backend capture task store persists failed capture tasks', async () =
+     /capture exploded/
+   )
+ 
+   const stored = taskStore.result('task-failed')
+   assert.equal(stored.taskId, 'task-failed')
+   assert.equal(stored.status, 'failed')
+   assert.equal(stored.error.message, 'capture exploded')
+   assert.equal(stored.result, null)
+ })
+ 
++testAsync('backend capture dispatcher compiles relay metadata before task-store execution', async () => {
++  const { createCaptureDispatcher } = await import('../backend/services/capture-dispatcher.js')
++  const { createCaptureTaskStore } = await import('../backend/services/capture-task-store.js')
++
++  const dispatcher = createCaptureDispatcher({
++    analyzeCaptureUrl: ({ url, authMode }) => ({
++      normalizedUrl: url,
++      authMode,
++      traits: { pageClass: 'saas-dashboard' },
++      authHints: { requiresAuth: true, preferredAuthMode: 'browser' }
++    }),
++    matchCaptureTemplate: () => ({
++      templateId: 'generic-saas-dashboard',
++      template: {
++        navigation: { waitUntil: 'networkidle', timeoutMs: 20000, extraWaitMs: 3000 },
++        pageStrategy: { scrollMode: 'full-page', maxScrollSteps: 8, includeIframes: false },
++        artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true }
++      },
++      matchReason: 'unit-test-match'
++    }),
++    compileCaptureTask: ({ payload }) => ({
++      taskType: 'web-capture',
++      templateId: 'generic-saas-dashboard',
++      source: { url: payload.url },
++      auth: { mode: payload.authMode, sessionId: payload.sessionId || '' },
++      execution: {
++        waitUntil: 'networkidle',
++        timeoutMs: 20000,
++        extraWaitMs: 3000,
++        scrollMode: 'full-page',
++        maxScrollSteps: 8,
++        includeIframes: false
++      },
++      artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true },
++      relay: { matchReason: 'unit-test-match', pageClass: 'saas-dashboard', requiresAuth: true }
++    }),
++    classifyCaptureDiagnostics: () => ({ status: 'completed', diagnostics: [], recoveryActions: [] }),
++    captureRunner: {
++      makeCaptureResult: async (payload) => ({
++        taskId: payload.taskId,
++        url: payload.url,
++        status: 'completed',
++        title: 'Compiled Capture',
++        raw: { authMode: payload.authMode, transport: 'unit' }
++      })
++    }
++  })
++
++  const taskStore = createCaptureTaskStore({
++    uuid: (() => {
++      let id = 0
++      return () => `relay-task-${++id}`
++    })(),
++    now: () => 1000
++  })
++
++  const result = await taskStore.runTask({
++    projectId: 'project-flow',
++    url: 'https://example.com/dashboard',
++    authMode: 'browser',
++    sessionId: 'session-7'
++  }, dispatcher)
++
++  assert.equal(result.templateId, 'generic-saas-dashboard')
++  assert.equal(result.relay.compiledTask.execution.waitUntil, 'networkidle')
++  assert.equal(result.relay.analysis.traits.pageClass, 'saas-dashboard')
++  assert.deepEqual(result.diagnostics, [])
++})
++
++testAsync('backend capture task store persists blocked dispatcher results as blocked status', async () => {
++  const { createCaptureTaskStore } = await import('../backend/services/capture-task-store.js')
++  const taskStore = createCaptureTaskStore({
++    uuid: () => 'task-blocked',
++    now: () => 1000
++  })
++
++  const dispatcher = {
++    execute: async (payload) => ({
++      taskId: payload.taskId,
++      url: payload.url,
++      status: 'blocked',
++      title: 'Blocked Capture',
++      diagnostics: [{ category: 'auth', severity: 'warning', message: 'login required' }],
++      recoveryActions: ['use browser auth']
++    })
++  }
++
++  const result = await taskStore.runTask({
++    projectId: 'project-flow',
++    url: 'https://example.com/private'
++  }, dispatcher)
++
++  const stored = taskStore.result('task-blocked')
++
++  assert.equal(result.status, 'blocked')
++  assert.equal(stored.status, 'blocked')
++  assert.equal(stored.result.status, 'blocked')
++  assert.deepEqual(stored.result.diagnostics, [{ category: 'auth', severity: 'warning', message: 'login required' }])
++})
++
+ testAsync('mock api mounts capture routes from backend route module', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+   const routesStart = source.indexOf('export function createMockApiRoutes')
+   const routesEnd = source.indexOf("'POST /api/generate/react-vite'", routesStart)
+   const routeSource = source.slice(routesStart, routesEnd)
+ 
+   assert.match(source, /import \{ captureRoutes \} from '\.\.\/routes\/capture\.js'/)
+   assert.match(source, /const captureApiRoutes = captureRoutes\(/)
+   assert.match(source, /export const routes = createMockApiRoutes/)
+   assert.match(routeSource, /\.\.\.captureApiRoutes/)
+@@ -8518,20 +8619,44 @@ testAsync('backend capture service owns page generation quality gate', async ()
+     generatedPageHtml: () => '<main>should not render</main>',
+     verifyGeneratedPage: async () => ({ status: 'passed' })
+   })
+ 
+   assert.equal(result.status, 'blocked')
+   assert.equal(result.html, '')
+   assert.match(result.message, /没有采集到可还原 DOM 节点/)
+   assert.equal(result.visualVerification.status, 'blocked')
+ })
+ 
++testAsync('backend capture service imports readiness and quality gate from backend services', async () => {
++  const serviceSource = await readFile(new URL('../backend/services/capture-service.js', import.meta.url), 'utf8')
++  const { captureRestoreReadiness, captureQualityGate } = await import('../backend/services/capture-quality-gate.js')
++
++  const readiness = captureRestoreReadiness({
++    title: 'Screenshot only',
++    screenshot: pngDataUrl([255, 255, 255]),
++    pages: [{ screenshot: pngDataUrl([255, 255, 255]) }],
++    layoutNodes: [],
++    raw: { layoutNodeCount: 0, screenshotCaptured: true }
++  })
++  const gate = captureQualityGate({
++    title: 'Denied page',
++    singleFileHtml: '<!doctype html><html><body><h1>405 异常访问</h1></body></html>',
++    layoutNodes: [],
++    raw: { singleFileCaptured: true, layoutNodeCount: 0 }
++  })
++
++  assert.match(serviceSource, /from '\.\/capture-quality-gate\.js'/)
++  assert.doesNotMatch(serviceSource, /frontend\/src\/services\/factoryWorkspace\.js/)
++  assert.equal(readiness.canRestore, false)
++  assert.equal(gate.passed, false)
++})
++
+ testAsync('backend capture service returns generated html and visual verification', async () => {
+   const { generatePageFromCapturePayload } = await import('../backend/services/capture-service.js')
+   const singleFileHtml = '<!doctype html><html><body><main><h1>SingleFile 页面</h1></main></body></html>'
+   const captureResult = {
+     title: 'SingleFile restore',
+     url: 'https://example.com/singlefile',
+     singleFileHtml,
+     layoutNodes: [],
+     raw: { singleFileCaptured: true, layoutNodeCount: 0 }
+   }
+@@ -8637,27 +8762,33 @@ testAsync('backend capture runner assembles capture result from injected target
+         viewport: { width: 1280, height: 720 },
+         pageBackground: '#fafafa'
+       }
+     })
+   })
+ 
+   const result = await runner.makeCaptureResult({
+     url: 'https://example.com',
+     authMode: 'none',
+     captureKind: 'internal-web-snapshot',
+-    output: 'html'
++    output: 'html',
++    relay: {
++      templateId: 'generic-saas-dashboard',
++      matchReason: 'unit-test-match'
++    }
+   })
+ 
+   assert.equal(result.taskId, 'capture-test-id')
+   assert.equal(result.status, 'completed')
+   assert.equal(result.title, 'Runner Page')
+   assert.equal(result.raw.authMode, 'public')
++  assert.equal(result.raw.templateId, 'generic-saas-dashboard')
++  assert.equal(result.raw.relayMatchReason, 'unit-test-match')
+   assert.equal(result.raw.transport, 'unit-capture')
+   assert.equal(result.raw.durationMs, 4400)
+   assert.equal(result.timing.estimatedSeconds, 11)
+   assert.equal(result.raw.singleFileCaptured, true)
+   assert.equal(result.raw.domSnapshotCaptured, true)
+   assert.equal(result.layoutNodes.length, 1)
+   assert.equal(result.designTree.id, 'root')
+   assert.equal(result.pageBackground, '#fafafa')
+   assert.match(result.pages[0].summary, /SingleFile/)
+   assert.match(result.pages[0].summary, /DOMSnapshot/)
+@@ -8700,44 +8831,203 @@ testAsync('backend capture runner records fallback capture failures as partial r
+   assert.equal(result.taskId, 'capture-fallback-id')
+   assert.equal(result.status, 'partial')
+   assert.match(result.pages[0].summary, /Chrome failed; fallback: fetch failed/)
+   assert.equal(result.raw.authMode, 'cookie')
+   assert.equal(result.raw.fetched, false)
+   assert.equal(result.raw.fetchError, 'Chrome failed; fallback: fetch failed')
+   assert.equal(result.raw.singleFileCaptured, false)
+   assert.equal(result.raw.domSnapshotCaptured, false)
+ })
+ 
++test('analyzes capture URLs and matches phase-one relay templates', async () => {
++  const { analyzeCaptureUrl } = await import('../backend/services/capture-url-analyzer.js')
++  const { matchCaptureTemplate } = await import('../backend/services/capture-template-matcher.js')
++
++  const dashboard = analyzeCaptureUrl({
++    url: 'https://example.com/dashboard/home',
++    authMode: 'public'
++  })
++  assert.equal(dashboard.normalizedUrl, 'https://example.com/dashboard/home')
++  assert.equal(dashboard.hostname, 'example.com')
++  assert.equal(dashboard.traits.pageClass, 'saas-dashboard')
++  assert.equal(dashboard.authHints.requiresAuth, true)
++  assert.equal(dashboard.authHints.preferredAuthMode, 'browser')
++
++  const login = analyzeCaptureUrl({
++    url: 'https://example.com/login?next=%2Fapp',
++    authMode: 'public'
++  })
++  assert.equal(login.traits.pageClass, 'login-page')
++
++  const matched = matchCaptureTemplate({
++    analysis: dashboard,
++    authMode: 'browser'
++  })
++  assert.equal(matched.templateId, 'generic-saas-dashboard')
++  assert.equal(matched.template.navigation.waitUntil, 'networkidle')
++  assert.match(matched.matchReason, /saas-dashboard/)
++})
++
++test('compiles relay capture tasks and classifies capture diagnostics', async () => {
++  const { analyzeCaptureUrl } = await import('../backend/services/capture-url-analyzer.js')
++  const { matchCaptureTemplate } = await import('../backend/services/capture-template-matcher.js')
++  const { compileCaptureTask } = await import('../backend/services/capture-compiler.js')
++  const { classifyCaptureDiagnostics } = await import('../backend/services/capture-diagnostics.js')
++
++  const analysis = analyzeCaptureUrl({
++    url: 'https://example.com/app/home',
++    authMode: 'browser'
++  })
++  const templateMatch = matchCaptureTemplate({ analysis, authMode: 'browser' })
++  const compiled = compileCaptureTask({
++    payload: {
++      projectId: 'project-flow',
++      url: 'https://example.com/app/home',
++      authMode: 'browser',
++      sessionId: 'session-1'
++    },
++    analysis,
++    templateMatch
++  })
++
++  assert.equal(compiled.taskType, 'web-capture')
++  assert.equal(compiled.templateId, 'generic-saas-dashboard')
++  assert.equal(compiled.auth.mode, 'browser')
++  assert.equal(compiled.execution.waitUntil, 'networkidle')
++  assert.equal(compiled.artifacts.domSnapshot, true)
++
++  const blocked = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html><body><h1>405 异常访问</h1></body></html>',
++      staticHtml: '',
++      layoutNodes: [],
++      raw: {
++        fetchError: '目标网页未能完整抓取',
++        screenshotCaptured: true,
++        singleFileCaptured: true,
++        layoutNodeCount: 0
++      }
++    }
++  })
++
++  assert.equal(blocked.status, 'blocked')
++  assert.equal(blocked.diagnostics[0].code, 'ANTI_BOT_SUSPECTED')
++  assert.ok(blocked.recoveryActions.includes('打开授权浏览器'))
++
++  const loginRequired = classifyCaptureDiagnostics({
++    compiledTask: {
++      ...compiled,
++      auth: { ...compiled.auth, mode: 'public' }
++    },
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html><body><div>login required</div></body></html>',
++      staticHtml: '',
++      layoutNodes: [{ id: 'n1' }],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 1
++      }
++    }
++  })
++  assert.equal(loginRequired.status, 'blocked')
++  assert.deepEqual(loginRequired.diagnostics.map((item) => item.code), ['LOGIN_REQUIRED'])
++
++  const cookieExpired = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '<html></html>',
++      staticHtml: '',
++      layoutNodes: [{ id: 'n2' }],
++      raw: {
++        fetchError: '',
++        fetchStatus: 403,
++        layoutNodeCount: 1
++      }
++    }
++  })
++  assert.equal(cookieExpired.status, 'blocked')
++  assert.deepEqual(cookieExpired.diagnostics.map((item) => item.code), ['COOKIE_EXPIRED'])
++
++  const domNotRestorable = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '',
++      staticHtml: '',
++      layoutNodes: [],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 0
++      }
++    }
++  })
++  assert.equal(domNotRestorable.status, 'blocked')
++  assert.deepEqual(domNotRestorable.diagnostics.map((item) => item.code), ['DOM_NOT_RESTORABLE'])
++
++  const hasTopLevelLayoutNodes = classifyCaptureDiagnostics({
++    compiledTask: compiled,
++    captureResult: {
++      url: compiled.source.url,
++      singleFileHtml: '',
++      staticHtml: '',
++      layoutNodes: [{ id: 'top-level-only' }],
++      raw: {
++        fetchError: '',
++        layoutNodeCount: 0
++      }
++    }
++  })
++  assert.equal(hasTopLevelLayoutNodes.status, 'completed')
++  assert.deepEqual(hasTopLevelLayoutNodes.diagnostics.map((item) => item.code), [])
++})
++
+ testAsync('mock api delegates capture generation to backend capture service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /import \{ generatePageFromCapturePayload \} from '\.\.\/services\/capture-service\.js'/)
+   assert.doesNotMatch(source, /async function generatePageFromCapturePayload/)
+   assert.match(source, /generatePageFromCapturePayload\(payload,\s*\{[\s\S]*generatedPageHtml[\s\S]*verifyGeneratedPage[\s\S]*\}\)/)
+ })
+ 
+ testAsync('mock api injects restored page persistence into capture generation service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /persistRestoredPage:\s*async\s*\(asset\)\s*=>\s*addRestoredPage\(workspaceStore,\s*asset\)/)
+ })
+ 
+-testAsync('mock api delegates capture start to backend capture runner', async () => {
++testAsync('mock api wires capture start through the relay dispatcher and returns relay metadata', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
++  const result = await routes['POST /api/capture/start']({
++    url: 'https://example.com',
++    authMode: 'public'
++  })
+ 
+   assert.match(source, /import \{ createCaptureRunner \} from '\.\.\/services\/capture-runner\.js'/)
+   assert.match(source, /import \{ createCaptureTaskStore \} from '\.\.\/services\/capture-task-store\.js'/)
++  assert.match(source, /import \{ createCaptureDispatcher \} from '\.\.\/services\/capture-dispatcher\.js'/)
++  assert.match(source, /import \{ analyzeCaptureUrl \} from '\.\.\/services\/capture-url-analyzer\.js'/)
++  assert.match(source, /import \{ matchCaptureTemplate \} from '\.\.\/services\/capture-template-matcher\.js'/)
++  assert.match(source, /import \{ compileCaptureTask \} from '\.\.\/services\/capture-compiler\.js'/)
++  assert.match(source, /import \{ classifyCaptureDiagnostics \} from '\.\.\/services\/capture-diagnostics\.js'/)
+   assert.match(source, /const captureRunner = createCaptureRunner\(/)
++  assert.match(source, /const captureDispatcher = createCaptureDispatcher\(/)
+   assert.match(source, /const captureTaskStore = createCaptureTaskStore\(/)
+-  assert.match(source, /captureStart: async \(payload\) => captureTaskStore\.runTask\(payload,\s*captureRunner\)/)
++  assert.match(source, /captureStart: async \(payload\) => captureTaskStore\.runTask\(payload,\s*captureDispatcher\)/)
+   assert.match(source, /captureResult: async \(payload\) => captureTaskStore\.result\(payload\.taskId\)/)
+   assert.match(source, /latestResult: async \(\) => captureTaskStore\.latestResult\(\)/)
++  assert.equal(typeof result.templateId, 'string')
++  assert.ok(Array.isArray(result.diagnostics))
++  assert.ok(Array.isArray(result.recoveryActions))
+   assert.doesNotMatch(source, /export async function makeCaptureResult/)
+ })
+ 
+ testAsync('browser session routes create reusable project scoped login sessions', async () => {
+   const created = await routes['POST /api/browser-sessions/create']({
+     projectId: 'project-flow',
+     url: 'https://example.com/login'
+   })
+ 
+   assert.equal(created.status, 'active')
+@@ -9721,20 +10011,35 @@ testAsync('web factory capture detail exposes recovery actions when html generat
+ 
+   assert.match(captureDetailSource, /pageGenerationStatus\.status === 'failed'/)
+   assert.match(captureDetailSource, /restore-generation-recovery/)
+   assert.match(captureDetailSource, /captureRecoveryFlows/)
+   assert.match(captureDetailSource, /goRecoveryFlow\(flow\.id\)/)
+   assert.match(captureDetailSource, /没有生成正式 HTML/)
+   assert.match(styles, /\.restore-generation-recovery\s*\{/)
+   assert.match(styles, /\.restore-generation-recovery-actions\s*\{/)
+ })
+ 
++testAsync('web factory capture detail renders backend relay diagnostics and recovery actions', async () => {
++  const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
++  const cssSource = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
++
++  assert.match(appSource, /const captureRelayDiagnostics = computed/)
++  assert.match(appSource, /const captureRelayActions = computed/)
++  assert.match(appSource, /const captureRelayTemplateId = computed/)
++  assert.match(appSource, /capture-relay-diagnostics/)
++  assert.match(appSource, /captureRelayTemplateId \|\| '未命中模板'/)
++  assert.match(appSource, /v-for="diagnostic in captureRelayDiagnostics"/)
++  assert.match(appSource, /v-for="action in captureRelayActions"/)
++  assert.match(cssSource, /\.capture-relay-diagnostics/)
++  assert.match(cssSource, /\.capture-relay-action-list/)
++})
++
+ testAsync('web factory capture result status is not overwritten by html generation failures', async () => {
+   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
+   const captureDetailStart = appSource.indexOf("state.currentFactoryRoute === 'capture-detail'")
+   const captureDetailEnd = appSource.indexOf("state.currentFactoryRoute === 'restored-detail'")
+   const captureDetailSource = appSource.slice(captureDetailStart, captureDetailEnd)
+   const panelHeadStart = captureDetailSource.indexOf('<div class="panel-head">')
+   const panelHeadEnd = captureDetailSource.indexOf('<div class="metric-grid">', panelHeadStart)
+   const panelHeadSource = captureDetailSource.slice(panelHeadStart, panelHeadEnd)
+ 
+   assert.match(appSource, /const captureResultPanelStatus = computed/)

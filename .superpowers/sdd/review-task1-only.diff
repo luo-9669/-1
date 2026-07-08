@@ -1,0 +1,363 @@
+# Review package: 5a4024d..4a1c0a9
+
+## Commits
+4a1c0a9 feat: add capture URL analyzer and template matcher
+
+## Files changed
+ .superpowers/sdd/task-1-report.md            | 160 +++++++++++++++++++++++++++
+ backend/services/capture-template-matcher.js |  17 +++
+ backend/services/capture-templates.js        |  62 +++++++++++
+ backend/services/capture-url-analyzer.js     |  32 ++++++
+ tests/workflows.test.mjs                     |  29 +++++
+ 5 files changed, 300 insertions(+)
+
+## Diff
+diff --git a/.superpowers/sdd/task-1-report.md b/.superpowers/sdd/task-1-report.md
+new file mode 100644
+index 0000000..ee269d4
+--- /dev/null
++++ b/.superpowers/sdd/task-1-report.md
+@@ -0,0 +1,160 @@
++# Task 1 Report: Declarative Template Library, URL Analyzer, And Template Matcher
++
++## Scope
++
++Implemented Task 1 for the URL relay plan inside the allowed backend/template analysis surface only:
++
++- `tests/workflows.test.mjs`
++- `backend/services/capture-templates.js`
++- `backend/services/capture-url-analyzer.js`
++- `backend/services/capture-template-matcher.js`
++
++Also wrote this report file after explicit authorization.
++
++No changes were made to capture runner, capture task store, or capture routes.
++
++## Requirements Checklist
++
++- Phase-one web URL capture only: satisfied
++- Auth mode limited to `public|browser|cookie`: satisfied
++- Templates are declarative: satisfied
++- Templates limited to `generic-public-page`, `generic-login-page`, `generic-saas-dashboard`: satisfied
++- Backend owns URL analysis, template matching, parameter completion surface: satisfied for Task 1 scope
++- No free-form Playwright script generation or persistence: satisfied
++- Frontend kept unchanged: satisfied
++
++## TDD Record
++
++### RED
++
++First, added the required test block to `tests/workflows.test.mjs`:
++
++- `analyzes capture URLs and matches phase-one relay templates`
++
++Then ran the focused verification command:
++
++```bash
++npm test -- --test-name-pattern "analyzes capture URLs and matches phase-one relay templates"
++```
++
++Observed expected failure:
++
++- Exit code: `1`
++- Failure type: `ERR_MODULE_NOT_FOUND`
++- Missing module: `../backend/services/capture-url-analyzer.js`
++
++This confirmed the test was genuinely exercising missing Task 1 functionality before implementation.
++
++### GREEN
++
++Implemented the minimum production code required to satisfy the failing test:
++
++1. `backend/services/capture-templates.js`
++   - Added declarative `CAPTURE_TEMPLATES` registry
++   - Included only:
++     - `generic-public-page`
++     - `generic-login-page`
++     - `generic-saas-dashboard`
++
++2. `backend/services/capture-url-analyzer.js`
++   - Added `analyzeCaptureUrl(input)`
++   - Normalizes auth mode to the allowed set
++   - Infers page class from URL path/query
++   - Returns analysis with `traits` and `authHints`
++
++3. `backend/services/capture-template-matcher.js`
++   - Added `matchCaptureTemplate(input)`
++   - Matches declarative template by `pageClass` and `authMode`
++   - Returns `templateId`, `template`, and `matchReason`
++
++Re-ran the focused verification command:
++
++```bash
++npm test -- --test-name-pattern "analyzes capture URLs and matches phase-one relay templates"
++```
++
++Observed passing result:
++
++- Exit code: `0`
++- Target test: `PASS analyzes capture URLs and matches phase-one relay templates`
++
++## Full Verification
++
++After the focused test passed, ran the full suite:
++
++```bash
++npm test
++```
++
++Observed passing result:
++
++- Exit code: `0`
++- Full suite completed with the new Task 1 test included
++- No failing tests remained
++
++## Behavior Implemented
++
++### URL Analyzer
++
++`analyzeCaptureUrl(input)` now produces:
++
++- `normalizedUrl`
++- `hostname`
++- `pathname`
++- `query`
++- normalized `authMode`
++- `traits.pageClass`
++- `traits.loginSignals`
++- `traits.dynamicSignals`
++- `authHints.requiresAuth`
++- `authHints.preferredAuthMode`
++
++Current inference rules:
++
++- Login-like paths/query -> `login-page`
++- Dashboard/app/admin/workspace/console paths -> `saas-dashboard`
++- Everything else -> `public-page`
++
++### Template Registry
++
++Each template is declarative and contains:
++
++- `id`
++- `name`
++- `pageClasses`
++- `match.authModes`
++- `preconditions`
++- `navigation`
++- `pageStrategy`
++- `artifacts`
++- `fallbacks`
++
++### Template Matcher
++
++`matchCaptureTemplate(input)` now:
++
++- Uses analysis traits to choose the correct template
++- Honors the allowed auth modes
++- Falls back to the first declarative template when no exact match exists
++- Emits a readable `matchReason`
++
++## Files Changed
++
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/tests/workflows.test.mjs`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-templates.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-url-analyzer.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/backend/services/capture-template-matcher.js`
++- `/Users/cds-dn-868/Desktop/流程通区分前后端/.worktrees/codex-url-rule-template-relay/.superpowers/sdd/task-1-report.md`
++
++## Commit
++
++Committed with the required message:
++
++```text
++feat: add capture URL analyzer and template matcher
++```
++
++## Notes / Concerns
++
++- The focused test command still executes the single test runner file and reports many passing tests because this repository’s test harness filters inside one large script rather than spawning an isolated test file.
++- `capture-url-analyzer.js` currently relies on the built-in `URL` constructor and will throw on invalid or empty URLs. This is acceptable for Task 1 because the brief only required the specified interface and exact test behavior; broader validation can be added by later tasks if needed.
+diff --git a/backend/services/capture-template-matcher.js b/backend/services/capture-template-matcher.js
+new file mode 100644
+index 0000000..d6d1f64
+--- /dev/null
++++ b/backend/services/capture-template-matcher.js
+@@ -0,0 +1,17 @@
++import { CAPTURE_TEMPLATES } from './capture-templates.js'
++
++export function matchCaptureTemplate(input = {}) {
++  const analysis = input.analysis || {}
++  const pageClass = analysis.traits?.pageClass || 'public-page'
++  const authMode = input.authMode || analysis.authMode || 'public'
++  const template = CAPTURE_TEMPLATES.find((candidate) =>
++    candidate.pageClasses.includes(pageClass)
++      && candidate.match.authModes.includes(authMode)
++  ) || CAPTURE_TEMPLATES[0]
++
++  return {
++    templateId: template.id,
++    template,
++    matchReason: `matched ${template.id} from ${pageClass} using ${authMode}`
++  }
++}
+diff --git a/backend/services/capture-templates.js b/backend/services/capture-templates.js
+new file mode 100644
+index 0000000..60a8114
+--- /dev/null
++++ b/backend/services/capture-templates.js
+@@ -0,0 +1,62 @@
++export const CAPTURE_TEMPLATES = [
++  {
++    id: 'generic-public-page',
++    name: 'Generic Public Page',
++    pageClasses: ['public-page'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: false, preferAuthMode: 'public' },
++    navigation: { waitUntil: 'networkidle', timeoutMs: 15000, extraWaitMs: 1200 },
++    pageStrategy: {
++      scrollMode: 'full-page',
++      maxScrollSteps: 4,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: false },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'retry-with-scroll',
++      onBotDetected: 'manual-review'
++    }
++  },
++  {
++    id: 'generic-login-page',
++    name: 'Generic Login Page',
++    pageClasses: ['login-page'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: true, preferAuthMode: 'browser' },
++    navigation: { waitUntil: 'domcontentloaded', timeoutMs: 15000, extraWaitMs: 800 },
++    pageStrategy: {
++      scrollMode: 'viewport-only',
++      maxScrollSteps: 1,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: false },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'switch-to-browser-auth',
++      onBotDetected: 'manual-review'
++    }
++  },
++  {
++    id: 'generic-saas-dashboard',
++    name: 'Generic SaaS Dashboard',
++    pageClasses: ['saas-dashboard'],
++    match: { authModes: ['public', 'browser', 'cookie'] },
++    preconditions: { loginRequired: true, preferAuthMode: 'browser' },
++    navigation: { waitUntil: 'networkidle', timeoutMs: 20000, extraWaitMs: 3000 },
++    pageStrategy: {
++      scrollMode: 'full-page',
++      maxScrollSteps: 8,
++      includeIframes: false,
++      captureAboveTheFoldFirst: true
++    },
++    artifacts: { screenshot: true, singleFile: true, domSnapshot: true, networkLogs: true },
++    fallbacks: {
++      onLoginDetected: 'switch-to-browser-auth',
++      onDomEmpty: 'retry-with-scroll',
++      onBotDetected: 'manual-review'
++    }
++  }
++]
+diff --git a/backend/services/capture-url-analyzer.js b/backend/services/capture-url-analyzer.js
+new file mode 100644
+index 0000000..3e5deb6
+--- /dev/null
++++ b/backend/services/capture-url-analyzer.js
+@@ -0,0 +1,32 @@
++function normalizeAuthMode(authMode = 'public') {
++  return ['public', 'browser', 'cookie'].includes(authMode) ? authMode : 'public'
++}
++
++function inferPageClass(pathname = '', search = '') {
++  const value = `${pathname}${search}`.toLowerCase()
++  if (/(login|signin|signup|auth|oauth|passport)/.test(value)) return 'login-page'
++  if (/\/(app|dashboard|admin|workspace|console)(\/|$)/.test(value)) return 'saas-dashboard'
++  return 'public-page'
++}
++
++export function analyzeCaptureUrl(input = {}) {
++  const parsed = new URL(String(input.url || '').trim())
++  const pageClass = inferPageClass(parsed.pathname, parsed.search)
++  const requiresAuth = pageClass !== 'public-page'
++  return {
++    normalizedUrl: parsed.href,
++    hostname: parsed.hostname,
++    pathname: parsed.pathname,
++    query: parsed.search,
++    authMode: normalizeAuthMode(input.authMode),
++    traits: {
++      pageClass,
++      loginSignals: pageClass === 'login-page' ? ['auth-path'] : [],
++      dynamicSignals: pageClass === 'saas-dashboard' ? ['app-shell-route'] : []
++    },
++    authHints: {
++      requiresAuth,
++      preferredAuthMode: requiresAuth ? 'browser' : 'public'
++    }
++  }
++}
+diff --git a/tests/workflows.test.mjs b/tests/workflows.test.mjs
+index f151284..806db6c 100644
+--- a/tests/workflows.test.mjs
++++ b/tests/workflows.test.mjs
+@@ -8701,20 +8701,49 @@ testAsync('backend capture runner records fallback capture failures as partial r
+   assert.equal(result.taskId, 'capture-fallback-id')
+   assert.equal(result.status, 'partial')
+   assert.match(result.pages[0].summary, /Chrome failed; fallback: fetch failed/)
+   assert.equal(result.raw.authMode, 'cookie')
+   assert.equal(result.raw.fetched, false)
+   assert.equal(result.raw.fetchError, 'Chrome failed; fallback: fetch failed')
+   assert.equal(result.raw.singleFileCaptured, false)
+   assert.equal(result.raw.domSnapshotCaptured, false)
+ })
+ 
++test('analyzes capture URLs and matches phase-one relay templates', async () => {
++  const { analyzeCaptureUrl } = await import('../backend/services/capture-url-analyzer.js')
++  const { matchCaptureTemplate } = await import('../backend/services/capture-template-matcher.js')
++
++  const dashboard = analyzeCaptureUrl({
++    url: 'https://example.com/dashboard/home',
++    authMode: 'public'
++  })
++  assert.equal(dashboard.normalizedUrl, 'https://example.com/dashboard/home')
++  assert.equal(dashboard.hostname, 'example.com')
++  assert.equal(dashboard.traits.pageClass, 'saas-dashboard')
++  assert.equal(dashboard.authHints.requiresAuth, true)
++  assert.equal(dashboard.authHints.preferredAuthMode, 'browser')
++
++  const login = analyzeCaptureUrl({
++    url: 'https://example.com/login?next=%2Fapp',
++    authMode: 'public'
++  })
++  assert.equal(login.traits.pageClass, 'login-page')
++
++  const matched = matchCaptureTemplate({
++    analysis: dashboard,
++    authMode: 'browser'
++  })
++  assert.equal(matched.templateId, 'generic-saas-dashboard')
++  assert.equal(matched.template.navigation.waitUntil, 'networkidle')
++  assert.match(matched.matchReason, /saas-dashboard/)
++})
++
+ testAsync('mock api delegates capture generation to backend capture service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
+ 
+   assert.match(source, /import \{ generatePageFromCapturePayload \} from '\.\.\/services\/capture-service\.js'/)
+   assert.doesNotMatch(source, /async function generatePageFromCapturePayload/)
+   assert.match(source, /generatePageFromCapturePayload\(payload,\s*\{[\s\S]*generatedPageHtml[\s\S]*verifyGeneratedPage[\s\S]*\}\)/)
+ })
+ 
+ testAsync('mock api injects restored page persistence into capture generation service', async () => {
+   const source = await readFile(new URL('../backend/server/mock-api.mjs', import.meta.url), 'utf8')
