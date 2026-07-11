@@ -1,0 +1,52 @@
+<template>
+  <div class="ui-secondary-tabs" role="tablist" :aria-label="label">
+    <button
+      v-for="item in items"
+      :key="item.value"
+      class="ui-secondary-tab"
+      :class="{ 'is-active': item.value === modelValue }"
+      type="button"
+      role="tab"
+      :aria-selected="item.value === modelValue"
+      :disabled="item.disabled"
+      @click="selectItem(item)"
+      @keydown.left.prevent="focusSibling(item.value, -1)"
+      @keydown.right.prevent="focusSibling(item.value, 1)"
+    >
+      {{ item.label }}
+    </button>
+  </div>
+</template>
+
+<script setup>
+const emit = defineEmits(['update:modelValue', 'change'])
+
+const props = defineProps({
+  modelValue: {
+    type: [String, Number],
+    default: ''
+  },
+  items: {
+    type: Array,
+    default: () => []
+  },
+  label: {
+    type: String,
+    default: '二级标签'
+  }
+})
+
+function selectItem(item) {
+  if (item.disabled) return
+  emit('update:modelValue', item.value)
+  emit('change', item.value)
+}
+
+function focusSibling(value, direction) {
+  const enabledItems = props.items.filter((item) => !item.disabled)
+  const currentIndex = enabledItems.findIndex((item) => item.value === value)
+  if (currentIndex < 0) return
+  const nextIndex = (currentIndex + direction + enabledItems.length) % enabledItems.length
+  selectItem(enabledItems[nextIndex])
+}
+</script>

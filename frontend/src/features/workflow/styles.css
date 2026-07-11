@@ -1,0 +1,140 @@
+/* Workflow canvas and agent styles belong here as styles are migrated from the legacy bundle. */
+
+.agent-drawer {
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+}
+
+.agent-message-body {
+  min-width: 0;
+}
+
+.agent-message-action-line {
+  position: relative;
+}
+
+.agent-composer-box {
+  min-height: 214px;
+  border: 1px solid #dfe3e8;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 16px 44px rgba(34, 37, 41, 0.08);
+  padding: 22px 18px 14px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.agent-composer-box textarea,
+.agent-composer-prompt {
+  width: 100%;
+  min-height: 118px;
+  border: 0;
+  padding: 8px 12px;
+  resize: none;
+  color: #222529;
+  line-height: 1.65;
+  font-size: 16px;
+}
+
+.agent-composer-box textarea::placeholder,
+.agent-composer-prompt::placeholder {
+  color: #b8bdc5;
+}
+
+.agent-composer-bottom-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.agent-composer-tools {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-height: 96px;
+  overflow: hidden;
+}
+
+.agent-composer-primary-actions {
+  align-self: end;
+  justify-self: end;
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.agent-upload-trigger {
+  flex: none;
+}
+
+.agent-upload-button,
+.agent-web-search-toggle,
+.agent-send-button {
+  flex: 0 0 auto;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  border-radius: 50%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.agent-upload-button {
+  background: #fff;
+  color: #222529;
+}
+
+.agent-upload-button:hover {
+  background: #f7f8fa;
+  border-color: #cfd5dd;
+}
+
+.agent-web-search-toggle {
+  background: #fff;
+  color: #8a93a1;
+  border-color: #e1e5eb;
+}
+
+.agent-web-search-toggle.is-enabled {
+  color: #155eef;
+  border-color: #c7d7fe;
+  background: #f5f8ff;
+}
+
+.agent-web-search-toggle:hover {
+  background: #f7f8fa;
+  border-color: #cfd5dd;
+}
+
+.agent-web-search-toggle.is-enabled:hover {
+  background: #edf3ff;
+  border-color: #9db7ff;
+}
+
+.agent-send-button {
+  flex: 0 0 auto;
+  color: #fff;
+  background: #101828;
+  border-color: #101828;
+}
+
+.agent-send-button:hover {
+  color: #fff;
+  background: #222529;
+  border-color: #222529;
+}
+
+.agent-stop-icon {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: currentColor;
+  display: block;
+}

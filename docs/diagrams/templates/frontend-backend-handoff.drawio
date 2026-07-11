@@ -1,0 +1,58 @@
+<mxfile host="app.diagrams.net" modified="2026-07-09T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">
+  <diagram id="frontend-backend-handoff" name="前后端交付流程">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="流程通产出交付链路" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#111827;" vertex="1" parent="1">
+          <mxGeometry x="320" y="40" width="520" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="user-input" value="用户需求 / 项目资料" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8FAFC;strokeColor=#CBD5E1;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="70" y="160" width="170" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="backend-artifact" value="后端 / 模型产物&#xa;totalDesignFlow&#xa;stageCanvases&#xa;pageLayoutArtifact" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#EFF6FF;strokeColor=#60A5FA;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="330" y="135" width="220" height="122" as="geometry" />
+        </mxCell>
+        <mxCell id="frontend-render" value="前端渲染&#xa;画布 / Agent / 全屏详情&#xa;不重写业务内容" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ECFDF5;strokeColor=#34D399;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="650" y="135" width="220" height="122" as="geometry" />
+        </mxCell>
+        <mxCell id="markdown-output" value="Markdown 产出&#xa;PRD / 合同 / 计划 / 复盘" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFF7ED;strokeColor=#FDBA74;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="330" y="360" width="220" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="drawio-source" value="Draw.io 源文件&#xa;.drawio&#xa;仅用于复杂图和交付图" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F5F3FF;strokeColor=#A78BFA;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="650" y="348" width="220" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="export-assets" value="导出资产&#xa;SVG / PNG / PDF&#xa;放入 docs/diagrams/assets" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FEF2F2;strokeColor=#F87171;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="925" y="360" width="210" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="review-delivery" value="评审 / 交付&#xa;文档引用图片&#xa;源文件可继续编辑" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#F8FAFC;strokeColor=#CBD5E1;fontColor=#0F172A;fontSize=14;spacing=12;" vertex="1" parent="1">
+          <mxGeometry x="650" y="585" width="220" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="rule-note" value="边界：Draw.io 不替换运行时画布；未落地 .drawio 文件时不得声明已生成。" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#FFFFFF;strokeColor=#D1D5DB;fontColor=#374151;fontSize=13;spacing=12;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="585" width="480" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-input-backend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;" edge="1" parent="1" source="user-input" target="backend-artifact">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-backend-frontend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;" edge="1" parent="1" source="backend-artifact" target="frontend-render">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-backend-md" value="结构化内容进入文档" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;fontSize=12;fontColor=#475569;" edge="1" parent="1" source="backend-artifact" target="markdown-output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-md-drawio" value="复杂流程再制图" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;fontSize=12;fontColor=#475569;" edge="1" parent="1" source="markdown-output" target="drawio-source">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-drawio-export" value="导出" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;fontSize=12;fontColor=#475569;" edge="1" parent="1" source="drawio-source" target="export-assets">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-export-delivery" value="Markdown 引用" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#64748B;endArrow=block;endFill=1;fontSize=12;fontColor=#475569;" edge="1" parent="1" source="export-assets" target="review-delivery">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-md-delivery" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#94A3B8;endArrow=block;endFill=1;dashed=1;" edge="1" parent="1" source="markdown-output" target="review-delivery">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

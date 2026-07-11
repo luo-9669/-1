@@ -1,0 +1,17 @@
+{
+  "name": "liuchengtong-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev --",
+    "api": "npm --prefix backend run api --",
+    "api:restart": "npm --prefix backend run api:restart --",
+    "dev:all": "node scripts/start-dev.mjs",
+    "start:all": "node scripts/start-dev.mjs",
+    "test": "node --test tests/workflow-agent-actions.test.mjs backend/routes/workspace.test.js tests/system-skills.test.mjs tests/web-evidence-search.test.mjs",
+    "build": "npm --prefix frontend run build --",
+    "preview": "npm --prefix frontend run preview --",
+    "install:all": "npm --prefix frontend install && npm --prefix backend install"
+  }
+}
