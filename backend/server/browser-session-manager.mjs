@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-export const DEFAULT_CHROME_EXECUTABLE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+export const DEFAULT_CHROME_EXECUTABLE = process.env.CHROME_EXECUTABLE ||
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 async function findFreePort() {
   return await new Promise((resolvePort, reject) => {

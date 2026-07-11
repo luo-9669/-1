@@ -1333,7 +1333,7 @@ export function modelSettingsView(store) {
   const raw = getModelSettingsRaw(store)
   const hasRealApiKey = Boolean(raw.apiKey) && !isPlaceholderApiKey(raw.apiKey)
   const provider = raw.provider || 'deterministic'
-  const usesInternalAuth = provider === 'codex-cli'
+  const usesInternalAuth = provider === 'codex-cli' || provider === 'codex-proxy'
   return {
     provider,
     baseUrl: raw.baseUrl || '',
@@ -1355,13 +1355,15 @@ export async function saveModelSettings(store, payload = {}) {
   const provider = payload.provider || current.provider || 'openai-compatible'
   const enabled = payload.enabled !== undefined
     ? Boolean(payload.enabled)
-    : (provider === 'codex-cli' ? true : (provider === 'openai-compatible' ? Boolean(apiKey || current.enabled) : Boolean(current.enabled)))
+    : (provider === 'codex-cli' || provider === 'codex-proxy' ? true : (provider === 'openai-compatible' ? Boolean(apiKey || current.enabled) : Boolean(current.enabled)))
+  const apiSurface = payload.apiSurface || current.apiSurface ||
+    (provider === 'codex-cli' ? 'codex.exec' : 'responses')
   const value = {
     provider,
     apiKey,
     baseUrl: payload.baseUrl || current.baseUrl || '',
     defaultModel: payload.defaultModel || current.defaultModel || 'gpt-5.5',
-    apiSurface: payload.apiSurface || current.apiSurface || 'chat.completions',
+    apiSurface,
     timeoutMs: payload.timeoutMs === 0 ? 0 : Number(payload.timeoutMs || current.timeoutMs || 20000),
     fallback: payload.fallback || current.fallback || 'deterministic',
     allowInsecureTLS: Boolean(payload.allowInsecureTLS ?? current.allowInsecureTLS),

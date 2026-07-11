@@ -10,6 +10,15 @@ npm run dev:all
 - 前台产品工作台：http://localhost:5588
 - 后端 API / 后台管理台：http://localhost:5599
 
+## 完整部署
+
+完整部署不是纯前端静态部署，需要同时部署前端、后端 Node 服务、模型通道和 Chrome/Chromium。
+
+- 环境变量模板：[.env.production.example](.env.production.example)
+- 完整部署说明：[docs/deployment/full-deploy.md](docs/deployment/full-deploy.md)
+
+本地 Mac 已跑通时可以继续使用当前 Codex / CC Switch / `codex-cli` 通道；服务器部署时推荐用部署平台 Secret 配置 `WORKFLOW_AGENT_PROVIDER=openai-compatible`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 和模型名。真实 key 不要提交到 GitHub。
+
 ## 当前发布门禁
 
 默认测试命令只覆盖当前有效产品方向，重点保护高级 UX Markdown-first 流程、统一 Agent、画布导入、workspace hydration、系统 Skill 和联网 Evidence Pack。

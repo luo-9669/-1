@@ -892,7 +892,7 @@ function parseTomlScalar(value = '') {
 }
 
 function parseCodexConfigToml(text = '') {
-  const result = { modelProvider: '', providers: {} }
+  const result = { model: '', modelProvider: '', providers: {} }
   let activeTable = ''
   for (const sourceLine of String(text || '').split(/\r?\n/)) {
     const line = sourceLine.trim()
@@ -911,12 +911,20 @@ function parseCodexConfigToml(text = '') {
       result.providers[activeTable][key] = value
     } else if (key === 'model_provider') {
       result.modelProvider = String(value || '')
+    } else if (key === 'model') {
+      result.model = String(value || '')
     }
   }
   return result
 }
 
-function readCodexAuthApiKey(authPath = '') {
+function readCodexAuthApiKey(authPath = '', authJson = '') {
+  if (authJson) {
+    try {
+      const raw = JSON.parse(authJson)
+      return String(raw.OPENAI_API_KEY || raw.openaiApiKey || '').trim()
+    } catch {}
+  }
   try {
     const raw = JSON.parse(readFileSync(authPath, 'utf8'))
     return String(raw.OPENAI_API_KEY || raw.openaiApiKey || '').trim()
@@ -946,49 +954,65 @@ function readCcSwitchCurrentCodexSettings(dbPath = '') {
   }
 }
 
-function resolveCcSwitchCodexImageSettings(settings = {}) {
-  const ccSwitchSettings = settings.ccSwitchCodexSettings || readCcSwitchCurrentCodexSettings(settings.ccSwitchDbPath)
-  const codexConfig = parseCodexConfigToml(String(ccSwitchSettings?.config || ''))
-  const activeProvider = codexConfig.modelProvider
-  const providerConfig = codexConfig.providers?.[activeProvider] || {}
+function normalizeCodexWireApi(value = '') {
+  const api = String(value || '').trim()
+  if (!api) return ''
+  if (/^chat(?:\.completions)?$/i.test(api)) return 'chat.completions'
+  if (/^responses$/i.test(api)) return 'responses'
+  return api
+}
+
+function codexProviderOptionsFromSettings({ settings = {}, codexConfig = {}, providerConfig = {}, apiKey = '' } = {}) {
   const baseUrl = String(providerConfig.base_url || providerConfig.baseUrl || '').trim()
-  const apiKey = String(settings.imageApiKey || ccSwitchSettings?.auth?.OPENAI_API_KEY || settings.apiKey || '').trim()
   const requiresAuth = providerConfig.requires_openai_auth !== false
   if (!baseUrl || (requiresAuth && !apiKey)) return null
   return {
     apiKey,
     baseUrl,
-    defaultModel: normalizeImageModel(settings, 'gpt-image-2'),
-    timeoutMs: settings.imageTimeoutMs || settings.timeoutMs,
+    defaultModel: settings.defaultModel || codexConfig.model || 'gpt-5.5',
+    apiSurface: settings.apiSurface || normalizeCodexWireApi(providerConfig.wire_api || providerConfig.apiSurface) || 'responses',
+    timeoutMs: settings.timeoutMs,
     allowInsecureTLS: settings.allowInsecureTLS
   }
 }
 
-function resolveCodexImageProxySettings(settings = {}) {
+function resolveCcSwitchCodexProxySettings(settings = {}) {
+  const ccSwitchSettings = settings.ccSwitchCodexSettings || readCcSwitchCurrentCodexSettings(settings.ccSwitchDbPath)
+  const codexConfig = parseCodexConfigToml(String(ccSwitchSettings?.config || ''))
+  const activeProvider = codexConfig.modelProvider
+  const providerConfig = codexConfig.providers?.[activeProvider] || {}
+  const apiKey = String(settings.imageApiKey || ccSwitchSettings?.auth?.OPENAI_API_KEY || settings.apiKey || '').trim()
+  return codexProviderOptionsFromSettings({ settings, codexConfig, providerConfig, apiKey })
+}
+
+function resolveCodexProxySettings(settings = {}) {
   const configPath = settings.codexConfigPath || process.env.CODEX_CONFIG_PATH || join(homedir(), '.codex', 'config.toml')
   const authPath = settings.codexAuthPath || process.env.CODEX_AUTH_PATH || join(homedir(), '.codex', 'auth.json')
   try {
-    const codexConfig = parseCodexConfigToml(readFileSync(configPath, 'utf8'))
+    const configText = settings.codexConfigText || process.env.CODEX_CONFIG_TEXT || readFileSync(configPath, 'utf8')
+    const codexConfig = parseCodexConfigToml(configText)
     const activeProvider = codexConfig.modelProvider
     const providerConfig = codexConfig.providers?.[activeProvider] || {}
     const baseUrl = String(providerConfig.base_url || providerConfig.baseUrl || '').trim()
     if (!baseUrl) return null
     if (isLocalProxyBaseUrl(baseUrl)) {
-      const ccSwitchOptions = resolveCcSwitchCodexImageSettings(settings)
+      const ccSwitchOptions = resolveCcSwitchCodexProxySettings(settings)
       if (ccSwitchOptions) return ccSwitchOptions
     }
-    const apiKey = String(settings.imageApiKey || readCodexAuthApiKey(authPath) || settings.apiKey || '').trim()
-    const requiresAuth = providerConfig.requires_openai_auth !== false
-    if (requiresAuth && !apiKey) return null
-    return {
-      apiKey,
-      baseUrl,
-      defaultModel: normalizeImageModel(settings, 'gpt-image-2'),
-      timeoutMs: settings.imageTimeoutMs || settings.timeoutMs,
-      allowInsecureTLS: settings.allowInsecureTLS
-    }
+    const apiKey = String(settings.imageApiKey || readCodexAuthApiKey(authPath, settings.codexAuthJson || process.env.CODEX_AUTH_JSON) || settings.apiKey || '').trim()
+    return codexProviderOptionsFromSettings({ settings, codexConfig, providerConfig, apiKey })
   } catch {
     return null
+  }
+}
+
+function resolveCodexImageProxySettings(settings = {}) {
+  const options = resolveCodexProxySettings(settings)
+  if (!options) return null
+  return {
+    ...options,
+    defaultModel: normalizeImageModel(settings, 'gpt-image-2'),
+    timeoutMs: settings.imageTimeoutMs || settings.timeoutMs
   }
 }
 
@@ -1504,6 +1528,22 @@ export function createCodexCliAgentProvider(options = {}) {
 export function createAgentProviderFromEnv(env = {}, fetchImpl = globalThis.fetch) {
   const provider = env.WORKFLOW_AGENT_PROVIDER || 'auto'
   const hasOpenAIConfig = Boolean(env.OPENAI_API_KEY)
+  if (provider === 'codex-proxy') {
+    const codexOptions = resolveCodexProxySettings({
+      defaultModel: env.OPENAI_DEFAULT_MODEL || env.CODEX_DEFAULT_MODEL || 'gpt-5.5',
+      timeoutMs: env.OPENAI_TIMEOUT_MS || env.CODEX_TIMEOUT_MS,
+      apiSurface: env.OPENAI_API_SURFACE,
+      codexConfigPath: env.CODEX_CONFIG_PATH,
+      codexAuthPath: env.CODEX_AUTH_PATH,
+      codexConfigText: env.CODEX_CONFIG_TEXT,
+      codexAuthJson: env.CODEX_AUTH_JSON,
+      ccSwitchDbPath: env.CC_SWITCH_DB_PATH || env.CODEX_CC_SWITCH_DB_PATH
+    })
+    if (codexOptions) {
+      if (fetchImpl) codexOptions.fetchImpl = fetchImpl
+      return createOpenAICompatibleAgentProvider(codexOptions)
+    }
+  }
   if (provider === 'deterministic' || (provider === 'auto' && !hasOpenAIConfig)) {
     return createDeterministicAgentProvider()
   }
@@ -1528,6 +1568,12 @@ export function createAgentProviderFromEnv(env = {}, fetchImpl = globalThis.fetc
 export function createAgentProviderFromModelSettings(settings = {}, fetchImpl) {
   if (!settings.enabled || settings.provider === 'deterministic') {
     return createDeterministicAgentProvider()
+  }
+  if (settings.provider === 'codex-proxy') {
+    const codexOptions = resolveCodexProxySettings(settings)
+    if (!codexOptions) return createDeterministicAgentProvider()
+    if (fetchImpl) codexOptions.fetchImpl = fetchImpl
+    return createOpenAICompatibleAgentProvider(codexOptions)
   }
   if (settings.provider === 'codex-cli') {
     return createCodexCliAgentProvider({

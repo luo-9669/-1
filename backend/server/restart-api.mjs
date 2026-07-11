@@ -1,3 +1,4 @@
+import './env-loader.mjs'
 import { execFile } from 'node:child_process'
 import { spawn } from 'node:child_process'
 import { promisify } from 'node:util'

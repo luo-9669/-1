@@ -1,3 +1,4 @@
+import './env-loader.mjs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -7,7 +8,9 @@ export const DEFAULT_HEADERS = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
 }
 export const IMAGE_TO_HTML_MODEL_TIMEOUT_MS = 600000
-export const CHROME_EXECUTABLE = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+export const CHROME_EXECUTABLE = process.env.CHROME_EXECUTABLE ||
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 export const projectRoot = fileURLToPath(new URL('../..', import.meta.url))
 export const backendRoot = fileURLToPath(new URL('..', import.meta.url))
 export const SINGLE_FILE_BIN = resolve(backendRoot, 'node_modules/.bin/single-file')

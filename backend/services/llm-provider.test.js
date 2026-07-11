@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  createAgentProviderFromEnv,
   createAgentProviderFromModelSettings,
   createCodexCliAgentProvider,
   createImageProviderFromModelSettings,
@@ -314,6 +315,102 @@ test('model settings factory uses current CC Switch Codex upstream for image gen
   } finally {
     await rm(tempDir, { recursive: true, force: true })
   }
+})
+
+test('model settings factory uses current CC Switch Codex upstream for agent generation', async () => {
+  let capturedUrl = ''
+  let capturedAuthorization = ''
+  let capturedBody = null
+  const provider = createAgentProviderFromModelSettings({
+    enabled: true,
+    provider: 'codex-proxy',
+    defaultModel: 'gpt-5.5',
+    ccSwitchCodexSettings: {
+      auth: { OPENAI_API_KEY: 'UPSTREAM_MANAGED' },
+      config: [
+        'model = "gpt-5.5"',
+        'model_provider = "newapi"',
+        '',
+        '[model_providers.newapi]',
+        'name = "NewAPI"',
+        'base_url = "https://model-upstream.local/v1"',
+        'wire_api = "responses"',
+        'requires_openai_auth = true',
+        ''
+      ].join('\n')
+    }
+  }, async (url, init = {}) => {
+    capturedUrl = url
+    capturedAuthorization = init.headers?.Authorization || ''
+    capturedBody = JSON.parse(init.body)
+    return new Response(JSON.stringify({
+      output_text: '{"ok":true,"message":"pong"}',
+      usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  })
+
+  assert.equal(provider.name, 'openai-compatible')
+  const result = await provider.generate({
+    systemPrompt: '只输出 JSON',
+    userPrompt: 'ping'
+  })
+
+  assert.equal(capturedUrl, 'https://model-upstream.local/v1/responses')
+  assert.equal(capturedAuthorization, 'Bearer UPSTREAM_MANAGED')
+  assert.equal(capturedBody.model, 'gpt-5.5')
+  assert.equal(result.content, '{"ok":true,"message":"pong"}')
+  assert.equal(result.provider, 'openai-compatible')
+})
+
+test('env provider auto prefers explicit OpenAI-compatible key before Codex proxy', () => {
+  const provider = createAgentProviderFromEnv({
+    WORKFLOW_AGENT_PROVIDER: 'auto',
+    OPENAI_API_KEY: 'env-key',
+    OPENAI_BASE_URL: 'https://env-model.local/v1',
+    OPENAI_DEFAULT_MODEL: 'gpt-env',
+    OPENAI_API_SURFACE: 'responses'
+  }, async () => new Response('{}', { status: 200 }))
+
+  assert.equal(provider.name, 'openai-compatible')
+})
+
+test('env provider can use Codex proxy when OPENAI_API_KEY is not directly configured', async () => {
+  let capturedUrl = ''
+  let capturedAuthorization = ''
+  const provider = createAgentProviderFromEnv({
+    WORKFLOW_AGENT_PROVIDER: 'codex-proxy',
+    OPENAI_DEFAULT_MODEL: 'gpt-5.5',
+    CODEX_CONFIG_TEXT: [
+      'model_provider = "newapi"',
+      '',
+      '[model_providers.newapi]',
+      'base_url = "https://codex-linked.local/v1"',
+      'wire_api = "responses"',
+      'requires_openai_auth = true',
+      ''
+    ].join('\n'),
+    CODEX_AUTH_JSON: JSON.stringify({ OPENAI_API_KEY: 'CODEX_LINKED_KEY' })
+  }, async (url, init = {}) => {
+    capturedUrl = url
+    capturedAuthorization = init.headers?.Authorization || ''
+    return new Response(JSON.stringify({ output_text: '{"ok":true}', usage: {} }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  })
+
+  assert.equal(provider.name, 'openai-compatible')
+  const result = await provider.generate({
+    systemPrompt: '只输出 JSON',
+    userPrompt: 'ping'
+  })
+
+  assert.equal(capturedUrl, 'https://codex-linked.local/v1/responses')
+  assert.equal(capturedAuthorization, 'Bearer CODEX_LINKED_KEY')
+  assert.equal(result.content, '{"ok":true}')
 })
 
 test('model provider classifies codex-client-only model errors explicitly', () => {

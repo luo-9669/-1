@@ -36,6 +36,8 @@
             供应商
             <select v-model="modelSettingsForm.provider">
               <option value="openai-compatible">OpenAI Compatible</option>
+              <option value="codex-cli">Codex CLI（本机）</option>
+              <option value="codex-proxy">Codex / CC Switch 代理</option>
               <option value="deterministic">Deterministic</option>
             </select>
           </label>
