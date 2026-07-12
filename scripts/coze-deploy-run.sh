@@ -12,6 +12,13 @@ export PORT
 fuser -k 5000/tcp 2>/dev/null || true
 sleep 1
 
+# 创建后端所需的存储目录（部署环境中这些目录可能不存在）
+mkdir -p backend/storage/workspace
+mkdir -p backend/storage/auth-states
+mkdir -p backend/storage/competitor-analysis
+mkdir -p backend/storage/workspace/generated-images
+mkdir -p backend/storage/workspace/material-previews
+
 # 启动后端 API 服务（监听 5000 端口）
 # 后端会同时提供 API 和静态文件服务
 exec node backend/server/mock-api.mjs
