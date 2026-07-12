@@ -3,8 +3,8 @@
 ## 启动
 
 ```bash
-npm run install:all
-npm run dev:all
+pnpm run install:all
+pnpm run dev:all
 ```
 
 - 前台产品工作台：http://localhost:5588
@@ -19,19 +19,19 @@ npm run dev:all
 
 本地 Mac 已跑通时可以继续使用当前 Codex / CC Switch / `codex-cli` 通道；服务器部署时推荐用部署平台 Secret 配置 `WORKFLOW_AGENT_PROVIDER=openai-compatible`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 和模型名。真实 key 不要提交到 GitHub。
 
-部署安装依赖请使用 `npm run install:all`，不要只执行根目录 `npm install`；Linux 服务器需要 Chrome/Chromium。可执行 `npm run install:browsers` 安装 Playwright Chromium，或使用系统 Chrome/Chromium 并配置 `CHROME_EXECUTABLE`。
+部署安装依赖请使用 `pnpm run install:all`，不要只执行根目录 `pnpm install`；Linux 服务器需要 Chrome/Chromium。可执行 `pnpm run install:browsers` 安装 Playwright Chromium，或使用系统 Chrome/Chromium 并配置 `CHROME_EXECUTABLE`。
 
 ## 当前发布门禁
 
 默认测试命令只覆盖当前有效产品方向，重点保护高级 UX Markdown-first 流程、统一 Agent、画布导入、workspace hydration、系统 Skill 和联网 Evidence Pack。
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 git diff --check
 ```
 
-`npm test` 当前执行：
+`pnpm test` 当前执行：
 
 ```bash
 node --test tests/workflow-agent-actions.test.mjs backend/routes/workspace.test.js tests/system-skills.test.mjs tests/web-evidence-search.test.mjs

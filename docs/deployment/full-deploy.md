@@ -74,13 +74,13 @@ Linux 服务器需要安装 Chromium，并配置：
 方式 A：使用项目脚本安装 Playwright Chromium：
 
 ```bash
-npm run install:browsers
+pnpm run install:browsers
 ```
 
 如果服务器缺少浏览器系统依赖，可改用：
 
 ```bash
-npm run install:browsers:deps
+pnpm run install:browsers:deps
 ```
 
 安装完成后查看实际路径：
@@ -134,41 +134,41 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 ## 安装与启动
 
-不要只执行根目录 `npm install`。本项目是前后端分目录依赖，安装依赖必须使用：
+不要只执行根目录 `pnpm install`。本项目是前后端分目录依赖，安装依赖必须使用：
 
 ```bash
-npm run install:all
+pnpm run install:all
 ```
 
 安装浏览器运行时：
 
 ```bash
-npm run install:browsers
+pnpm run install:browsers
 ```
 
 构建前端：
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 启动后端：
 
 ```bash
-npm --prefix backend run api
+pnpm --prefix backend run api
 ```
 
 本地或服务器临时联调时，可同时启动前后端：
 
 ```bash
-npm run dev:all
+pnpm run dev:all
 ```
 
 生产环境建议用进程管理器守护后端，例如 `pm2`：
 
 ```bash
 npm install -g pm2
-pm2 start "npm --prefix backend run api" --name liuchengtong-api
+pm2 start "pnpm --prefix backend run api" --name liuchengtong-api
 pm2 save
 ```
 
@@ -194,8 +194,8 @@ VITE_COMPETITOR_API_BASE_URL=https://your-api.example.com
 部署前本地验证：
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 git diff --check
 ```
 
