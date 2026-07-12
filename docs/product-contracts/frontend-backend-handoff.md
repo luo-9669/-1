@@ -4,6 +4,19 @@
 
 Frontend and backend have clear ownership. Backend generates structured workflow results. Frontend renders those results faithfully without inventing business content.
 
+## Fixed Collaboration Protocol
+
+Every code change, bug fix, feature addition, deploy-prep change, clean package, or remote push must follow this collaboration protocol:
+
+1. Fetch remote first with `git fetch` and check whether local `main` diverges from remote `main`.
+2. Inspect `git status`, recent `git log`, and targeted diffs before editing or staging.
+3. Keep runtime/local artifacts out of Git: `generated-md/`, `backend/storage/`, `frontend/dist/`, generated images, PDFs, HTML files, logs, caches, `node_modules/`, local workspace JSON, auth states, and personal outputs.
+4. Before changing Advanced UX, Agent, canvas, staged workflow, image-to-HTML, deploy, storage, or model-provider behavior, read the relevant contract in `docs/product-contracts/*` and preserve the confirmed behavior unless the user explicitly approves a contract change.
+5. Verify after edits: always run `git diff --check`; run relevant `node --test` commands for backend/workflow changes; run `pnpm --filter liuchengtong-frontend run build` when frontend code changes.
+6. Stage only target files with explicit `git add <path>` commands. Do not use `git add .`.
+7. Before pushing, check remote again. If remote moved, merge or rebase, re-run verification, then push normally. Do not force push unless the user explicitly asks to replace remote history.
+8. When collaborating with Coze or another coding session, remote `main` is the shared source of truth. The first side to finish pushes; the other side must pull/merge latest `main` before continuing.
+
 ## Backend Owns
 
 - `totalDesignFlow`

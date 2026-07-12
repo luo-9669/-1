@@ -120,6 +120,19 @@
 - 本地数据不提交（workspace JSON、生成图片、auth states、日志等）
 - 新对话继续开发时先 `git pull` 最新 `main`，确认不要回退模型 curl fallback、`/api/workspace/storage-status`、高级 UX 10 节点阶段产出、图片转 HTML 临时预览等待、pnpm 构建策略。
 
+## 固定协作流程
+
+每次改代码、修 bug、新增功能、整理可提交版本或推送远程时，必须按下面流程执行：
+
+1. **先同步远程**：先执行 `git fetch`，确认本地和远程是否分叉；不能在不了解远程新提交的情况下覆盖别人提交。
+2. **先看差异**：检查 `git status`、`git log`、关键文件 diff，确认本次只改目标范围。
+3. **不提交本地产物**：永远不要提交 `generated-md/`、`backend/storage/`、`frontend/dist/`、图片/PDF/HTML 生成产物、日志、缓存、`node_modules/`、本地 workspace 数据或个人输出。
+4. **改代码前先确认合同**：涉及高级 UX、Agent、画布、阶段流、图片转 HTML、部署、存储、模型调用时，先读取对应 `docs/product-contracts/*`，不能把已确认规则改回旧流程。
+5. **改完必须验证**：至少执行 `git diff --check`；涉及后端或工作流时跑相关 `node --test`；涉及前端时跑 `pnpm --filter liuchengtong-frontend run build`。
+6. **提交只提交目标文件**：不要用 `git add .`；只 `git add` 本次相关代码、测试和文档，排除运行数据和无关脏文件。
+7. **推送前再次同步**：如果远程有新提交，先 merge 或 rebase，再重新验证，再正常 push；默认不 force push。
+8. **和 Coze/另一边协作**：双方都以远程 `main` 为准；谁先改完谁先推，另一边先拉最新 `main` 再继续，不能各自基于旧版本修改。
+
 ## 常见问题和预防
 
 - 后端启动依赖环境变量（模型 API key 等），缺失时部分功能不可用
