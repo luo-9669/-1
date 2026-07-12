@@ -1325,6 +1325,17 @@ function isPlaceholderApiKey(apiKey = '') {
   return String(apiKey || '').trim() === 'PROXY_MANAGED'
 }
 
+function normalizeModelApiSurface(provider = '', ...candidates) {
+  const normalizedProvider = String(provider || '').trim()
+  if (normalizedProvider === 'codex-cli') return 'codex.exec'
+  const validHttpSurfaces = new Set(['responses', 'chat.completions'])
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim()
+    if (validHttpSurfaces.has(value)) return value
+  }
+  return normalizedProvider === 'deterministic' ? 'chat.completions' : 'responses'
+}
+
 export function getModelSettingsRaw(store) {
   return getSettingValue(store, MODEL_SETTING_KEY)
 }
@@ -1338,7 +1349,7 @@ export function modelSettingsView(store) {
     provider,
     baseUrl: raw.baseUrl || '',
     defaultModel: raw.defaultModel || 'gpt-5.5',
-    apiSurface: raw.apiSurface || 'chat.completions',
+    apiSurface: normalizeModelApiSurface(provider, raw.apiSurface),
     timeoutMs: raw.timeoutMs === 0 ? 0 : Number(raw.timeoutMs || 20000),
     fallback: raw.fallback || 'deterministic',
     enabled: Boolean(raw.enabled),
@@ -1356,8 +1367,7 @@ export async function saveModelSettings(store, payload = {}) {
   const enabled = payload.enabled !== undefined
     ? Boolean(payload.enabled)
     : (provider === 'codex-cli' || provider === 'codex-proxy' ? true : (provider === 'openai-compatible' ? Boolean(apiKey || current.enabled) : Boolean(current.enabled)))
-  const apiSurface = payload.apiSurface || current.apiSurface ||
-    (provider === 'codex-cli' ? 'codex.exec' : 'responses')
+  const apiSurface = normalizeModelApiSurface(provider, payload.apiSurface, current.apiSurface)
   const value = {
     provider,
     apiKey,

@@ -19414,11 +19414,14 @@ async function testApiConfig() {
 
 function applyModelSettingsView(modelSettings = {}) {
   const provider = modelSettings.provider || 'codex-cli'
+  const apiSurface = ['responses', 'chat.completions'].includes(modelSettings.apiSurface)
+    ? modelSettings.apiSurface
+    : (provider === 'codex-cli' ? 'codex.exec' : 'responses')
   Object.assign(modelSettingsForm, {
     provider,
     baseUrl: modelSettings.baseUrl || '',
     defaultModel: modelSettings.defaultModel || 'gpt-5.5',
-    apiSurface: modelSettings.apiSurface || (provider === 'codex-cli' ? 'codex.exec' : 'chat.completions'),
+    apiSurface,
     apiKey: '',
     timeoutMs: modelSettings.timeoutMs === 0 ? 0 : (modelSettings.timeoutMs || (provider === 'codex-cli' ? 600000 : 20000)),
     fallback: modelSettings.fallback || 'deterministic',

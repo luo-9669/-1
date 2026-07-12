@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { createWorkspaceWorkflowRun } from '../models/workspace.js'
 import { analyzeRequirementDocuments } from '../services/document-parser.js'
 import { buildTotalDesignFlow } from '../services/total-design-flow.js'
-import { createWorkspaceStore, listMaterials, listParseJobs, upsertWorkflowRun } from '../services/workspace-store.js'
+import { createWorkspaceStore, listMaterials, listParseJobs, modelSettingsView, saveModelSettings, upsertWorkflowRun } from '../services/workspace-store.js'
 import { workspaceRoutes } from './workspace.js'
 
 test('workspace route exports markdown as a direct PDF download', async () => {
@@ -29,6 +29,30 @@ test('workspace route exports markdown as a direct PDF download', async () => {
   assert.match(result.headers['Content-Disposition'], /filename\*=UTF-8''/)
   assert.ok(Buffer.isBuffer(result.body))
   assert.match(result.body.toString('utf8'), /^%PDF/)
+})
+
+test('workspace model settings do not keep codex exec surface after switching to openai-compatible', async () => {
+  const store = createWorkspaceStore({ settings: [] })
+  await saveModelSettings(store, {
+    provider: 'codex-cli',
+    apiSurface: 'codex.exec',
+    defaultModel: 'gpt-5.5',
+    enabled: true
+  })
+
+  const view = await saveModelSettings(store, {
+    provider: 'openai-compatible',
+    apiKey: 'sk-test',
+    baseUrl: 'https://ai.example.com',
+    defaultModel: 'gpt-5.5',
+    apiSurface: '',
+    timeoutMs: 600000,
+    enabled: true
+  })
+
+  assert.equal(view.provider, 'openai-compatible')
+  assert.equal(view.apiSurface, 'responses')
+  assert.equal(modelSettingsView(store).apiSurface, 'responses')
 })
 
 test('workspace store preserves advanced UX markdown artifacts beyond the generic string limit', async () => {
