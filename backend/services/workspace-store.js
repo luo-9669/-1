@@ -612,10 +612,13 @@ async function persistStore(store) {
     try {
       const data = workspaceStorePersistPayload(store)
       await saveWorkspaceToDatabase(data)
+      console.log('[workspace-store] Saved to database')
     } catch (error) {
       console.error('[workspace-store] Failed to save to database:', error.message)
       // Fall through to file-based persistence
     }
+  } else {
+    console.log('[workspace-store] Database not available, using file storage')
   }
   
   // Also save to file if filePath is set
@@ -689,7 +692,9 @@ export function createWorkspaceStore(seed = null, options = {}) {
     },
     async load() {
       // First try to load from database if available
-      if (await isDatabaseAvailable()) {
+      const dbAvailable = await isDatabaseAvailable()
+      console.log(`[workspace-store] Database available: ${dbAvailable}`)
+      if (dbAvailable) {
         try {
           const dbState = await loadWorkspaceFromDatabase()
           if (dbState) {

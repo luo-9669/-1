@@ -776,7 +776,7 @@ test('image-to-html enhanced prompts require usable responsive web and app pages
   assert.match(ruleSource, /不要.*桌面侧边栏.*硬塞|桌面侧边栏.*不能.*硬塞|不要.*九宫格.*硬塞/)
 })
 
-test('standalone preview waits for persisted restored page html before failing', async () => {
+test('standalone temporary image-to-html preview waits without a max timeout', async () => {
   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
   const routeStart = appSource.indexOf('async function loadStandalonePreviewRoute')
   const routeEnd = appSource.indexOf('function buildRestoredPageResultShell', routeStart)
@@ -796,9 +796,12 @@ test('standalone preview waits for persisted restored page html before failing',
   assert.match(waitSource, /await openRestoredPageDetail\(pageId,\s*\{\s*syncRoute:\s*false\s*\}\)/)
   assert.match(waitSource, /restoredPageHasPreviewArtifact\(page\)/)
   assert.match(waitSource, /isTemporaryImageHtmlPreviewId\(pageId\)/)
-  assert.match(waitSource, /TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS/)
+  assert.match(waitSource, /standalonePreviewLoadToken/)
   assert.match(waitSource, /activeToken !== standalonePreviewLoadToken/)
+  assert.match(waitSource, /TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS/)
+  assert.doesNotMatch(waitSource, /Date\.now\(\)\s*-\s*startedAt/)
   assert.match(waitSource, /STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS/)
+  assert.match(waitSource, /if \(!isTemporaryPreview \|\| attempt === 0\)/)
   assert.match(waitSource, /await wait\(retryDelay\)/)
 })
 
