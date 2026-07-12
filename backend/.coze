@@ -1,0 +1,8 @@
+[project]
+sub_id = "a022e068"
+name = "liuchengtong-backend"
+requires = ["nodejs-24"]
+project_type = ""
+
+[preview]
+preview_enable = "disabled"

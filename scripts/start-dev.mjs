@@ -40,7 +40,7 @@ async function stopPort(port) {
 }
 
 function startProcess(name, args, options = {}) {
-  const child = spawn('npm', args, {
+  const child = spawn('pnpm', args, {
     stdio: 'inherit',
     shell: false,
     env: {
@@ -90,13 +90,13 @@ console.log(`Proxying frontend /api requests to ${API_PROXY_TARGET}`)
 await stopPort(BACKEND_PORT)
 await stopPort(FRONTEND_PORT)
 
-startProcess('backend', ['--prefix', 'backend', 'run', 'api', '--'], {
+startProcess('backend', ['--filter', 'liuchengtong-backend', 'run', 'api'], {
   env: {
     PORT: BACKEND_PORT
   }
 })
 
-startProcess('frontend', ['--prefix', 'frontend', 'run', 'dev', '--', '--port', FRONTEND_PORT, '--strictPort'], {
+startProcess('frontend', ['--filter', 'liuchengtong-frontend', 'run', 'dev', '--', '--port', FRONTEND_PORT, '--strictPort'], {
   env: {
     VITE_API_PROXY_TARGET: API_PROXY_TARGET
   }

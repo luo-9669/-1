@@ -1,0 +1,12 @@
+[project]
+sub_id = "7049b919"
+name = "liuchengtong-frontend"
+requires = ["nodejs-24"]
+project_type = "web"
+
+[preview]
+preview_enable = "enabled"
+
+[dev]
+build = ["bash", "../scripts/coze-preview-build.sh"]
+run = ["bash", "../scripts/coze-preview-run.sh"]

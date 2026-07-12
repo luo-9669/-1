@@ -1,3 +1,5 @@
+import { tryServeStaticFile } from './static-file-server.mjs'
+
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
@@ -43,6 +45,10 @@ export function createApiRequestHandler({ matchRoute, sseEvent }) {
     const url = new URL(req.url, `http://${req.headers.host}`)
     const handler = matchRoute(req.method, url.pathname)
     if (!handler) {
+      // 尝试提供静态文件服务
+      const served = await tryServeStaticFile(req, res, url.pathname)
+      if (served) return
+      
       sendJson(res, 404, { message: `未找到接口：${req.method} ${url.pathname}` })
       return
     }
