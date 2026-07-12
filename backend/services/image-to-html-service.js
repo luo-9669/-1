@@ -611,7 +611,9 @@ export function createImageToHtmlService(config = {}) {
       timeoutMs: options.timeoutMs === 0 ? 0 : (options.timeoutMs || timeoutMs)
     }
     let modelResult = null
-    if (typeof provider.stream === 'function') {
+    if (typeof provider.generate === 'function') {
+      modelResult = await provider.generate(context)
+    } else if (typeof provider.stream === 'function') {
       let streamedContent = ''
       let finalEvent = null
       for await (const event of provider.stream(context)) {
@@ -628,8 +630,6 @@ export function createImageToHtmlService(config = {}) {
         provider: finalEvent?.provider || provider.name || 'model',
         model: finalEvent?.model || context.model
       }
-    } else {
-      modelResult = await provider.generate(context)
     }
     const parsed = safeParseJsonObject(modelResult.content)
     if (!parsed?.html || typeof parsed.html !== 'string') {

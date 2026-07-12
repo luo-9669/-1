@@ -376,6 +376,11 @@ function assignProviderError(target, fields = {}) {
   return target
 }
 
+function isTimeoutLikeProviderError(error = {}) {
+  const message = providerErrorMessage(error)
+  return /AbortError|aborted|timeout|timed?\s*out|超时|取消/i.test(`${error?.name || ''} ${message}`)
+}
+
 export function normalizeModelProviderError(error = {}, context = {}) {
   const sourceMessage = providerErrorMessage(error)
   const status = error?.status || error?.response?.status || context.status
@@ -401,7 +406,7 @@ export function normalizeModelProviderError(error = {}, context = {}) {
     })
   }
 
-  if (/AbortError|aborted|timeout|timed?\s*out|超时|取消/i.test(`${error?.name || ''} ${sourceMessage}`)) {
+  if (isTimeoutLikeProviderError(error)) {
     return assignProviderError(new Error('模型请求超时，请调大 timeout 或重试'), {
       code: 'LLM_PROVIDER_TIMEOUT',
       message: '模型请求超时，请调大 timeout 或重试',
@@ -482,7 +487,93 @@ export function normalizeModelProviderError(error = {}, context = {}) {
   })
 }
 
-async function postJson({ fetchImpl, url, apiKey, timeoutMs, body, provider, model, apiSurface }) {
+function curlConfigValue(value = '') {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+async function postJsonWithCurl({ url, apiKey, timeoutMs, body, provider, model, apiSurface, spawnImpl = spawn }) {
+  const tempDir = await mkdtemp(join(tmpdir(), 'llm-curl-'))
+  const bodyPath = join(tempDir, 'request.json')
+  const configPath = join(tempDir, 'curl.conf')
+  try {
+    await writeFile(bodyPath, JSON.stringify(body), 'utf8')
+    const args = ['-sS', '--config', configPath, '-w', '\n%{http_code}']
+    const configLines = [
+      `url = "${curlConfigValue(url)}"`,
+      'request = "POST"',
+      'header = "Content-Type: application/json"',
+      `header = "Authorization: Bearer ${curlConfigValue(apiKey)}"`,
+      `data-binary = "@${curlConfigValue(bodyPath)}"`
+    ]
+    if (timeoutMs) configLines.push(`max-time = ${Math.max(1, Math.ceil(timeoutMs / 1000))}`)
+    await writeFile(configPath, configLines.join('\n'), 'utf8')
+
+    const { stdout, stderr } = await new Promise((resolve, reject) => {
+      const child = spawnImpl('curl', args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdoutBuffer = ''
+      let stderrBuffer = ''
+      child.stdout?.on?.('data', (chunk) => { stdoutBuffer += String(chunk) })
+      child.stderr?.on?.('data', (chunk) => { stderrBuffer += String(chunk) })
+      child.on?.('error', reject)
+      child.on?.('close', (code) => {
+        if (code === 0) {
+          resolve({ stdout: stdoutBuffer, stderr: stderrBuffer })
+        } else {
+          reject(createProviderError(stderrBuffer || `curl 请求失败：${code}`, {
+            code: isTimeoutLikeProviderError({ message: stderrBuffer }) ? 'LLM_PROVIDER_TIMEOUT' : 'LLM_PROVIDER_FAILED',
+            provider,
+            model,
+            apiSurface,
+            ...(timeoutMs ? { timeoutMs } : {})
+          }))
+        }
+      })
+    })
+    const match = String(stdout).match(/([\s\S]*)\n(\d{3})\s*$/)
+    const text = match ? match[1] : stdout
+    const status = match ? Number(match[2]) : 0
+    let data = null
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch (error) {
+        throw normalizeModelProviderError(error, {
+          provider,
+          model,
+          apiSurface,
+          timeoutMs,
+          status,
+          response: text.slice(0, 1000)
+        })
+      }
+    }
+    if (status >= 400) {
+      throw normalizeModelProviderError(new Error(data?.error?.message || data?.message || `模型服务返回 ${status}`), {
+        provider,
+        model,
+        apiSurface,
+        timeoutMs,
+        status,
+        response: data
+      })
+    }
+    if (!data) {
+      throw normalizeModelProviderError(new Error(`模型服务没有返回 JSON${stderr ? `：${stderr}` : ''}`), {
+        provider,
+        model,
+        apiSurface,
+        timeoutMs,
+        status
+      })
+    }
+    Object.defineProperty(data, '__transport', { value: 'curl', enumerable: false })
+    return data
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+}
+
+async function postJson({ fetchImpl, url, apiKey, timeoutMs, body, provider, model, apiSurface, curlPostJsonImpl, spawnImpl, allowCurlFallback = true }) {
   const controller = new AbortController()
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
   try {
@@ -532,6 +623,14 @@ async function postJson({ fetchImpl, url, apiKey, timeoutMs, body, provider, mod
     }
     return data
   } catch (error) {
+    if (allowCurlFallback && isTimeoutLikeProviderError(error)) {
+      const fallback = curlPostJsonImpl || postJsonWithCurl
+      try {
+        return await fallback({ url, apiKey, timeoutMs, body, provider, model, apiSurface, spawnImpl })
+      } catch (fallbackError) {
+        throw normalizeModelProviderError(fallbackError, { provider, model, apiSurface, timeoutMs })
+      }
+    }
     throw normalizeModelProviderError(error, { provider, model, apiSurface, timeoutMs })
   } finally {
     if (timer) clearTimeout(timer)
@@ -724,6 +823,8 @@ export function createOpenAICompatibleAgentProvider(options = {}) {
         }
       }
     : globalThis.fetch)
+  const curlPostJsonImpl = options.curlPostJsonImpl
+  const spawnImpl = options.spawnImpl
   if (!fetchImpl) throw new Error('当前运行环境不支持 fetch')
 
   const chatUserContent = (context = {}) => context.imageDataUrl
@@ -859,7 +960,9 @@ export function createOpenAICompatibleAgentProvider(options = {}) {
         body,
         provider: 'openai-compatible',
         model,
-        apiSurface
+        apiSurface,
+        curlPostJsonImpl,
+        spawnImpl
       })
       const normalized = normalizeAgentModelText(extractResponseText(raw))
       return {

@@ -57,6 +57,45 @@ test('image-to-html keeps generated HTML previewable when visual similarity fail
   assert.equal(persisted.length, 1)
 })
 
+test('image-to-html vision generation prefers non-stream model calls for deploy reliability', async () => {
+  const html = '<!doctype html><html><body><main><h1>非流式生成</h1></main></body></html>'
+  let generateCalled = false
+  const service = createImageToHtmlService({
+    resolveAgentProvider: () => ({
+      name: 'fake-vision-model',
+      async *stream() {
+        throw new Error('stream path should not be used for image-to-html vision generation')
+      },
+      async generate() {
+        generateCalled = true
+        return {
+          content: JSON.stringify({
+            visualModel: { source: { type: 'screenshot', title: '非流式生成', target: 'static-html', hasImage: true } },
+            html,
+            summary: '模型通过非流式接口返回 HTML。'
+          }),
+          provider: 'fake-vision-model',
+          model: 'vision-test',
+          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 }
+        }
+      }
+    }),
+    verifyGeneratedPage: async () => ({ status: 'passed', results: [], recommendations: [] }),
+    persistRestoredPage: async (asset) => ({ ...asset, id: 'non-stream-preview' })
+  })
+
+  const result = await service.generate({
+    projectId: 'project-flow',
+    title: '非流式生成',
+    target: 'static-html',
+    imageDataUrl: screenshotDataUrl
+  })
+
+  assert.equal(generateCalled, true)
+  assert.equal(result.html, html)
+  assert.equal(result.restoredPage.id, 'non-stream-preview')
+})
+
 test('image-to-html static quality audit flags unsafe scaling and oversized fixed layout while keeping html previewable', async () => {
   const html = `<!doctype html>
 <html>
