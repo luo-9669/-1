@@ -12,6 +12,8 @@
     "test": "node --test tests/workflow-agent-actions.test.mjs backend/routes/workspace.test.js tests/system-skills.test.mjs tests/web-evidence-search.test.mjs",
     "build": "npm --prefix frontend run build --",
     "preview": "npm --prefix frontend run preview --",
-    "install:all": "npm --prefix frontend install && npm --prefix backend install"
+    "install:all": "npm --prefix frontend install && npm --prefix backend install",
+    "install:browsers": "npm --prefix backend exec playwright-core -- install chromium",
+    "install:browsers:deps": "npm --prefix backend exec playwright-core -- install --with-deps chromium"
   }
 }

@@ -71,6 +71,32 @@ Mac 本地默认路径：
 
 Linux 服务器需要安装 Chromium，并配置：
 
+方式 A：使用项目脚本安装 Playwright Chromium：
+
+```bash
+npm run install:browsers
+```
+
+如果服务器缺少浏览器系统依赖，可改用：
+
+```bash
+npm run install:browsers:deps
+```
+
+安装完成后查看实际路径：
+
+```bash
+find ~/.cache/ms-playwright -path '*chrome-linux*/chrome' -type f | head -1
+```
+
+把输出路径写入 `.env.production`：
+
+```bash
+CHROME_EXECUTABLE=/root/.cache/ms-playwright/chromium-1200/chrome-linux64/chrome
+```
+
+方式 B：使用系统 Chromium：
+
 Ubuntu 22.04 可先尝试：
 
 ```bash
@@ -112,6 +138,12 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 ```bash
 npm run install:all
+```
+
+安装浏览器运行时：
+
+```bash
+npm run install:browsers
 ```
 
 构建前端：

@@ -19,7 +19,7 @@ npm run dev:all
 
 本地 Mac 已跑通时可以继续使用当前 Codex / CC Switch / `codex-cli` 通道；服务器部署时推荐用部署平台 Secret 配置 `WORKFLOW_AGENT_PROVIDER=openai-compatible`、`OPENAI_API_KEY`、`OPENAI_BASE_URL` 和模型名。真实 key 不要提交到 GitHub。
 
-部署安装依赖请使用 `npm run install:all`，不要只执行根目录 `npm install`；Linux 服务器需要安装 Chrome/Chromium 并配置 `CHROME_EXECUTABLE`。
+部署安装依赖请使用 `npm run install:all`，不要只执行根目录 `npm install`；Linux 服务器需要 Chrome/Chromium。可执行 `npm run install:browsers` 安装 Playwright Chromium，或使用系统 Chrome/Chromium 并配置 `CHROME_EXECUTABLE`。
 
 ## 当前发布门禁
 
