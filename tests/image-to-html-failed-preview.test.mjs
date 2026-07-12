@@ -786,17 +786,21 @@ test('standalone temporary image-to-html preview waits without a max timeout', a
   const waitSource = appSource.slice(waitStart, waitEnd)
 
   assert.match(appSource, /const STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS = \[/)
-  assert.match(appSource, /const TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS = /)
+  assert.match(appSource, /const TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS = 15 \* 1000/)
   assert.doesNotMatch(appSource, /TEMPORARY_IMAGE_HTML_PREVIEW_MAX_WAIT_MS/)
-  assert.match(routeSource, /const page = await waitForStandaloneRestoredPage\(pageId\)/)
+  assert.match(routeSource, /const page = await waitForStandaloneRestoredPage\(pageId,\s*\{\s*activeToken\s*\}\)/)
   assert.match(waitSource, /await openRestoredPageDetail\(pageId,\s*\{\s*syncRoute:\s*false\s*\}\)/)
   assert.match(waitSource, /restoredPageHasPreviewArtifact\(page\)/)
   assert.match(waitSource, /isTemporaryImageHtmlPreviewId\(pageId\)/)
+  assert.match(waitSource, /standalonePreviewLoadToken/)
+  assert.match(waitSource, /activeToken !== standalonePreviewLoadToken/)
   assert.match(waitSource, /TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS/)
   assert.doesNotMatch(waitSource, /Date\.now\(\)\s*-\s*startedAt/)
   assert.match(waitSource, /STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS/)
   assert.match(waitSource, /if \(!isTemporaryPreview \|\| attempt === 0\)/)
   assert.match(waitSource, /await wait\(retryDelay\)/)
+  assert.match(routeSource, /standalonePreviewLoadToken \+= 1/)
+  assert.match(routeSource, /const activeToken = standalonePreviewLoadToken/)
 })
 
 test('image-to-html enhanced prompt requires current icons contextual images and text overlap checks', async () => {

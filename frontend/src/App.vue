@@ -2706,7 +2706,7 @@ function wait(ms = 0) {
 }
 const PENDING_CAPTURE_TASK_KEY = 'liuchengtong-pending-capture-task'
 const STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS = [300, 700, 1200, 2000, 3000]
-const TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS = 1500
+const TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS = 15 * 1000
 const FACTORY_RESTORED_PAGES_SYNC_MIN_INTERVAL_MS = 2000
 const APP_PAGE_ROUTES = {
   ...APP_ROUTE_REGISTRY,
@@ -3006,6 +3006,7 @@ const standalonePreviewHtml = ref(buildStaticHtmlLoadingPage('还原资产详情
   stepIndex: 2
 }))
 const standalonePreviewKey = ref(0)
+let standalonePreviewLoadToken = 0
 const restoredPreviewModes = [
   { value: 'html', label: 'HTML 结果' },
   { value: 'compare', label: '对照' }
@@ -4401,11 +4402,14 @@ function isTemporaryImageHtmlPreviewId(pageId = '') {
   return String(pageId || '').startsWith('image-html-')
 }
 
-async function waitForStandaloneRestoredPage(pageId) {
+async function waitForStandaloneRestoredPage(pageId, options = {}) {
   let page = null
   const isTemporaryPreview = isTemporaryImageHtmlPreviewId(pageId)
+  const activeToken = options.activeToken || standalonePreviewLoadToken
   for (let attempt = 0; ; attempt += 1) {
+    if (activeToken !== standalonePreviewLoadToken) return null
     const loadedPage = await openRestoredPageDetail(pageId, { syncRoute: false })
+    if (activeToken !== standalonePreviewLoadToken) return null
     page = loadedPage || state.restoredPages.find((item) => restoredPageMatchesPreviewId(item, pageId)) || selectedRestoredPage.value || null
     if (restoredPageHasPreviewArtifact(page)) return page
     const retryDelay = isTemporaryPreview
@@ -4413,6 +4417,7 @@ async function waitForStandaloneRestoredPage(pageId) {
       : STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS[attempt]
     if (!retryDelay) break
     if (!isTemporaryPreview || attempt === 0) {
+      if (activeToken !== standalonePreviewLoadToken) return null
       standalonePreviewHtml.value = buildStaticHtmlLoadingPage('还原资产详情', '正在等待后端保存 HTML 结果...', {
         taskId: pageId,
         stepIndex: Math.min(3, attempt + 2)
@@ -4421,6 +4426,7 @@ async function waitForStandaloneRestoredPage(pageId) {
     }
     await wait(retryDelay)
   }
+  if (activeToken !== standalonePreviewLoadToken) return null
   return page || state.restoredPages.find((item) => restoredPageMatchesPreviewId(item, pageId)) || selectedRestoredPage.value || { id: pageId, title: '静态 HTML 还原结果', coverImage: '' }
 }
 
@@ -4431,12 +4437,16 @@ async function loadStandalonePreviewRoute(pageId) {
   const routeAction = new URLSearchParams(String(projectRoute?.route || '').split('?')[1] || '').get('action') || ''
   const shouldAutoConvert = routeAction === 'convert-vue'
   const shouldRegenerate = routeAction === 'regenerate' || routeAction === 'advanced-generate'
+  standalonePreviewLoadToken += 1
+  const activeToken = standalonePreviewLoadToken
   standalonePreviewHtml.value = buildStaticHtmlLoadingPage('还原资产详情', '正在读取已生成的 HTML 结果...', {
     taskId: pageId,
     stepIndex: 2
   })
   standalonePreviewKey.value += 1
-  const page = await waitForStandaloneRestoredPage(pageId)
+  const page = await waitForStandaloneRestoredPage(pageId, { activeToken })
+  if (activeToken !== standalonePreviewLoadToken) return
+  if (!page) return
   if (page.id && page.id !== pageId) {
     persistRestoredPageSelection(page.id)
     window.history.replaceState(null, '', projectScopedUrl(`/assets/${encodeURIComponent(page.id)}/preview`, page.projectId || state.currentProjectId))
