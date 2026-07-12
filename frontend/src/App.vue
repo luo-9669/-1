@@ -2707,7 +2707,6 @@ function wait(ms = 0) {
 const PENDING_CAPTURE_TASK_KEY = 'liuchengtong-pending-capture-task'
 const STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS = [300, 700, 1200, 2000, 3000]
 const TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS = 1500
-const TEMPORARY_IMAGE_HTML_PREVIEW_MAX_WAIT_MS = 15 * 60 * 1000
 const FACTORY_RESTORED_PAGES_SYNC_MIN_INTERVAL_MS = 2000
 const APP_PAGE_ROUTES = {
   ...APP_ROUTE_REGISTRY,
@@ -4405,7 +4404,6 @@ function isTemporaryImageHtmlPreviewId(pageId = '') {
 async function waitForStandaloneRestoredPage(pageId) {
   let page = null
   const isTemporaryPreview = isTemporaryImageHtmlPreviewId(pageId)
-  const startedAt = Date.now()
   for (let attempt = 0; ; attempt += 1) {
     const loadedPage = await openRestoredPageDetail(pageId, { syncRoute: false })
     page = loadedPage || state.restoredPages.find((item) => restoredPageMatchesPreviewId(item, pageId)) || selectedRestoredPage.value || null
@@ -4414,12 +4412,13 @@ async function waitForStandaloneRestoredPage(pageId) {
       ? TEMPORARY_IMAGE_HTML_PREVIEW_POLL_INTERVAL_MS
       : STANDALONE_PREVIEW_ASSET_RETRY_DELAYS_MS[attempt]
     if (!retryDelay) break
-    if (isTemporaryPreview && Date.now() - startedAt >= TEMPORARY_IMAGE_HTML_PREVIEW_MAX_WAIT_MS) break
-    standalonePreviewHtml.value = buildStaticHtmlLoadingPage('还原资产详情', '正在等待后端保存 HTML 结果...', {
-      taskId: pageId,
-      stepIndex: Math.min(3, attempt + 2)
-    })
-    standalonePreviewKey.value += 1
+    if (!isTemporaryPreview || attempt === 0) {
+      standalonePreviewHtml.value = buildStaticHtmlLoadingPage('还原资产详情', '正在等待后端保存 HTML 结果...', {
+        taskId: pageId,
+        stepIndex: Math.min(3, attempt + 2)
+      })
+      standalonePreviewKey.value += 1
+    }
     await wait(retryDelay)
   }
   return page || state.restoredPages.find((item) => restoredPageMatchesPreviewId(item, pageId)) || selectedRestoredPage.value || { id: pageId, title: '静态 HTML 还原结果', coverImage: '' }
