@@ -53,7 +53,8 @@ import {
   IMAGE_TO_HTML_MODEL_TIMEOUT_MS,
   PORT,
   SINGLE_FILE_BIN,
-  projectRoot
+  projectRoot,
+  storageRoot
 } from './server-config.mjs'
 import { createStreamPusher, sseEvent } from './sse.mjs'
 
@@ -70,12 +71,12 @@ const browserSessionService = createBrowserSessionService({
   chromium,
   isTestRuntime,
   defaultHeaders: DEFAULT_HEADERS,
-  authStateRootDir: resolve(projectRoot, 'backend/storage/auth-states')
+  authStateRootDir: resolve(storageRoot, 'auth-states')
 })
 const workspaceStore = createWorkspaceStore(null, {
   filePath: isTestRuntime
     ? ''
-    : (process.env.WORKSPACE_STORE_FILE || resolve(projectRoot, 'backend/storage/workspace/workspace.local.json'))
+    : (process.env.WORKSPACE_STORE_FILE || resolve(storageRoot, 'workspace/workspace.local.json'))
 })
 await workspaceStore.load()
 

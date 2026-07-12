@@ -65,9 +65,10 @@ import { blueprintKnowledgeItems, buildProjectBlueprint } from '../../frontend/s
 import { buildWebsiteKnowledgeImport, websiteBlueprintDocumentFromImport } from '../../frontend/src/services/websiteKnowledge.js'
 import { createAgentProviderFromModelSettings } from '../services/llm-provider.js'
 import { safeParseModelJson } from '../services/generation-runner.js'
+import { storageRoot } from '../server/server-config.mjs'
 
-const DEFAULT_GENERATED_IMAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'storage', 'workspace', 'generated-images')
-const DEFAULT_MATERIAL_PREVIEW_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'storage', 'workspace', 'material-previews')
+const DEFAULT_GENERATED_IMAGE_DIR = join(storageRoot, 'workspace', 'generated-images')
+const DEFAULT_MATERIAL_PREVIEW_DIR = join(storageRoot, 'workspace', 'material-previews')
 
 function normalizeDocumentText(document = {}) {
   return String(document.text || document.content || document.markdown || '').trim()

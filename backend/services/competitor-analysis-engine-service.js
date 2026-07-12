@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { storageRoot } from '../server/server-config.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PYTHON_APP_DIR = path.join(__dirname, 'competitor-analysis-engine', 'python', '竞品监控系统')
-const REPORT_STORAGE_DIR = path.join(__dirname, '..', 'storage', 'competitor-analysis')
+const REPORT_STORAGE_DIR = path.join(storageRoot, 'competitor-analysis')
 const SAFE_FAILURE_MESSAGE = '竞品分析暂时无法完成，请检查 Python 依赖或稍后重试。'
 const MODEL_FALLBACK_FAILURE_MESSAGE = '当前后端模型暂时无法生成竞品分析，请检查模型配置后重试。'
 

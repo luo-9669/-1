@@ -21,11 +21,12 @@ import { createImageProviderFromModelSettings, normalizeModelProviderError } fro
 import { buildCanvasVersion } from '../services/agent-proposal-service.js'
 import { buildAdvancedUxWebEvidencePack } from '../services/web-evidence-search.js'
 import { addModelCallLog, getModelSettingsRaw } from '../services/workspace-store.js'
+import { storageRoot } from '../server/server-config.mjs'
 
 export { createWorkflowRunnerStore }
 
-const DEFAULT_GENERATED_IMAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'storage', 'workspace', 'generated-images')
-const DEFAULT_MATERIAL_PREVIEW_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'storage', 'workspace', 'material-previews')
+const DEFAULT_GENERATED_IMAGE_DIR = join(storageRoot, 'workspace', 'generated-images')
+const DEFAULT_MATERIAL_PREVIEW_DIR = join(storageRoot, 'workspace', 'material-previews')
 
 function safeFileSegment(value = '') {
   return String(value || '')
