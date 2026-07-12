@@ -1,4 +1,5 @@
 import './env-loader.mjs'
+import { existsSync, mkdirSync, accessSync, constants } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -16,7 +17,21 @@ export const projectRoot = fileURLToPath(new URL('../..', import.meta.url))
 export const backendRoot = fileURLToPath(new URL('..', import.meta.url))
 export const SINGLE_FILE_BIN = resolve(backendRoot, 'node_modules/.bin/single-file')
 
-// 存储根目录：优先使用环境变量，否则使用项目内目录（本地开发），
-// 如果项目目录不可写则回退到系统临时目录（部署环境）
-export const storageRoot = process.env.STORAGE_ROOT ||
-  resolve(projectRoot, 'backend/storage')
+// 存储根目录：优先使用环境变量，否则检测项目内目录是否可写，
+// 不可写则回退到系统临时目录（部署环境）
+function resolveStorageRoot() {
+  if (process.env.STORAGE_ROOT) return process.env.STORAGE_ROOT
+  const defaultRoot = resolve(projectRoot, 'backend/storage')
+  try {
+    if (!existsSync(defaultRoot)) mkdirSync(defaultRoot, { recursive: true })
+    accessSync(defaultRoot, constants.W_OK)
+    return defaultRoot
+  } catch {
+    const fallbackRoot = resolve(tmpdir(), 'liuchengtong-storage')
+    try {
+      if (!existsSync(fallbackRoot)) mkdirSync(fallbackRoot, { recursive: true })
+    } catch { /* ignore */ }
+    return fallbackRoot
+  }
+}
+export const storageRoot = resolveStorageRoot()
