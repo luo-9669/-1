@@ -25,3 +25,11 @@ tmp-*
 
 chanjing-ai-dashboard.html
 opportunity-validation-skill.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Assets
+assets/*.png
