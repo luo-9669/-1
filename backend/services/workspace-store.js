@@ -1,3 +1,20 @@
+/**
+ * Workspace Store - 双模式存储
+ * 
+ * 【Coze 端改动说明】
+ * 本文件支持两种存储模式：
+ * 1. 数据库模式：当 COZE_SUPABASE_URL 环境变量存在时，优先从 Supabase 数据库加载
+ * 2. 本地 JSON 模式：数据库不可用时，回退到本地 JSON 文件（workspace.local.json）
+ * 
+ * 数据库表：workspace_state (id TEXT PK, data JSONB, updated_at TIMESTAMPTZ)
+ * 数据库操作封装：backend/services/database-store.mjs
+ * 
+ * 持久化逻辑：
+ * - load(): 先尝试数据库 → 失败则读本地 JSON → 都没有则用空 workspace
+ * - persistStore(): 先写本地 JSON（缓存）→ 再尝试写数据库（持久化）
+ * 
+ * 【注意】不要修改此文件的双模式逻辑，如需新增存储路径请使用 server-config.mjs 中的 storageRoot
+ */
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import {

@@ -17,8 +17,12 @@ export const projectRoot = fileURLToPath(new URL('../..', import.meta.url))
 export const backendRoot = fileURLToPath(new URL('..', import.meta.url))
 export const SINGLE_FILE_BIN = resolve(backendRoot, 'node_modules/.bin/single-file')
 
+// 【Coze 端改动 - Codex 请注意】
 // 存储根目录：优先使用环境变量，否则检测项目内目录是否可写，
-// 不可写则回退到系统临时目录（部署环境）
+// 不可写则回退到系统临时目录（部署环境）。
+// 这是因为 Coze 部署环境 /opt/bytefaas/ 是只读文件系统，
+// 无法在 backend/storage 下创建目录，所以自动回退到 /tmp。
+// 如果后续接入数据库存储，这个配置主要用于大文件（图片/PDF等）的本地缓存。
 function resolveStorageRoot() {
   if (process.env.STORAGE_ROOT) return process.env.STORAGE_ROOT
   const defaultRoot = resolve(projectRoot, 'backend/storage')

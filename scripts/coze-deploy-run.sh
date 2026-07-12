@@ -1,4 +1,11 @@
 #!/bin/bash
+# 【Coze 端改动 - Codex 请注意】
+# 这是 Coze 部署环境的运行脚本。
+# Coze 部署环境 /opt/bytefaas/ 是只读文件系统，所以：
+# 1. 存储目录使用 /tmp 下的可写目录
+# 2. 后端同时提供 API 和静态文件服务（frontend/dist）
+# 3. 监听端口固定为 5000（Coze 平台要求）
+# 如果后续接入数据库，这里的 STORAGE_ROOT 主要用于大文件本地缓存。
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,6 +20,8 @@ fuser -k 5000/tcp 2>/dev/null || true
 sleep 1
 
 # 部署环境可能是只读文件系统，使用 /tmp 下的可写目录作为存储根目录
+# 【注意】/tmp 在 serverless 环境重启后会丢失数据，
+# 后续接入数据库后，这里只用于大文件（图片/PDF）的临时缓存
 STORAGE_ROOT="/tmp/liuchengtong-storage"
 export STORAGE_ROOT
 

@@ -1,3 +1,23 @@
+/**
+ * Supabase Client - Coze 内置数据库客户端封装
+ * 
+ * 【Coze 端改动 - Codex 请注意】
+ * 本文件封装了 Coze 内置 Supabase 数据库的连接逻辑。
+ * 
+ * 环境变量（Coze 平台自动注入）：
+ * - COZE_SUPABASE_URL: Supabase 项目 URL
+ * - COZE_SUPABASE_ANON_KEY: Supabase 匿名 Key
+ * 
+ * 使用方式：
+ *   import { getSupabaseClient, isSupabaseAvailable } from './supabase-client.mjs';
+ *   
+ *   if (await isSupabaseAvailable()) {
+ *     const supabase = await getSupabaseClient();
+ *     const { data } = await supabase.from('workspace_state').select('*');
+ *   }
+ * 
+ * 依赖：@supabase/supabase-js（已添加到 backend/package.json）
+ */
 import { createClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 

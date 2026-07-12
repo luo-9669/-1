@@ -1,3 +1,31 @@
+/**
+ * Database Store - Coze Supabase 数据库存储层
+ * 
+ * 【Coze 端改动 - Codex 请注意】
+ * 本文件是 Coze 端新增的数据库存储层，用于线上持久化 workspace 数据。
+ * 
+ * 依赖：
+ * - backend/src/storage/database/supabase-client.mjs（Supabase 客户端封装）
+ * - 环境变量：COZE_SUPABASE_URL, COZE_SUPABASE_ANON_KEY（Coze 平台自动注入）
+ * 
+ * 数据库表结构：
+ *   CREATE TABLE workspace_state (
+ *     id TEXT PRIMARY KEY DEFAULT 'default',
+ *     data JSONB NOT NULL DEFAULT '{}',
+ *     updated_at TIMESTAMPTZ DEFAULT NOW()
+ *   );
+ * 
+ * 使用方式：
+ * - workspace-store.js 在 load() 时调用 loadWorkspace()
+ * - workspace-store.js 在 persistStore() 时调用 saveWorkspace(data)
+ * - 如果数据库不可用，workspace-store.js 会自动回退到本地 JSON
+ * 
+ * 【Codex 改动建议】
+ * 如果后续需要拆分表结构（users, projects, materials 等），请：
+ * 1. 在本文件中新增对应的 CRUD 函数
+ * 2. 修改 workspace-store.js 的 load/persistStore 逻辑
+ * 3. 不要删除本文件，保持数据库模式作为线上的主存储
+ */
 import { getSupabaseClient, isSupabaseAvailable } from '../src/storage/database/supabase-client.mjs';
 
 const TABLE_NAME = 'workspace_state';
