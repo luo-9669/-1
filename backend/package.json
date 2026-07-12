@@ -8,6 +8,7 @@
     "api:restart": "node server/restart-api.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.2",
     "playwright-core": "^1.61.0",
     "single-file-cli": "^2.0.83",
     "vue": "^3.5.17"

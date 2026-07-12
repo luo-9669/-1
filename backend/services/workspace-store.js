@@ -25,6 +25,7 @@ import {
   publicWorkspaceUser
 } from '../models/workspace.js'
 import { listSkillDefinitions } from './skill-registry.js'
+import { isDatabaseAvailable, loadWorkspace as loadWorkspaceFromDatabase, saveWorkspace as saveWorkspaceToDatabase } from './database-store.mjs'
 
 const DEFAULT_BACKEND_KNOWLEDGE = [
   createWorkspaceBackendKnowledge({
@@ -587,8 +588,21 @@ async function persistStoreAtomically(store) {
 }
 
 async function persistStore(store) {
-  if (!store.filePath) return
   if (store.persistenceDisabled) return
+  
+  // Save to database if available
+  if (isDatabaseAvailable()) {
+    try {
+      const data = workspaceStorePersistPayload(store)
+      await saveWorkspaceToDatabase(data)
+    } catch (error) {
+      console.error('[workspace-store] Failed to save to database:', error.message)
+      // Fall through to file-based persistence
+    }
+  }
+  
+  // Also save to file if filePath is set
+  if (!store.filePath) return
   const persistTask = (store.persistQueue || Promise.resolve())
     .catch(() => {})
     .then(() => persistStoreAtomically(store))
@@ -657,11 +671,38 @@ export function createWorkspaceStore(seed = null, options = {}) {
       store.settings.splice(0, store.settings.length, ...fileState.settings)
     },
     async load() {
+      // First try to load from database if available
+      if (isDatabaseAvailable()) {
+        try {
+          const dbState = await loadWorkspaceFromDatabase()
+          if (dbState) {
+            const normalizedState = normalizeStore(dbState)
+            store.applyState(normalizedState)
+            console.log('[workspace-store] Loaded from database')
+            return workspaceSnapshot(store)
+          }
+        } catch (error) {
+          console.error('[workspace-store] Failed to load from database:', error.message)
+          // Fall through to file-based loading
+        }
+      }
+      
+      // Fall back to file-based loading
       if (!store.filePath) return workspaceSnapshot(store)
       try {
         const { state: rawFileState, recovered } = await readWorkspaceFileState(store.filePath)
         const fileState = normalizeStore(rawFileState)
         store.applyState(fileState)
+        // If loaded from file and database is available, sync to database
+        if (isDatabaseAvailable()) {
+          try {
+            const data = workspaceStorePersistPayload(store)
+            await saveWorkspaceToDatabase(data)
+            console.log('[workspace-store] Synced file state to database')
+          } catch (error) {
+            console.error('[workspace-store] Failed to sync to database:', error.message)
+          }
+        }
         if (recovered) {
           const backupPath = `${store.filePath}.corrupt-${Date.now()}.json`
           try {
