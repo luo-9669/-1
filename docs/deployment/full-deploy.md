@@ -71,6 +71,29 @@ Mac 本地默认路径：
 
 Linux 服务器需要安装 Chromium，并配置：
 
+Ubuntu 22.04 可先尝试：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y chromium-browser
+```
+
+如果系统提示 `chromium-browser` 来自 snap 或不可用，可改用：
+
+```bash
+sudo snap install chromium
+```
+
+安装完成后必须确认真实可执行路径：
+
+```bash
+which chromium
+which chromium-browser
+which google-chrome
+```
+
+哪个命令有输出，就把该路径写入 `.env.production`。
+
 ```bash
 CHROME_EXECUTABLE=/usr/bin/chromium-browser
 ```
@@ -85,7 +108,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 ## 安装与启动
 
-安装依赖：
+不要只执行根目录 `npm install`。本项目是前后端分目录依赖，安装依赖必须使用：
 
 ```bash
 npm run install:all
@@ -103,11 +126,21 @@ npm run build
 npm --prefix backend run api
 ```
 
-本地开发同时启动前后端：
+本地或服务器临时联调时，可同时启动前后端：
 
 ```bash
 npm run dev:all
 ```
+
+生产环境建议用进程管理器守护后端，例如 `pm2`：
+
+```bash
+npm install -g pm2
+pm2 start "npm --prefix backend run api" --name liuchengtong-api
+pm2 save
+```
+
+前端构建产物在 `frontend/dist`，可以交给 Nginx、静态托管服务或同域反向代理。
 
 ## 前端 API 地址
 
@@ -136,11 +169,12 @@ git diff --check
 
 部署后验证：
 
-1. 打开系统设置，点击“读取后端配置”。
-2. 确认模型供应商和脱敏 key 状态。
-3. 点击“测试模型”，应返回“模型连通：通过”。
-4. 新建高级 UX 分析，确认 Agent 生成 Markdown 文件，画布随后导入。
-5. 测试需要浏览器能力的功能时，确认服务器已安装并配置 Chrome/Chromium。
+1. 后端启动后访问 API 服务地址，确认服务进程未退出。
+2. 打开前端系统设置，点击“读取后端配置”。
+3. 确认模型供应商和脱敏 key 状态。
+4. 点击“测试模型”，应返回“模型连通：通过”。
+5. 新建高级 UX 分析，确认 Agent 生成 Markdown 文件，画布随后导入。
+6. 测试需要浏览器能力的功能时，确认服务器已安装并配置 Chrome/Chromium。
 
 ## 常见问题
 
