@@ -149,14 +149,17 @@ async function persistMaterialPreviewFile(materialId = '', preview = {}, options
     format: preview.format || extension,
     fileName: preview.fileName || fileName,
     mimeType: preview.mimeType || parsed.mimeType || 'application/octet-stream',
-    url: `/api/workspace/material-previews/${encodeURIComponent(fileName)}`
+    url: `/api/workspace/material-previews/${encodeURIComponent(fileName)}`,
+    dataUrl: '',
+    storage: 'workspace-database',
+    storageDataUrl: preview.storageDataUrl || preview.dataUrl
   }
 }
 
 async function persistWorkspaceImageAttachment(ownerId = '', itemId = '', dataUrl = '', options = {}) {
-  if (!ownerId || !itemId || !isImageDataUrl(dataUrl)) return ''
+  if (!ownerId || !itemId || !isImageDataUrl(dataUrl)) return null
   const parsed = dataUrlBuffer(dataUrl)
-  if (!parsed?.buffer?.length || !/^image\//i.test(parsed.mimeType || '')) return ''
+  if (!parsed?.buffer?.length || !/^image\//i.test(parsed.mimeType || '')) return null
   const directory = resolveMaterialPreviewDir(options)
   await mkdir(directory, { recursive: true })
   const extension = imageExtensionForMimeType(parsed.mimeType)
@@ -170,7 +173,13 @@ async function persistWorkspaceImageAttachment(ownerId = '', itemId = '', dataUr
     digest
   ].join('-') + `.${extension}`
   await writeFile(join(directory, fileName), parsed.buffer)
-  return `/api/workspace/material-previews/${encodeURIComponent(fileName)}`
+  return {
+    fileName,
+    mimeType: parsed.mimeType || generatedImageContentType(fileName),
+    url: `/api/workspace/material-previews/${encodeURIComponent(fileName)}`,
+    storage: 'workspace-database',
+    storageDataUrl: dataUrl
+  }
 }
 
 async function persistPrototypeDemoScreenshotAttachments(asset = {}, options = {}) {
@@ -183,18 +192,24 @@ async function persistPrototypeDemoScreenshotAttachments(asset = {}, options = {
     const screenId = screen.id || `screen-${index + 1}`
     let screenshotUrl = screen.screenshotUrl || ''
     let screenshotStorage = screen.screenshotStorage || screen.storage || ''
+    let storageDataUrl = screen.storageDataUrl || ''
     if (isImageDataUrl(screenshotUrl)) {
-      const persistedUrl = await persistWorkspaceImageAttachment(assetId, screenId, screenshotUrl, options)
-      if (persistedUrl) {
-        screenshotUrl = persistedUrl
-        screenshotStorage = 'workspace-attachment'
+      const persistedAttachment = await persistWorkspaceImageAttachment(assetId, screenId, screenshotUrl, options)
+      if (persistedAttachment?.url) {
+        screenshotUrl = persistedAttachment.url
+        screenshotStorage = persistedAttachment.storage
+        storageDataUrl = persistedAttachment.storageDataUrl
       }
     }
     if (screenId && screenshotUrl) screenUrlById.set(screenId, screenshotUrl)
-    screens.push({
+    const screenRecord = {
       ...screen,
       screenshotUrl,
       screenshotStorage
+    }
+    if (storageDataUrl) screenRecord.storageDataUrl = storageDataUrl
+    screens.push({
+      ...screenRecord
     })
   }
   const screenshotAssets = []
@@ -202,21 +217,26 @@ async function persistPrototypeDemoScreenshotAttachments(asset = {}, options = {
     const screenId = screenshotAsset.screenId || screenshotAsset.id || `asset-${index + 1}`
     let screenshotUrl = screenshotAsset.screenshotUrl || screenshotAsset.url || ''
     let storage = screenshotAsset.storage || ''
+    let storageDataUrl = screenshotAsset.storageDataUrl || ''
     if (isImageDataUrl(screenshotUrl)) {
-      const persistedUrl = screenUrlById.get(screenId) || await persistWorkspaceImageAttachment(assetId, screenId, screenshotUrl, options)
+      const persistedAttachment = await persistWorkspaceImageAttachment(assetId, screenId, screenshotUrl, options)
+      const persistedUrl = screenUrlById.get(screenId) || persistedAttachment?.url
       if (persistedUrl) {
         screenshotUrl = persistedUrl
-        storage = 'workspace-attachment'
+        storage = persistedAttachment?.storage || 'workspace-database'
+        storageDataUrl = persistedAttachment?.storageDataUrl || storageDataUrl
       }
     } else if (screenUrlById.has(screenId)) {
       screenshotUrl = screenUrlById.get(screenId)
-      storage = storage === 'local-upload' ? 'workspace-attachment' : storage
+      storage = storage === 'local-upload' ? 'workspace-database' : storage
     }
-    screenshotAssets.push({
+    const screenshotAssetRecord = {
       ...screenshotAsset,
       screenshotUrl,
       storage
-    })
+    }
+    if (storageDataUrl) screenshotAssetRecord.storageDataUrl = storageDataUrl
+    screenshotAssets.push(screenshotAssetRecord)
   }
   return {
     ...asset,
@@ -229,11 +249,49 @@ async function persistPrototypeDemoScreenshotAttachments(asset = {}, options = {
       ? asset.screenshotAssets.map((screenshotAsset) => {
           const screenId = screenshotAsset.screenId || screenshotAsset.id || ''
           return screenUrlById.has(screenId)
-            ? { ...screenshotAsset, screenshotUrl: screenUrlById.get(screenId), storage: 'workspace-attachment' }
+            ? { ...screenshotAsset, screenshotUrl: screenUrlById.get(screenId), storage: 'workspace-database' }
             : screenshotAsset
         })
       : asset.screenshotAssets
   }
+}
+
+function previewResponseFromDataUrl(dataUrl = '', fallbackContentType = 'application/octet-stream') {
+  const parsed = dataUrlBuffer(dataUrl)
+  if (!parsed?.buffer?.length) return null
+  return {
+    contentType: parsed.mimeType || fallbackContentType,
+    body: parsed.buffer
+  }
+}
+
+function materialPreviewRecordMatches(record = {}, fileName = '') {
+  if (!record || typeof record !== 'object') return false
+  const safeName = basename(String(fileName || ''))
+  const urlFileName = decodeURIComponent(String(record.url || record.screenshotUrl || '').split('/').pop() || '')
+  return safeName && (
+    safeName === basename(String(record.fileName || '')) ||
+    safeName === basename(urlFileName)
+  )
+}
+
+function materialPreviewFromWorkspaceRecord(store, fileName = '') {
+  for (const material of store.materials || []) {
+    const preview = material?.preview
+    if (materialPreviewRecordMatches(preview, fileName)) {
+      return previewResponseFromDataUrl(preview.storageDataUrl || preview.dataUrl || '', preview.mimeType)
+    }
+  }
+  for (const asset of store.assets || []) {
+    const screens = Array.isArray(asset?.prototypeDemo?.screens) ? asset.prototypeDemo.screens : []
+    const screenshotAssets = Array.isArray(asset?.prototypeDemo?.screenshotAssets) ? asset.prototypeDemo.screenshotAssets : []
+    for (const item of [...screens, ...screenshotAssets, ...(Array.isArray(asset?.screenshotAssets) ? asset.screenshotAssets : [])]) {
+      if (materialPreviewRecordMatches(item, fileName)) {
+        return previewResponseFromDataUrl(item.storageDataUrl || '', item.mimeType || generatedImageContentType(fileName))
+      }
+    }
+  }
+  return null
 }
 
 function materialPreviewPath(fileName = '', options = {}) {
@@ -2446,6 +2504,8 @@ export function workspaceRoutes(store, options = {}) {
       return { material }
     },
     'GET /api/workspace/material-previews/:fileName': async (payload) => {
+      const storedPreview = materialPreviewFromWorkspaceRecord(store, payload.fileName)
+      if (storedPreview) return storedPreview
       const filePath = materialPreviewPath(payload.fileName, options)
       if (!filePath) {
         const error = new Error('资料预览文件不存在')

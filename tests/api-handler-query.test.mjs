@@ -4,11 +4,11 @@ import test from 'node:test'
 import { createApiRequestHandler } from '../backend/server/api-handler.mjs'
 import { createRouteMatcher } from '../backend/server/route-matcher.mjs'
 
-function mockRequest({ method = 'GET', url = '/', body = '' } = {}) {
+function mockRequest({ method = 'GET', url = '/', body = '', headers = {} } = {}) {
   return {
     method,
     url,
-    headers: { host: 'local.test' },
+    headers: { host: 'local.test', ...headers },
     async *[Symbol.asyncIterator]() {
       if (body) yield Buffer.from(body)
     }
@@ -58,4 +58,25 @@ test('api handler passes query params into delete route payloads', async () => {
     id: 'competitor-1',
     projectId: 'project-1'
   })
+})
+
+test('api handler allows credentialed browser requests from the request origin', async () => {
+  const routes = {
+    'GET /api/auth/me': async () => ({ authenticated: false, user: null })
+  }
+  const handler = createApiRequestHandler({
+    matchRoute: createRouteMatcher(routes),
+    sseEvent: () => ''
+  })
+  const response = mockResponse()
+
+  await handler(mockRequest({
+    method: 'GET',
+    url: '/api/auth/me',
+    headers: { origin: 'https://liuchengtong.coze.site' }
+  }), response)
+
+  assert.equal(response.statusCode, 200)
+  assert.equal(response.headers['Access-Control-Allow-Origin'], 'https://liuchengtong.coze.site')
+  assert.equal(response.headers['Access-Control-Allow-Credentials'], 'true')
 })

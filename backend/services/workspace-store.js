@@ -575,8 +575,8 @@ function workspaceStorePersistPayload(store) {
   const payload = workspaceStorePayload(store)
   return {
     ...payload,
-    assets: payload.assets.map(compactAssetForOverview),
-    materials: payload.materials.map(compactMaterialForOverview),
+    assets: payload.assets.map(compactAssetForPersistence),
+    materials: payload.materials.map(compactMaterialForPersistence),
     restoredPages: payload.restoredPages.map(compactRestoredPageForPersistence),
     workflowRuns: payload.workflowRuns.map(compactWorkflowRunForPersistence),
     settings: payload.settings.map(compactSettingForPersistence)
@@ -608,7 +608,7 @@ async function persistStore(store) {
   if (store.persistenceDisabled) return
   
   // Save to database if available
-  if (isDatabaseAvailable()) {
+  if (await isDatabaseAvailable()) {
     try {
       const data = workspaceStorePersistPayload(store)
       await saveWorkspaceToDatabase(data)
@@ -689,7 +689,7 @@ export function createWorkspaceStore(seed = null, options = {}) {
     },
     async load() {
       // First try to load from database if available
-      if (isDatabaseAvailable()) {
+      if (await isDatabaseAvailable()) {
         try {
           const dbState = await loadWorkspaceFromDatabase()
           if (dbState) {
@@ -711,7 +711,7 @@ export function createWorkspaceStore(seed = null, options = {}) {
         const fileState = normalizeStore(rawFileState)
         store.applyState(fileState)
         // If loaded from file and database is available, sync to database
-        if (isDatabaseAvailable()) {
+        if (await isDatabaseAvailable()) {
           try {
             const data = workspaceStorePersistPayload(store)
             await saveWorkspaceToDatabase(data)
@@ -832,11 +832,33 @@ function compactPrototypeDemoForOverview(demo = null) {
     screens: Array.isArray(demo.screens)
       ? demo.screens.map((screen) => ({
           ...screen,
+          storageDataUrl: '',
           screenshotUrl: compactDataUrl(screen.screenshotUrl || ''),
           screenshot: compactDataUrl(screen.screenshot || '')
         }))
       : demo.screens,
     screenshotAssets: []
+  }
+}
+
+function compactPrototypeDemoForPersistence(demo = null) {
+  if (!demo || typeof demo !== 'object') return demo
+  return {
+    ...demo,
+    screens: Array.isArray(demo.screens)
+      ? demo.screens.map((screen) => ({
+          ...screen,
+          screenshotUrl: compactDataUrl(screen.screenshotUrl || ''),
+          screenshot: compactDataUrl(screen.screenshot || '')
+        }))
+      : demo.screens,
+    screenshotAssets: Array.isArray(demo.screenshotAssets)
+      ? demo.screenshotAssets.map((asset) => ({
+          ...asset,
+          screenshotUrl: compactDataUrl(asset.screenshotUrl || ''),
+          screenshot: compactDataUrl(asset.screenshot || '')
+        }))
+      : demo.screenshotAssets
   }
 }
 
@@ -851,7 +873,40 @@ function compactAssetForOverview(asset = {}) {
   }
 }
 
+function compactAssetForPersistence(asset = {}) {
+  return {
+    ...asset,
+    content: compactText(asset.content),
+    designSource: compactDesignSourceForOverview(asset.designSource),
+    prototypeDemo: compactPrototypeDemoForPersistence(asset.prototypeDemo),
+    screenshotAssets: Array.isArray(asset.screenshotAssets)
+      ? asset.screenshotAssets.map((screenshotAsset) => ({
+          ...screenshotAsset,
+          screenshotUrl: compactDataUrl(screenshotAsset.screenshotUrl || ''),
+          screenshot: compactDataUrl(screenshotAsset.screenshot || '')
+        }))
+      : asset.screenshotAssets,
+    versions: Array.isArray(asset.versions) && JSON.stringify(asset.versions).length > 200000 ? [] : asset.versions
+  }
+}
+
 function compactMaterialForOverview(material = {}) {
+  const preview = material.preview && typeof material.preview === 'object'
+    ? {
+        ...material.preview,
+        dataUrl: '',
+        storageDataUrl: ''
+      }
+    : ''
+  return {
+    ...material,
+    content: compactText(material.content),
+    preview,
+    raw: undefined
+  }
+}
+
+function compactMaterialForPersistence(material = {}) {
   const preview = material.preview && typeof material.preview === 'object'
     ? {
         ...material.preview,

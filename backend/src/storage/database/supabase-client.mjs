@@ -25,6 +25,7 @@ let envLoaded = false;
 
 async function loadEnv() {
   if (envLoaded || (process.env.COZE_SUPABASE_URL && process.env.COZE_SUPABASE_ANON_KEY)) {
+    envLoaded = true;
     return;
   }
 
@@ -108,7 +109,7 @@ function getSupabaseServiceRoleKey() {
 
 async function getSupabaseClient(token) {
   await loadEnv();
-  const { url, anonKey } = getSupabaseCredentials();
+  const { url, anonKey } = await getSupabaseCredentials();
 
   let key;
   if (token) {

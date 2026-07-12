@@ -2383,19 +2383,20 @@ test('workspace route persists uploaded prototype demo screenshots as durable at
     const screenshotUrl = saved.asset.prototypeDemo.screens[0].screenshotUrl
     assert.match(screenshotUrl, /^\/api\/workspace\/material-previews\/asset-demo-prototype-home-/)
     assert.equal(saved.asset.prototypeDemo.screenshotAssets[0].screenshotUrl, screenshotUrl)
-    assert.equal(saved.asset.prototypeDemo.screenshotAssets[0].storage, 'workspace-attachment')
+    assert.equal(saved.asset.prototypeDemo.screenshotAssets[0].storage, 'workspace-database')
 
     const snapshot = await routes['GET /api/workspace']()
     assert.equal(snapshot.assets[0].prototypeDemo.screens[0].screenshotUrl, screenshotUrl)
 
     const fileName = decodeURIComponent(screenshotUrl.split('/').pop())
+    await rm(previewDir, { recursive: true, force: true })
     const previewFile = await routes['GET /api/workspace/material-previews/:fileName']({ fileName })
     assert.equal(previewFile.contentType, 'image/png')
     assert.deepEqual(previewFile.body, Buffer.from('home'))
 
     const persisted = JSON.parse(await readFile(filePath, 'utf8'))
     assert.equal(persisted.assets[0].prototypeDemo.screens[0].screenshotUrl, screenshotUrl)
-    assert.doesNotMatch(JSON.stringify(persisted), /data:image\/png;base64/)
+    assert.match(persisted.assets[0].prototypeDemo.screens[0].storageDataUrl, /^data:image\/png;base64,/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -2931,6 +2932,7 @@ test('workspace document import stores Word preview as a durable attachment URL'
     assert.equal(detail.material.preview.url, material.preview.url)
 
     const fileName = decodeURIComponent(material.preview.url.split('/').pop())
+    await rm(previewDir, { recursive: true, force: true })
     const previewFile = await routes['GET /api/workspace/material-previews/:fileName']({ fileName })
     assert.equal(previewFile.contentType, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     assert.deepEqual(previewFile.body, docxBytes)
@@ -2938,7 +2940,7 @@ test('workspace document import stores Word preview as a durable attachment URL'
     const persisted = JSON.parse(await readFile(filePath, 'utf8'))
     assert.equal(persisted.materials[0].preview.url, material.preview.url)
     assert.equal(persisted.materials[0].preview.dataUrl, '')
-    assert.doesNotMatch(JSON.stringify(persisted), /fake-docx-with-image-bytes/)
+    assert.match(persisted.materials[0].preview.storageDataUrl, /^data:application\/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

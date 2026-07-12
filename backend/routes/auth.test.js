@@ -78,6 +78,59 @@ test('auth routes log in with a password and resolve the current session user', 
   assert.equal(me.user.passwordHash, undefined)
 })
 
+test('auth routes can resolve a signed session after service restart', async () => {
+  const store = createWorkspaceStore({ users: [], projects: [] })
+  const firstRoutes = workspaceRoutes(store, {
+    auth: {
+      secureCookie: false,
+      sessionSecret: 'test-session-secret'
+    }
+  })
+
+  const registered = await firstRoutes['POST /api/auth/register']({
+    name: '林一',
+    email: 'lin@example.com',
+    password: 'secret123'
+  })
+  const cookie = setCookieValue(registered)
+
+  const restartedRoutes = workspaceRoutes(store, {
+    auth: {
+      secureCookie: false,
+      sessionSecret: 'test-session-secret'
+    }
+  })
+  const me = await restartedRoutes['GET /api/auth/me']({}, { headers: { cookie } })
+
+  assert.equal(me.authenticated, true)
+  assert.equal(me.user.email, 'lin@example.com')
+})
+
+test('auth routes bootstrap a deploy login account when configured', async () => {
+  const store = createWorkspaceStore({ users: [], projects: [] })
+  const routes = workspaceRoutes(store, {
+    auth: {
+      secureCookie: false,
+      sessionSecret: 'test-session-secret',
+      bootstrapUser: {
+        name: '部署管理员',
+        email: 'admin@example.com',
+        password: 'secret123'
+      }
+    }
+  })
+
+  const login = await routes['POST /api/auth/login']({
+    email: 'admin@example.com',
+    password: 'secret123'
+  })
+
+  assert.equal(login.authenticated, true)
+  assert.equal(login.user.email, 'admin@example.com')
+  assert.ok(store.users.some((user) => user.email === 'admin@example.com'))
+  assert.ok(store.projects.some((project) => project.ownerUserId === login.user.id))
+})
+
 test('auth routes clear the session on logout', async () => {
   const store = createWorkspaceStore({ users: [], projects: [] })
   const routes = workspaceRoutes(store, {

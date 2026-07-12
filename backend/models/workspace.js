@@ -103,7 +103,9 @@ export function createWorkspaceMaterial(input = {}) {
         fileName: input.preview.fileName || input.title || '',
         mimeType: input.preview.mimeType || '',
         dataUrl: input.preview.dataUrl || '',
-        url: input.preview.url || ''
+        url: input.preview.url || '',
+        storage: input.preview.storage || '',
+        storageDataUrl: input.preview.storageDataUrl || ''
       }
     : null
   return {

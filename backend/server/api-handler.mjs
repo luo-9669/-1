@@ -6,10 +6,21 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type,Authorization'
 }
 
-export function sendJson(res, statusCode, data, extraHeaders = {}) {
+function corsHeadersForRequest(req = {}) {
+  const origin = req.headers?.origin || req.headers?.Origin || ''
+  if (!origin) return CORS_HEADERS
+  return {
+    ...CORS_HEADERS,
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    Vary: 'Origin'
+  }
+}
+
+export function sendJson(res, statusCode, data, extraHeaders = {}, corsHeaders = CORS_HEADERS) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    ...CORS_HEADERS,
+    ...corsHeaders,
     ...extraHeaders
   })
   res.end(JSON.stringify(data, null, 2))
@@ -37,8 +48,9 @@ export async function readBody(req) {
 
 export function createApiRequestHandler({ matchRoute, sseEvent }) {
   return async function handleApiRequest(req, res) {
+    const corsHeaders = corsHeadersForRequest(req)
     if (req.method === 'OPTIONS') {
-      sendJson(res, 204, {})
+      sendJson(res, 204, {}, {}, corsHeaders)
       return
     }
 
@@ -49,7 +61,7 @@ export function createApiRequestHandler({ matchRoute, sseEvent }) {
       const served = await tryServeStaticFile(req, res, url.pathname)
       if (served) return
       
-      sendJson(res, 404, { message: `未找到接口：${req.method} ${url.pathname}` })
+      sendJson(res, 404, { message: `未找到接口：${req.method} ${url.pathname}` }, {}, corsHeaders)
       return
     }
 
@@ -73,7 +85,7 @@ export function createApiRequestHandler({ matchRoute, sseEvent }) {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
           Connection: 'keep-alive',
-          ...CORS_HEADERS,
+          ...corsHeaders,
           'X-Accel-Buffering': 'no'
         })
         res.flushHeaders?.()
@@ -86,13 +98,13 @@ export function createApiRequestHandler({ matchRoute, sseEvent }) {
       if (data?.contentType && Object.hasOwn(data, 'body')) {
         res.writeHead(data.statusCode || 200, {
           'Content-Type': data.contentType,
-          ...CORS_HEADERS,
+          ...corsHeaders,
           ...(data.headers || {})
         })
         res.end(data.body)
         return
       }
-      sendJson(res, data?.statusCode || 200, routeResponseBody(data), data?.headers || {})
+      sendJson(res, data?.statusCode || 200, routeResponseBody(data), data?.headers || {}, corsHeaders)
     } catch (error) {
       if (req.method === 'POST' && url.pathname.endsWith('/stream')) {
         const errorData = {
@@ -105,7 +117,7 @@ export function createApiRequestHandler({ matchRoute, sseEvent }) {
         res.end()
         return
       }
-      sendJson(res, 500, { message: error.message || '本地 API 执行失败' })
+      sendJson(res, 500, { message: error.message || '本地 API 执行失败' }, {}, corsHeaders)
     }
   }
 }
