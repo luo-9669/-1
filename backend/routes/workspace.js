@@ -32,6 +32,7 @@ import {
   restoredPagePreview,
   restoredPageFrame,
   restoredPageSource,
+  restoredPageDownload,
   searchMaterials,
   saveWorkspaceContext,
   skillOrchestrationSettingsView,
@@ -2536,6 +2537,7 @@ export function workspaceRoutes(store, options = {}) {
     'GET /api/workspace/restored-pages/:id/preview': async (payload) => restoredPagePreview(store, payload.id),
     'GET /api/workspace/restored-pages/:id/frame': async (payload) => restoredPageFrame(store, payload.id),
     'GET /api/workspace/restored-pages/:id/source': async (payload) => restoredPageSource(store, payload.id),
+    'GET /api/workspace/restored-pages/:id/download': async (payload) => restoredPageDownload(store, payload.id),
     'GET /api/workspace/workflow-runs/:id': async (payload) => {
       const run = getWorkflowRun(store, payload.id)
       return {

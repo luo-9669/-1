@@ -1866,6 +1866,27 @@ export function restoredPageSource(store, id = '') {
   }
 }
 
+function restoredPageDownloadFileName(title = '') {
+  const safeTitle = String(title || 'restored-page')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .trim() || 'restored-page'
+  return /\.html?$/i.test(safeTitle) ? safeTitle : `${safeTitle}.html`
+}
+
+export function restoredPageDownload(store, id = '') {
+  const source = restoredPageSource(store, id)
+  const indexFile = source.files.find((file) => file.path === 'index.html') || source.files[0] || {}
+  const body = indexFile.content || ''
+  const fileName = restoredPageDownloadFileName(source.title)
+  return {
+    contentType: 'text/html; charset=utf-8',
+    headers: {
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    },
+    body
+  }
+}
+
 export async function upsertWorkflowRun(store, payload = {}) {
   const incomingRun = createWorkspaceWorkflowRun({
     ...payload,

@@ -77,6 +77,23 @@ test('workspace restored page overview derives urls from current id and keeps ht
   assert.equal(page.sourceUrlPath, '/api/workspace/restored-pages/restored-current-id/source')
 })
 
+test('workspace restored page download returns the generated html file', async () => {
+  const store = createWorkspaceStore()
+  const routes = workspaceRoutes(store)
+  await routes['POST /api/workspace/restored-pages']({
+    id: 'restored-download-id',
+    projectId: 'project-flow',
+    title: '可下载资产',
+    html: '<main>download me</main>'
+  })
+
+  const response = await routes['GET /api/workspace/restored-pages/:id/download']({ id: 'restored-download-id' })
+
+  assert.equal(response.contentType, 'text/html; charset=utf-8')
+  assert.equal(response.body, '<main>download me</main>')
+  assert.equal(response.headers['Content-Disposition'], "attachment; filename*=UTF-8''%E5%8F%AF%E4%B8%8B%E8%BD%BD%E8%B5%84%E4%BA%A7.html")
+})
+
 test('restored asset cards expose a hover delete action without opening detail', async () => {
   const panelSource = await readFile(new URL('../frontend/src/pages/factory/FactoryHomePanel.vue', import.meta.url), 'utf8')
   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
