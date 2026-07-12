@@ -67,9 +67,43 @@ import { buildWebsiteKnowledgeImport, websiteBlueprintDocumentFromImport } from 
 import { createAgentProviderFromModelSettings } from '../services/llm-provider.js'
 import { safeParseModelJson } from '../services/generation-runner.js'
 import { storageRoot } from '../server/server-config.mjs'
+import { isDatabaseAvailable } from '../services/database-store.mjs'
 
 const DEFAULT_GENERATED_IMAGE_DIR = join(storageRoot, 'workspace', 'generated-images')
 const DEFAULT_MATERIAL_PREVIEW_DIR = join(storageRoot, 'workspace', 'material-previews')
+
+function safeUrlHost(value = '') {
+  try {
+    return new URL(String(value || '')).host
+  } catch {
+    return ''
+  }
+}
+
+async function workspaceStorageStatus(store = {}) {
+  const databaseAvailable = await isDatabaseAvailable()
+  const supabaseUrl = process.env.COZE_SUPABASE_URL || ''
+  const filePath = store.filePath || ''
+  return {
+    ok: true,
+    storageMode: databaseAvailable ? 'database+file-cache' : 'file-fallback',
+    database: {
+      available: databaseAvailable,
+      supabaseHost: safeUrlHost(supabaseUrl),
+      env: {
+        COZE_SUPABASE_URL: Boolean(process.env.COZE_SUPABASE_URL),
+        COZE_SUPABASE_ANON_KEY: Boolean(process.env.COZE_SUPABASE_ANON_KEY),
+        COZE_SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.COZE_SUPABASE_SERVICE_ROLE_KEY)
+      }
+    },
+    file: {
+      enabled: Boolean(filePath),
+      path: filePath,
+      storageRoot,
+      usingTmp: storageRoot.startsWith('/tmp/')
+    }
+  }
+}
 
 function normalizeDocumentText(document = {}) {
   return String(document.text || document.content || document.markdown || '').trim()
@@ -1981,6 +2015,7 @@ export function workspaceRoutes(store, options = {}) {
   return {
     ...authService.routes(),
     'GET /api/workspace': async () => workspaceSnapshot(store),
+    'GET /api/workspace/storage-status': async () => workspaceStorageStatus(store),
     'PATCH /api/workspace/context': async (payload) => saveWorkspaceContext(store, payload),
     'GET /api/workspace/model-settings': async () => ({
       modelSettings: modelSettingsView(store)

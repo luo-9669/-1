@@ -31,6 +31,32 @@ test('workspace route exports markdown as a direct PDF download', async () => {
   assert.match(result.body.toString('utf8'), /^%PDF/)
 })
 
+test('workspace storage status exposes deploy diagnostics without secrets', async () => {
+  const previousUrl = process.env.COZE_SUPABASE_URL
+  const previousAnonKey = process.env.COZE_SUPABASE_ANON_KEY
+  process.env.COZE_SUPABASE_URL = 'https://example.supabase.co'
+  process.env.COZE_SUPABASE_ANON_KEY = 'secret-anon-key'
+  try {
+    const store = createWorkspaceStore({ projects: [] }, { filePath: '/tmp/workspace.local.json' })
+    const routes = workspaceRoutes(store)
+    const result = await routes['GET /api/workspace/storage-status']({})
+
+    assert.equal(result.ok, true)
+    assert.equal(result.database.available, true)
+    assert.equal(result.database.env.COZE_SUPABASE_URL, true)
+    assert.equal(result.database.env.COZE_SUPABASE_ANON_KEY, true)
+    assert.equal(result.database.supabaseHost, 'example.supabase.co')
+    assert.equal(result.file.enabled, true)
+    assert.equal(result.file.path, '/tmp/workspace.local.json')
+    assert.equal(JSON.stringify(result).includes('secret-anon-key'), false)
+  } finally {
+    if (previousUrl === undefined) delete process.env.COZE_SUPABASE_URL
+    else process.env.COZE_SUPABASE_URL = previousUrl
+    if (previousAnonKey === undefined) delete process.env.COZE_SUPABASE_ANON_KEY
+    else process.env.COZE_SUPABASE_ANON_KEY = previousAnonKey
+  }
+})
+
 test('workspace model settings do not keep codex exec surface after switching to openai-compatible', async () => {
   const store = createWorkspaceStore({ settings: [] })
   await saveModelSettings(store, {
