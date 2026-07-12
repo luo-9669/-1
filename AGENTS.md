@@ -67,6 +67,7 @@
 - **预览**：通过 Vite dev server 预览前端页面
 - **测试**：`node --test tests/*.test.mjs backend/routes/*.test.js`
 - **构建**：`pnpm --filter liuchengtong-frontend run build`
+- **干净安装**：`pnpm install --frozen-lockfile`；`pnpm-workspace.yaml` 中的 `allowBuilds.esbuild: true` 和 `postcss: 8.5.16` override 是部署构建契约，不要移回 `package.json` 或删除。
 
 ### 预览链路配置
 
@@ -117,6 +118,7 @@
 - 前端使用 Vue 3 Composition API + Element Plus 组件库
 - 环境变量通过 `.env` 文件管理，参考 `.env.example` 和 `.env.production.example`
 - 本地数据不提交（workspace JSON、生成图片、auth states、日志等）
+- 新对话继续开发时先 `git pull` 最新 `main`，确认不要回退模型 curl fallback、`/api/workspace/storage-status`、高级 UX 10 节点阶段产出、图片转 HTML 临时预览等待、pnpm 构建策略。
 
 ## 常见问题和预防
 
@@ -125,3 +127,4 @@
 - 前端 App.vue 文件较大（~892KB），包含主要路由和布局逻辑
 - 后端 mock-api.mjs 文件较大（~102KB），是核心路由分发入口
 - `single-file-cli` 用于网页抓取，依赖 Chrome/Chromium
+- 图片转 HTML 的临时预览路由 `image-html-*` 必须保持 15 秒轮询、无前端最大等待时间，并保留 `standalonePreviewLoadToken` 防止刷新/水合产生的旧等待循环覆盖当前 iframe；相关 contract 在 `docs/product-contracts/frontend-backend-handoff.md`。

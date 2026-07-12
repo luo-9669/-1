@@ -75,9 +75,11 @@ If any answer is uncertain, keep the module and ask for explicit confirmation be
 Cleanup should be committed in small, runnable batches. Each batch must keep the app buildable and should be verified with the relevant release gate:
 
 ```bash
-npm test
-npm run build
+pnpm install --frozen-lockfile
+pnpm --filter liuchengtong-frontend run build
 git diff --check
 ```
+
+The pnpm workspace build settings are part of the clean-version contract. Keep `pnpm-workspace.yaml` as the source for pnpm settings, including `allowBuilds.esbuild: true` so clean installs can run the required esbuild postinstall, and the `postcss: 8.5.16` override so builds do not fail the minimum-release-age supply-chain policy. Do not move these settings back into `package.json`; pnpm 11 no longer reads the `pnpm.overrides` field there.
 
 For documentation-only contract updates, `git diff --check` is the minimum required verification.
