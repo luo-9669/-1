@@ -578,7 +578,7 @@ async function generateImageToHtmlStream(payload = {}, options = {}, routeContex
 }
 
 export function createImageToHtmlService(config = {}) {
-  const timeoutMs = config.timeoutMs || 600000
+  const timeoutMs = config.timeoutMs === 0 ? 0 : (config.timeoutMs || 600000)
   const verifyGeneratedPage = config.verifyGeneratedPage || (async () => ({ status: 'passed', results: [], recommendations: [] }))
   const createStreamPusher = config.createStreamPusher || ((routeContext = {}) => ({
     push: (event, data) => routeContext.writeEvent?.(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
@@ -608,7 +608,7 @@ export function createImageToHtmlService(config = {}) {
       imageUpgrade: payload.imageUpgrade || '',
       iconSystem: payload.iconSystem || '',
       model: 'gpt-5.5',
-      timeoutMs: options.timeoutMs || timeoutMs
+      timeoutMs: options.timeoutMs === 0 ? 0 : (options.timeoutMs || timeoutMs)
     }
     let modelResult = null
     if (typeof provider.stream === 'function') {

@@ -12995,8 +12995,7 @@ function workflowAnalysisRequestTimeoutMs() {
 }
 
 function imageToHtmlRequestTimeoutMs() {
-  const modelTimeoutMs = Number(modelSettingsForm.timeoutMs) || 60000
-  return Math.max(600000, modelTimeoutMs + 120000)
+  return 0
 }
 
 function workflowAgentRequestTimeoutMs() {

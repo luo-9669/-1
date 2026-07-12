@@ -602,7 +602,7 @@ export const api = {
       return request(config.aiBaseUrl || config.apiBaseUrl, '/api/generate/image-to-html', {
         method: 'POST',
         body: JSON.stringify(payload),
-        timeoutMs: 600000
+        timeoutMs: 0
       })
     },
     imageToHtmlStream(config, payload, options = {}) {
@@ -611,7 +611,7 @@ export const api = {
         body: JSON.stringify(payload),
         onEvent: options.onEvent,
         signal: options.signal,
-        timeoutMs: options.timeoutMs || 600000
+        timeoutMs: options.timeoutMs ?? 0
       })
     },
     vueVite(config, payload) {
