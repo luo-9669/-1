@@ -155,7 +155,7 @@ export function orchestrateRequirementSkill(payload = {}) {
     resolvedSkillName: skillLabel(resolvedSkillId),
     displaySkillName,
     routingReason: requestedSkillId === ACTIVE_REQUIREMENT_SKILL_ID
-      ? `当前只启用「${displaySkillName}」，继续按最新高级 UX 7 步规范生成 Markdown 并导入画布。`
+      ? `当前只启用「${displaySkillName}」，继续按最新高级 UX 10 步规范生成 Markdown 并导入画布。`
       : `当前已清空其它 Skill，原选择「${skillLabel(requestedSkillId)}」已切换为「${displaySkillName}」。`
   }
 }

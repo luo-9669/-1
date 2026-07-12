@@ -12,7 +12,8 @@ import {
   buildTotalDesignFlow,
   failAdvancedUxMarkdownGenerationInTotalFlow,
   importAdvancedUxMarkdownReportToTotalFlow,
-  TOTAL_DESIGN_FLOW_STAGES
+  TOTAL_DESIGN_FLOW_STAGES,
+  withDownstreamStageArtifactContext
 } from '../backend/services/total-design-flow.js'
 import { buildWorkflowStageRuntime } from '../backend/services/stage-runtime.js'
 import { buildRequirementDissectionGuidanceArtifact } from '../backend/services/requirement-dissection-guidance.js'
@@ -151,7 +152,7 @@ test('legacy dialogue skill is hidden and routed to advanced UX', () => {
   assert.equal(routing.displaySkillName, '高级 UX 需求分析')
 })
 
-test('advanced UX requirement analysis skill copies total-flow behavior with seven UX nodes', () => {
+test('advanced UX requirement analysis skill copies total-flow behavior with ten UX nodes', () => {
   const frontendSkill = createSystemSkills().find((skill) => skill.id === 'advanced-ux-requirement-analysis')
   const backendSkill = getSkillDefinition('advanced-ux-requirement-analysis')
   const backendIds = listSkillDefinitions().map((skill) => skill.id)
@@ -163,17 +164,20 @@ test('advanced UX requirement analysis skill copies total-flow behavior with sev
     'ux-original-requirement-analysis',
     'ux-design-problem-definition',
     'ux-user-scenario',
+    'ux-assumption-validation',
+    'ux-design-opportunity',
     'ux-interaction-chain',
     'ux-three-design-solutions',
     'ux-exception-flow',
-    'ux-recommendation-decision'
+    'ux-recommendation-decision',
+    'ux-priority-phasing'
   ])
-  assert.match(frontendSkill.outputFormat, /原始需求分析|推荐方案建议/)
+  assert.match(frontendSkill.outputFormat, /原始需求分析|假设与验证|设计机会|推荐方案建议|设计优先级/)
 
   assert.equal(backendSkill.id, 'advanced-ux-requirement-analysis')
   assert.equal(backendSkill.outputSchema, 'smart-canvas')
   assert.equal(backendSkill.mode, 'total-design-flow')
-  assert.match(backendSkill.promptTemplate, /高级 UX 需求分析|7 步|原始需求分析|推荐方案建议|置信度|事实、推断、建议、风险/)
+  assert.match(backendSkill.promptTemplate, /高级 UX 需求分析|10 步|原始需求分析|假设与验证|设计机会|推荐方案建议|设计优先级|置信度|事实、推断、建议、风险/)
   assert.match(backendSkill.promptTemplate, /页面交互框架与说明|低保真|Draw\.io/)
   assert.ok(backendSkill.qualityChecks.includes('page-interaction-doc-planning'))
   assert.ok(backendSkill.qualityChecks.includes('visual-artifact-status'))
@@ -183,7 +187,7 @@ test('advanced UX requirement analysis skill copies total-flow behavior with sev
   assert.ok(backendIds.includes('advanced-ux-requirement-analysis'))
 })
 
-test('advanced UX upload route prompts require the latest seven headings', async () => {
+test('advanced UX upload route prompts require the latest ten headings and new required fields', async () => {
   const uploadsSource = await readFile(new URL('../backend/routes/uploads.js', import.meta.url), 'utf8')
   const directPromptSource = uploadsSource.slice(
     uploadsSource.indexOf('const advancedUxDirectMarkdownPrompt'),
@@ -197,10 +201,13 @@ test('advanced UX upload route prompts require the latest seven headings', async
     '原始需求分析',
     '设计问题定义',
     '用户与场景',
+    '假设与验证',
+    '设计机会',
     '整体交互链路',
     '三套设计方案',
     '异常流补充',
-    '推荐方案建议'
+    '推荐方案建议',
+    '设计优先级与分阶段计划'
   ]
 
   latestHeadings.forEach((heading) => {
@@ -213,12 +220,17 @@ test('advanced UX upload route prompts require the latest seven headings', async
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/需求阶段一产出约束\.md/)
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/交互低保阶段二\.md/)
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/AI视频爆款复刻-对照参考\.md/)
+  assert.match(uploadsSource, /docs\/skills\/advanced-ux\/AI视频爆款复刻工具-阶段二产出参考\.md/)
   assert.match(directPromptSource, /禁止复制、套用或改写参考文档中的业务内容/)
   ;[
     'GWT',
     '5 Whys',
     'HMW',
     'Journey Map',
+    '假设分类总表',
+    '高风险假设聚焦',
+    '设计机会总表',
+    '机会→步骤映射',
     '页面三件套',
     '弹窗/抽屉定义表',
     '状态迁移图',
@@ -227,7 +239,10 @@ test('advanced UX upload route prompts require the latest seven headings', async
     '方案对比矩阵',
     '关键节点低保真',
     'Problem-Solution Fit',
-    '六顶思考帽'
+    '六顶思考帽',
+    '优先级排序总览',
+    '分期交付计划',
+    '待确认决策'
   ].forEach((token) => {
     assert.match(uploadsSource, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   })
@@ -238,6 +253,8 @@ test('advanced UX upload route prompts require the latest seven headings', async
   assert.match(uploadsSource, /advancedUxSixHatsReviewPattern/)
   assert.match(uploadsSource, /缺少推荐方案建议下的六顶思考帽评审/)
   assert.match(uploadsSource, /advancedUxLowFiDrawioStatusPattern/)
+  assert.match(uploadsSource, /图编号（如图1、图6）/)
+  assert.match(uploadsSource, /图编号内容仍是兜底说明/)
   assert.doesNotMatch(directPromptSource, /必须包含且仅用以下 7 个二级标题：## 需求理解/)
   assert.doesNotMatch(repairPromptSource, /保持高级 UX 7 节点结构：需求理解/)
   assert.match(uploadsSource, /包含旧章节标题/)
@@ -256,7 +273,7 @@ test('advanced UX page interaction prompt allows required text code blocks', asy
   assert.doesNotMatch(pagePromptSource, /不输出 JSON、解释、代码围栏或前后缀/)
 })
 
-test('advanced UX requirement analysis builds total-flow canvas with PDF seven-node requirement stage', () => {
+test('advanced UX requirement analysis builds total-flow canvas with PDF ten-node requirement stage', () => {
   const analysis = analyzeRequirementDocuments({
     skillId: 'advanced-ux-requirement-analysis',
     requestedSkillId: 'advanced-ux-requirement-analysis',
@@ -279,17 +296,20 @@ test('advanced UX requirement analysis builds total-flow canvas with PDF seven-n
     'ux-original-requirement-analysis',
     'ux-design-problem-definition',
     'ux-user-scenario',
+    'ux-assumption-validation',
+    'ux-design-opportunity',
     'ux-interaction-chain',
     'ux-three-design-solutions',
     'ux-exception-flow',
-    'ux-recommendation-decision'
+    'ux-recommendation-decision',
+    'ux-priority-phasing'
   ])
   assert.ok(totalFlow.stageCanvases['requirement-dissection'].nodes.every((node) => node.artifactStatus === 'generating'))
   assert.equal(totalFlow.advancedUxReport?.status, 'generating')
   assert.match(totalFlow.advancedUxReport?.fileName || '', /^高级UX需求分析-\d{8}-\d{4}\.md$/)
 })
 
-test('advanced UX markdown report imports into generated seven-node requirement canvas', () => {
+test('advanced UX markdown report imports into generated ten-node requirement canvas', () => {
   const analysis = analyzeRequirementDocuments({
     skillId: 'advanced-ux-requirement-analysis',
     requestedSkillId: 'advanced-ux-requirement-analysis',
@@ -304,18 +324,74 @@ test('advanced UX markdown report imports into generated seven-node requirement 
 
   assert.equal(importedFlow.advancedUxReport.status, 'imported')
   assert.match(importedFlow.advancedUxReport.markdown, /## 原始需求分析/)
-  assert.equal(importedFlow.advancedUxReport.sections.length, 7)
+  assert.equal(importedFlow.advancedUxReport.sections.length, 10)
   assert.deepEqual(importedFlow.requirementDissectionArtifact.productAnalysisPipeline.tabs.map((tab) => tab.id), [
     'ux-original-requirement-analysis',
     'ux-design-problem-definition',
     'ux-user-scenario',
+    'ux-assumption-validation',
+    'ux-design-opportunity',
     'ux-interaction-chain',
     'ux-three-design-solutions',
     'ux-exception-flow',
-    'ux-recommendation-decision'
+    'ux-recommendation-decision',
+    'ux-priority-phasing'
   ])
   assert.ok(importedFlow.stageCanvases['requirement-dissection'].nodes.every((node) => node.artifactStatus === 'generated'))
   assert.ok(importedFlow.stageCanvases['requirement-dissection'].nodes.every((node) => /我要做一个卖鞋子的小程序|卖鞋子的小程序/.test(node.markdown || node.summary || '')))
+})
+
+test('advanced UX fallback markdown report follows stage one output standard sections', () => {
+  const analysis = analyzeRequirementDocuments({
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    skillSelectionMode: 'auto',
+    demandScope: 'project',
+    input: '做一个给企业销售团队使用的线索跟进 Web 工具',
+    documents: []
+  })
+  const report = buildAdvancedUxMarkdownReport(analysis)
+  const markdown = report.markdown
+
+  ;[
+    '需求理解清单',
+    '需求清晰度评分表',
+    'GWT 功能行为描述',
+    '5 Whys 根因追溯',
+    '关键缺口清单',
+    '追问清单',
+    '目标矩阵表',
+    '体验矛盾表',
+    'HMW 问题卡片',
+    '用户旅程地图',
+    '页面优先级初判表',
+    '假设分类总表',
+    '高风险假设聚焦',
+    '设计机会总表',
+    '优先 Top 3-5 机会',
+    '机会→步骤映射',
+    '页面总览表',
+    '页面流转表',
+    '页面框架表',
+    '状态机表',
+    '信息架构实体表',
+    '全局交互规范表',
+    '方案卡片',
+    '三方案对比矩阵',
+    '异常流矩阵表',
+    '推荐决策卡片',
+    '假设回检',
+    '六帽评审表',
+    '优先级排序总览',
+    '分期交付计划',
+    '待确认决策',
+    '数据埋点方案表',
+    '最终方案页面清单',
+    '下一步行动表',
+    '页面交互框架与说明.md'
+  ].forEach((token) => assert.match(markdown, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
+  assert.match(markdown, /```text[\s\S]*┌[\s\S]*┘[\s\S]*```/)
+  assert.equal(report.sections.length, 10)
 })
 
 test('advanced UX markdown import turns framework subsections into structured detail blocks', () => {
@@ -400,7 +476,47 @@ test('advanced UX markdown import turns framework subsections into structured de
     '|--------|------|---------|---------|------|',
     '| P0 | 尺码不合且换码困难 | 用户选码→收货试穿→发现不合适→寻找换码入口 | 信任下降 | 换码入口前置 |',
     '',
-    '## 节点 04：整体交互链路',
+    '## 节点 04：假设与验证',
+    '',
+    '### 1. 假设分类总表',
+    '',
+    '| 假设内容 | 分类 | 来源追溯 | 不成立的影响 | 验证方式 | 置信度 | 当前状态 |',
+    '|---------|------|----------|--------------|----------|--------|----------|',
+    '| 用户愿意在线完成尺码决策 | 用户假设 | 用户与场景 | 转化下降 | 原型测试 | 中 | 待验证 |',
+    '',
+    '### 2. 高风险假设聚焦',
+    '',
+    '| 高风险假设 | 置信度 | 降级策略 | 触发验证的时间节点 |',
+    '|------------|--------|----------|--------------------|',
+    '| 尺码助手能降低退换率 | 中 | 保留人工客服入口 | MVP 原型测试后 |',
+    '',
+    '### 3. 假设回检点',
+    '',
+    '| 假设编号 | 回检节点 | 回检方式 |',
+    '|----------|----------|----------|',
+    '| H1 | 推荐方案建议 | 对照 PSF 和原型测试结果回检 |',
+    '',
+    '## 节点 05：设计机会',
+    '',
+    '### 1. 设计机会总表',
+    '',
+    '| 机会编号 | 机会描述 | 类型 | 上游依据 | 可承接步骤 | 预期价值 | 优先级 |',
+    '|----------|----------|------|----------|------------|----------|--------|',
+    '| O1 | 尺码助手前置 | 体验 | 尺码不合风险 | 步骤07 三套设计方案 | 降低决策成本 | P0 |',
+    '',
+    '### 2. 优先 Top 3-5 机会',
+    '',
+    '| 排序 | 机会编号 | 机会描述 | 优先理由 | 设计方向提示 |',
+    '|------|----------|----------|----------|--------------|',
+    '| Top 1 | O1 | 尺码助手前置 | 直接影响下单 | 在详情页给出推荐尺码 |',
+    '',
+    '### 3. 机会→步骤映射',
+    '',
+    '| 机会编号 | 承接步骤 | 承接方式 |',
+    '|----------|----------|----------|',
+    '| O1 | 步骤06 整体交互链路 | 进入商品详情与下单主流程 |',
+    '',
+    '## 节点 06：整体交互链路',
     '',
     '### 1. 用户流程图',
     '',
@@ -414,7 +530,7 @@ test('advanced UX markdown import turns framework subsections into structured de
     '|---------|---------|----------|----------|---------|',
     '| 商品SPU | 品牌、款名、图片 | 1:N SKU | 上架/下架 | 卡片突出可选尺码 |',
     '',
-    '## 节点 05：三套设计方案',
+    '## 节点 07：三套设计方案',
     '',
     '### 1. 机会总览',
     '',
@@ -436,7 +552,7 @@ test('advanced UX markdown import turns framework subsections into structured de
     '|-----|------|------|-------------|---------|--------|',
     '| 1 | 尺码助手 | 降低尺码决策成本 | 用户需要先判断尺码 | 商品详情 | 高 |',
     '',
-    '## 节点 06：异常流补充',
+    '## 节点 08：异常流补充',
     '',
     '### 1. 全局排序',
     '',
@@ -452,7 +568,7 @@ test('advanced UX markdown import turns framework subsections into structured de
     '|------|---------|---------|---------|',
     '| 基础售后 | 退货/换码申请入口 | 提升购买信心 | SOP不清 |',
     '',
-    '## 节点 07：推荐方案建议',
+    '## 节点 09：推荐方案建议',
     '',
     '### 1. 交付物清单',
     '',
@@ -470,7 +586,27 @@ test('advanced UX markdown import turns framework subsections into structured de
     '',
     '| 埋点事件 | 触发条件 | 上报参数 | 用途 |',
     '|---------|---------|---------|------|',
-    '| size_select | 选择尺码 | 商品id、尺码 | 分析尺码需求 |'
+    '| size_select | 选择尺码 | 商品id、尺码 | 分析尺码需求 |',
+    '',
+    '## 节点 10：设计优先级与分阶段计划',
+    '',
+    '### 1. 优先级排序总览',
+    '',
+    '| 功能/机会 | 用户价值 | 业务价值 | 实施成本 | 综合优先级 | 分期建议 |',
+    '|-----------|----------|----------|----------|------------|----------|',
+    '| O1 尺码助手 | 高 | 高 | 中 | P0 | 一期 |',
+    '',
+    '### 2. 分期交付计划',
+    '',
+    '| 阶段 | 范围 | 核心目标 | 交付物 | 验证标准 | 预计周期 |',
+    '|------|------|----------|--------|----------|----------|',
+    '| 一期 | 商品详情与尺码决策 | 降低选码成本 | 原型与接口 | 任务完成率提升 | 2周 |',
+    '',
+    '### 3. 待确认决策',
+    '',
+    '| 决策事项 | 影响范围 | 需要谁确认 | 确认时限 | 不确认的影响 |',
+    '|----------|----------|------------|----------|--------------|',
+    '| 退换码规则 | 售后入口 | 运营/法务 | 开发前 | 影响下单信任 |'
   ].join('\n')
 
   const importedFlow = importAdvancedUxMarkdownReportToTotalFlow(totalFlow, {
@@ -515,6 +651,98 @@ test('advanced UX markdown import turns framework subsections into structured de
   assert.ok(importedFlow.stageCanvases['requirement-dissection'].nodes.every((node) => node.detailBlocks?.some((block) => block.type !== 'markdown')))
 })
 
+test('advanced UX markdown import wraps natural diagrams and rejects placeholder figure content', () => {
+  const analysis = analyzeRequirementDocuments({
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    skillSelectionMode: 'auto',
+    input: '我要做一个 AI 视频爆款复刻工具',
+    documents: []
+  })
+  const totalFlow = buildTotalDesignFlow(analysis)
+  const markdown = [
+    '## 节点 06：整体交互链路',
+    '',
+    '### 1. 用户流程图',
+    '',
+    '[进入工具]',
+    '↓',
+    '[粘贴链接或上传视频]',
+    '├─ 失败 → [展示失败原因]',
+    '└─ 成功 → [创建参考视频对象]',
+    '',
+    '### 2. 业务流程图',
+    '',
+    '[项目草稿创建]',
+    '↓',
+    '[写入参考视频]',
+    '↓',
+    '[生成拆解任务]',
+    '',
+    '### 7. 状态迁移图',
+    '',
+    'ST0(草稿) -> ST1(解析中) -> ST2(已完成)',
+    'ST1(解析中) -> ST3(解析失败) -> ST1(解析中)',
+    '',
+    '### 9. 低保真线框图',
+    '',
+    '┌────────────────────┐',
+    '│ 顶部导航             │',
+    '├────────────────────┤',
+    '│ 导入区 / 拆解区 / 预览区 │',
+    '└────────────────────┘',
+    '',
+    '## 节点 07：三套设计方案',
+    '',
+    '### 7. 关键节点低保真对比',
+    '',
+    '方案一：分步向导        方案二：单页工作台        方案三：AI 对话助手',
+    '┌────────┐          ┌────────┐          ┌────────┐',
+    '│ 导入   │          │ 输入区 │          │ 对话区 │',
+    '└────────┘          └────────┘          └────────┘',
+    '',
+    '## 节点 09：推荐方案建议',
+    '',
+    '### 2. 六顶思考帽评审',
+    '',
+    '| 帽子 | 方案一 | 方案二 | 方案三 | 结论 |',
+    '|------|--------|--------|--------|------|',
+    '| 白帽 | 流程清晰 | 信息密度高 | 依赖 AI 稳定性 | 事实上方案一最稳 |',
+    '| 红帽 | 用户安心 | 老手顺手 | 新手轻松 | 情绪价值各有侧重 |',
+    '| 黑帽 | 流程偏长 | 容易迷失 | 输出不可控 | 一期避免高不确定 |',
+    '| 黄帽 | 易上线 | 效率高 | 差异化强 | 可分阶段吸收 |',
+    '| 绿帽 | 可局部回流 | 可演进工作台 | 可做辅助助手 | 路线可组合 |',
+    '| 蓝帽 | 一期主方案 | 二期增强 | 三期探索 | 先选方案一 |',
+    '',
+    '### 10. 低保真线框图产物约束',
+    '',
+    '| 项目 | 约束 |',
+    '|------|------|',
+    '| 图6 | 当前仅输出 ASCII 文本布局；真实低保真图片和 Draw.io 文件待后续按触发条件生成 |'
+  ].join('\n')
+
+  const importedFlow = importAdvancedUxMarkdownReportToTotalFlow(totalFlow, {
+    fileName: '高级UX需求分析-20260712-1200.md',
+    markdown
+  })
+  const normalized = importedFlow.advancedUxReport.markdown
+  assert.match(normalized, /### 1\. 用户流程图[\s\S]*```text[\s\S]*\[进入工具\][\s\S]*```/)
+  assert.match(normalized, /### 2\. 业务流程图[\s\S]*```text[\s\S]*\[项目草稿创建\][\s\S]*```/)
+  assert.match(normalized, /### 7\. 状态迁移图[\s\S]*```text[\s\S]*ST0\(草稿\).*ST1\(解析中\)[\s\S]*```/)
+  assert.match(normalized, /### 9\. 低保真线框图[\s\S]*```text[\s\S]*┌/)
+  assert.match(normalized, /### 7\. 关键节点低保真对比[\s\S]*```text[\s\S]*方案一[\s\S]*方案二[\s\S]*方案三[\s\S]*```/)
+  assert.doesNotMatch(normalized, /当前仅输出 ASCII 文本布局；真实低保真图片和 Draw\.io 文件待后续按触发条件生成/)
+
+  const flowBlocks = importedFlow.requirementDissectionArtifact.productAnalysisPipeline.tabs
+    .find((tab) => tab.id === 'ux-interaction-chain')
+    .detailBlocks
+  const solutionBlocks = importedFlow.requirementDissectionArtifact.productAnalysisPipeline.tabs
+    .find((tab) => tab.id === 'ux-three-design-solutions')
+    .detailBlocks
+  assert.ok(flowBlocks.filter((block) => block.type === 'flow-wireframe').length >= 4)
+  assert.ok(solutionBlocks.some((block) => block.type === 'flow-wireframe' && /方案一/.test(block.content || '')))
+})
+
 test('advanced UX markdown import recognizes natural numbered node headings', () => {
   const analysis = analyzeRequirementDocuments({
     skillId: 'advanced-ux-requirement-analysis',
@@ -545,29 +773,53 @@ test('advanced UX markdown import recognizes natural numbered node headings', ()
     '',
     '- 假设用户愿意在线买鞋。',
     '',
-    '## 04 整体交互链路：怎么串起来？',
+    '## 04 假设与验证：哪些判断需要验证？',
+    '',
+    '### 1. 假设分类总表',
+    '',
+    '| 假设内容 | 分类 | 来源追溯 | 不成立的影响 | 验证方式 | 置信度 | 当前状态 |',
+    '|---------|------|----------|--------------|----------|--------|----------|',
+    '| 用户愿意在线买鞋 | 用户假设 | 用户输入 | 转化下降 | 访谈 | 低 | 待验证 |',
+    '',
+    '## 05 设计机会：哪些机会值得承接？',
+    '',
+    '### 1. 设计机会总表',
+    '',
+    '| 机会描述 | 类型 | 上游依据 | 可承接步骤 | 预期价值 | 优先级 |',
+    '|----------|------|----------|------------|----------|--------|',
+    '| 尺码助手 | 体验 | 尺码风险 | 步骤07 | 降低退换 | P0 |',
+    '',
+    '## 06 整体交互链路：怎么串起来？',
     '',
     '### 1. 用户流程图',
     '',
     '浏览 → 下单',
     '',
-    '## 05 三套设计方案：有什么方案？具体怎么做？',
+    '## 07 三套设计方案：有什么方案？具体怎么做？',
     '',
     '### 1. 机会总览',
     '',
     '- 尺码助手。',
     '',
-    '## 06 异常流补充：哪里会失败？怎么恢复？',
+    '## 08 异常流补充：哪里会失败？怎么恢复？',
     '',
     '### 1. 全局排序',
     '',
     '- 商品详情 P0。',
     '',
-    '## 07 推荐方案建议：怎么落地？怎么验证？',
+    '## 09 推荐方案建议：怎么落地？怎么验证？',
     '',
     '### 1. 交付物清单',
     '',
-    '- PRD。'
+    '- PRD。',
+    '',
+    '## 10 设计优先级与分阶段计划：先做什么？',
+    '',
+    '### 1. 优先级排序总览',
+    '',
+    '| 功能/机会 | 用户价值 | 业务价值 | 实施成本 | 综合优先级 | 分期建议 |',
+    '|-----------|----------|----------|----------|------------|----------|',
+    '| 尺码助手 | 高 | 高 | 中 | P0 | 一期 |'
   ].join('\n')
 
   const importedFlow = importAdvancedUxMarkdownReportToTotalFlow(totalFlow, {
@@ -581,10 +833,13 @@ test('advanced UX markdown import recognizes natural numbered node headings', ()
     'ux-original-requirement-analysis',
     'ux-design-problem-definition',
     'ux-user-scenario',
+    'ux-assumption-validation',
+    'ux-design-opportunity',
     'ux-interaction-chain',
     'ux-three-design-solutions',
     'ux-exception-flow',
-    'ux-recommendation-decision'
+    'ux-recommendation-decision',
+    'ux-priority-phasing'
   ])
   assert.match(nodes.find((node) => node.id === 'ux-design-problem-definition').markdown, /02 设计问题定义/)
 })
@@ -605,7 +860,7 @@ test('advanced UX markdown import failure keeps report and marks placeholder nod
 
   assert.equal(importedFlow.advancedUxReport.status, 'import_failed')
   assert.match(importedFlow.advancedUxReport.importError, /缺少章节/)
-  assert.equal(importedFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(importedFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.ok(importedFlow.stageCanvases['requirement-dissection'].nodes.every((node) => node.artifactStatus === 'failed'))
   const returnedNode = importedFlow.stageCanvases['requirement-dissection'].nodes.find((node) => node.id === 'ux-original-requirement-analysis')
   assert.match(returnedNode.markdown || '', /只有一个章节/)
@@ -2015,10 +2270,13 @@ test('smart recommendation routes to the active advanced UX workflow', () => {
     'ux-original-requirement-analysis',
     'ux-design-problem-definition',
     'ux-user-scenario',
+    'ux-assumption-validation',
+    'ux-design-opportunity',
     'ux-interaction-chain',
     'ux-three-design-solutions',
     'ux-exception-flow',
-    'ux-recommendation-decision'
+    'ux-recommendation-decision',
+    'ux-priority-phasing'
   ])
 })
 
@@ -2072,7 +2330,7 @@ test('legacy interaction design workflow routes to advanced UX requirement analy
 
   assert.equal(result.displaySkillName, '高级 UX 需求分析')
   assert.equal(result.skillId, 'advanced-ux-requirement-analysis')
-  assert.equal(result.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(result.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.ok(result.totalDesignFlow.advancedUxReport)
 })
 
@@ -3166,6 +3424,180 @@ test('total design flow derives interaction stage page nav from final model canv
     ['lofi-custom-entry', 'lofi-custom-result']
   )
   assert.ok(!flow.stagePages['interaction-lofi'].some((page) => page.title === '旧页面导航'))
+})
+
+test('downstream UI visual canvas realigns stale pending nodes to interaction lofi pages', () => {
+  const flow = withDownstreamStageArtifactContext({
+    currentStage: 'ui-visual',
+    stages: TOTAL_DESIGN_FLOW_STAGES,
+    stageCanvases: {
+      'interaction-lofi': {
+        nodes: [
+          {
+            id: 'advanced-ux-page-home',
+            stageId: 'interaction-lofi',
+            title: '复制首页',
+            sourcePageId: 'page-home',
+            sliceId: 'slice-main',
+            pageLayoutArtifact: {
+              version: 'layout-v1',
+              asciiWireframe: 'A1 顶部导航区 | Logo | 项目 | 模板',
+              layout: {
+                shell: 'top-fixed-scroll-body',
+                regions: [
+                  { id: 'topbar', label: '顶部导航区', type: 'navigation' },
+                  { id: 'upload', label: '上传区域', type: 'input' }
+                ],
+                states: [{ id: 'ready', label: '待输入' }]
+              },
+              evidenceRefs: [{ id: 'page-home' }]
+            },
+            interactionSpecArtifact: {
+              version: 'interaction-v1',
+              interactionRows: [
+                { target: '上传区域', targetRegionId: 'upload', gesture: '点击上传' }
+              ],
+              stateMatrix: [{ state: '待输入' }]
+            }
+          }
+        ],
+        edges: [],
+        orderedTabs: []
+      },
+      'ui-visual': {
+        nodes: [
+          {
+            id: 'ui-doc-summary',
+            stageId: 'ui-visual',
+            title: '文档分析结果 UI视觉',
+            sourcePageId: 'doc-summary',
+            artifactStatus: 'pending',
+            visualPreview: { imageStatus: 'pending' }
+          }
+        ],
+        edges: [],
+        orderedTabs: []
+      }
+    }
+  })
+
+  const visualNodes = flow.stageCanvases['ui-visual'].nodes
+  assert.deepEqual(visualNodes.map((node) => node.title), ['复制首页 UI视觉'])
+  assert.equal(visualNodes[0].sourceNodeId, 'advanced-ux-page-home')
+  assert.equal(visualNodes[0].sourcePageId, 'page-home')
+  assert.equal(visualNodes[0].sliceId, 'slice-main')
+  assert.equal(visualNodes[0].sourcePageLayoutArtifact.asciiWireframe, 'A1 顶部导航区 | Logo | 项目 | 模板')
+  assert.equal(visualNodes[0].visualBrief.pageTitle, '复制首页')
+  assert.match(visualNodes[0].visualPreview.imagePrompt, /必须延续上一阶段交互低保和页面骨架/)
+  assert.deepEqual(flow.stageCanvases['ui-visual'].orderedTabs, [
+    { key: 'ui-advanced-ux-page-home', label: '复制首页 UI视觉' }
+  ])
+})
+
+test('downstream UI visual and HTML canvases sync all interaction pages while preserving unchanged generated nodes', () => {
+  const sourceNodes = [
+    {
+      id: 'advanced-ux-page-home',
+      stageId: 'interaction-lofi',
+      title: '复刻首页',
+      sliceId: 'slice-main',
+      pageLayoutArtifact: {
+        version: 'layout-home-v1',
+        asciiWireframe: 'A1 顶部导航区 | A2 上传区',
+        layout: { regions: [{ id: 'upload', label: '上传区' }] }
+      },
+      interactionSpecArtifact: {
+        version: 'interaction-home-v1',
+        interactionRows: [{ target: '点击上传区', targetRegionId: 'upload' }]
+      }
+    },
+    {
+      id: 'advanced-ux-page-result',
+      stageId: 'interaction-lofi',
+      title: '拆解结果页',
+      sliceId: 'slice-main',
+      pageLayoutArtifact: {
+        version: 'layout-result-v1',
+        asciiWireframe: 'B1 摘要区 | B2 分镜列表',
+        layout: { regions: [{ id: 'storyboard', label: '分镜列表' }] }
+      },
+      interactionSpecArtifact: {
+        version: 'interaction-result-v1',
+        interactionRows: [{ target: '点击分镜行', targetRegionId: 'storyboard' }]
+      }
+    }
+  ]
+  const flow = withDownstreamStageArtifactContext({
+    currentStage: 'html-output',
+    stages: TOTAL_DESIGN_FLOW_STAGES,
+    stageCanvases: {
+      'interaction-lofi': {
+        nodes: sourceNodes,
+        edges: [],
+        orderedTabs: sourceNodes.map((node) => ({ key: node.id, label: node.title }))
+      },
+      'ui-visual': {
+        nodes: [
+          {
+            id: 'ui-advanced-ux-page-home',
+            stageId: 'ui-visual',
+            title: '复刻首页 UI视觉',
+            sourcePageId: 'advanced-ux-page-home',
+            artifactStatus: 'generated',
+            visualPreview: {
+              imageStatus: 'generated',
+              imageUrl: '/generated/home.png',
+              imagePrompt: '已生成的首页提示词'
+            }
+          }
+        ],
+        edges: [],
+        orderedTabs: [{ key: 'ui-advanced-ux-page-home', label: '复刻首页 UI视觉' }]
+      },
+      'html-output': {
+        nodes: [
+          {
+            id: 'html-page-advanced-ux-page-home',
+            stageId: 'html-output',
+            title: '复刻首页 HTML',
+            htmlOutputKind: 'page',
+            sourcePageId: 'advanced-ux-page-home',
+            artifactStatus: 'generated',
+            codePreview: { code: '<main>home</main>', filePath: 'pages/advanced-ux-page-home.html' },
+            artifact: { html: '<main>home</main>' }
+          },
+          {
+            id: 'html-total-preview',
+            stageId: 'html-output',
+            title: '总交互 HTML 预览',
+            htmlOutputKind: 'total-interactive',
+            artifactStatus: 'generated',
+            codePreview: { code: '<main>total</main>', filePath: 'index.html' },
+            artifact: { html: '<main>total</main>' }
+          }
+        ],
+        edges: [],
+        orderedTabs: [{ key: 'html-page-advanced-ux-page-home', label: '复刻首页 HTML' }]
+      }
+    }
+  })
+
+  const visualNodes = flow.stageCanvases['ui-visual'].nodes
+  assert.deepEqual(visualNodes.map((node) => node.title), ['复刻首页 UI视觉', '拆解结果页 UI视觉'])
+  assert.equal(visualNodes[0].artifactStatus, 'generated')
+  assert.equal(visualNodes[0].visualPreview.imageUrl, '/generated/home.png')
+  assert.equal(visualNodes[1].sourceNodeId, 'advanced-ux-page-result')
+  assert.equal(visualNodes[1].artifactStatus, 'pending')
+
+  const htmlNodes = flow.stageCanvases['html-output'].nodes
+  const htmlPageNodes = htmlNodes.filter((node) => node.htmlOutputKind === 'page')
+  const htmlTotalNode = htmlNodes.find((node) => node.htmlOutputKind === 'total-interactive')
+  assert.deepEqual(htmlPageNodes.map((node) => node.title), ['复刻首页 HTML', '拆解结果页 HTML'])
+  assert.equal(htmlPageNodes[0].artifactStatus, 'generated')
+  assert.equal(htmlPageNodes[0].codePreview.code, '<main>home</main>')
+  assert.equal(htmlPageNodes[1].sourceNodeId, 'advanced-ux-page-result')
+  assert.equal(htmlPageNodes[1].artifactStatus, 'pending')
+  assert.deepEqual(htmlTotalNode.linkedPageIds, ['advanced-ux-page-home', 'advanced-ux-page-result'])
 })
 
 test('total design flow attaches model page layout artifact to interaction canvas nodes', () => {
@@ -4764,18 +5196,30 @@ test('workflow canvas fullscreen and agent actions resolve valid nodes for every
   const fullscreenStart = appSource.indexOf('function openWorkflowCanvasFullscreen')
   const fullscreenEnd = appSource.indexOf('function closeWorkflowCanvasFullscreen', fullscreenStart)
   const fullscreenSource = appSource.slice(fullscreenStart, fullscreenEnd)
+  const canvasNodeStart = appSource.indexOf('function canvasNodeById')
+  const canvasNodeEnd = appSource.indexOf('function canvasNodeCenter', canvasNodeStart)
+  const canvasNodeSource = appSource.slice(canvasNodeStart, canvasNodeEnd)
   const agentStart = appSource.indexOf('function openWorkflowAgentForNode')
   const agentEnd = appSource.indexOf('function workflowAgentScopeId', agentStart)
   const agentSource = appSource.slice(agentStart, agentEnd)
 
-  assert.match(canvasSource, /@click\.stop="\$emit\('open-agent', node\.id\)"/)
-  assert.match(canvasSource, /@click\.stop="\$emit\('fullscreen', node\.id\)"/)
+  assert.match(canvasSource, /data-canvas-action="open-agent" :data-node-id="node\.id"/)
+  assert.match(canvasSource, /data-canvas-action="open-detail" :data-node-id="node\.id"/)
+  assert.match(canvasSource, /function handleCanvasActionClick\(event\)[\s\S]*closest\?\.\('\[data-canvas-action\]\[data-node-id\]'\)[\s\S]*emit\('open-agent', nodeId\)[\s\S]*emit\('open-agent', \{ action: 'open-detail', nodeId, node \}\)/)
   assert.match(resolverSource, /function workflowCanvasResolvableNodeId\(candidateId = ''\)/)
   assert.match(resolverSource, /canvasNodeById\(candidateId\)/)
   assert.match(resolverSource, /activeCanvasNode\.value\?\.id/)
   assert.match(resolverSource, /workflowCurrentCanvasNodes\.value\[0\]\?\.id/)
-  assert.match(fullscreenSource, /const targetNodeId = workflowCanvasResolvableNodeId\(nodeId\)/)
+  assert.match(
+    canvasNodeSource,
+    /workflowStageCanvasNodeById\(nodeId\)[\s\S]*workflowCurrentCanvasNodes\.value\.find/,
+    'fullscreen detail should prefer canonical stage canvas nodes before merged canvas fallbacks'
+  )
+  assert.match(fullscreenSource, /const candidateNode = nodeId && typeof nodeId === 'object' && !Array\.isArray\(nodeId\) \? nodeId : null/)
+  assert.match(fullscreenSource, /const resolvedNode = candidateNodeId \? canvasNodeById\(candidateNodeId\) : null/)
+  assert.match(fullscreenSource, /const targetNodeId = resolvedNode\?\.id \|\| candidateNode\?\.id \|\| workflowCanvasResolvableNodeId\(candidateNodeId\)/)
   assert.match(fullscreenSource, /if \(!targetNodeId\) return/)
+  assert.match(fullscreenSource, /workflowFullscreenNodeOverride\.value = resolvedNode \? null : \(candidateNode\?\.id === targetNodeId \? candidateNode : null\)/)
   assert.match(fullscreenSource, /workflowFullscreenNodeId\.value = targetNodeId/)
   assert.match(agentSource, /const targetNodeId = workflowCanvasResolvableNodeId\(nodeId\)/)
   assert.match(agentSource, /workflowAgentNodeId\.value = targetNodeId/)
@@ -5730,6 +6174,11 @@ test('ux confirmation fullscreen keeps stage structure after the live node outpu
   assert.match(canvasSource, /待确认问题/)
   assert.match(canvasSource, /下一步建议/)
   assert.match(canvasSource, /v-else-if="isAgentConfirmationNode\(fullscreenNode\)"/)
+  assert.match(
+    canvasSource,
+    /showModelReturnSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !isStageSpecificDetail\(fullscreenNode\) && !shouldUseRequirementReportDetail\(fullscreenNode\) && !shouldUseRequirementPipelineDetail\(fullscreenNode\)/,
+    'stage-specific page details should not be preceded by the generic model return card'
+  )
   assert.match(canvasSource, /v-if="!isNodeActuallyLoading\(fullscreenNode\) && !isStageSpecificDetail\(fullscreenNode\) && !isAgentConfirmationNode\(fullscreenNode\) && !shouldUseRequirementPipelineDetail\(fullscreenNode\) && !shouldUseRequirementSectionDetail\(fullscreenNode\)" v-show="!isFullscreenEditing\(fullscreenNode\)" class="canvas-detail-tree"/)
   assert.doesNotMatch(canvasSource, /<template v-if="!isAgentConfirmationNode\(fullscreenNode\)">/)
   assert.doesNotMatch(canvasSource, /v-for="section in visibleFullscreenDetailSections\(fullscreenNode\)"/)

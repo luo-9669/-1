@@ -1612,8 +1612,7 @@
         @update-slice="selectWorkflowSlice"
         @regenerate-stage="regenerateWorkflowStage"
         @focus-node="selectWorkflowCanvasNode"
-        @open-agent="openWorkflowAgentForNode"
-        @fullscreen="openWorkflowCanvasFullscreen($event)"
+        @open-agent="handleWorkflowCanvasNodeAction"
         @close-fullscreen="closeWorkflowCanvasFullscreen"
         @edit-node="saveWorkflowCanvasNodeEdit"
         @rollback-version="rollbackWorkflowAnalysisVersion"
@@ -3382,6 +3381,7 @@ const workflowAgentStaleProposalErrorCodes = ['AGENT_PROPOSAL_NOT_FOUND', 'AGENT
 const workflowCanvasZoom = ref(0.82)
 const workflowFullscreenNodeId = ref('')
 const workflowFullscreenEditNodeId = ref('')
+const workflowFullscreenNodeOverride = ref(null)
 const workflowAgentNodeId = ref('')
 const workflowAgentComposerReference = ref(null)
 const blueprintDemoHtml = ref('')
@@ -3419,6 +3419,16 @@ const materialToolTitle = computed(() => {
   }
   return labels[materialToolModalMode.value] || '资料库工具'
 })
+
+function materialDisplayContent(item = {}) {
+  const directContent = String(item?.content || item?.markdown || item?.text || item?.rawText || '').trim()
+  if (directContent) return directContent
+  if (!Array.isArray(item?.chunks)) return ''
+  return item.chunks
+    .map((chunk) => String(chunk?.text || chunk?.content || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+}
 
 const captureStatus = refStatus()
 const imageCodeStatus = refStatus()
@@ -9050,11 +9060,12 @@ const activeCanvasNode = computed(() =>
   null
 )
 const workflowAgentNode = computed(() =>
-  workflowCurrentCanvasNodes.value.find((node) => node.id === workflowAgentNodeId.value) ||
+  canvasNodeById(workflowAgentNodeId.value) ||
   activeCanvasNode.value
 )
 const fullscreenCanvasNode = computed(() =>
-  workflowCurrentCanvasNodes.value.find((node) => node.id === workflowFullscreenNodeId.value) || null
+  canvasNodeById(workflowFullscreenNodeId.value) ||
+  (workflowFullscreenNodeOverride.value?.id === workflowFullscreenNodeId.value ? workflowFullscreenNodeOverride.value : null)
 )
 
 function workflowCanvasResolvableNodeId(candidateId = '') {
@@ -9064,17 +9075,30 @@ function workflowCanvasResolvableNodeId(candidateId = '') {
 }
 
 function openWorkflowCanvasFullscreen(nodeId = '', options = {}) {
-  const targetNodeId = workflowCanvasResolvableNodeId(nodeId)
+  const candidateNode = nodeId && typeof nodeId === 'object' && !Array.isArray(nodeId) ? nodeId : null
+  const candidateNodeId = candidateNode?.id || String(nodeId || '')
+  const resolvedNode = candidateNodeId ? canvasNodeById(candidateNodeId) : null
+  const targetNodeId = resolvedNode?.id || candidateNode?.id || workflowCanvasResolvableNodeId(candidateNodeId)
   if (!targetNodeId) return
   // 画布全屏是当前主视图；先收起 Agent，避免右侧对话遮挡全屏详情。
   setWorkflowAgentDisplayMode('hidden')
+  workflowFullscreenNodeOverride.value = resolvedNode ? null : (candidateNode?.id === targetNodeId ? candidateNode : null)
   workflowFullscreenNodeId.value = targetNodeId
   workflowFullscreenEditNodeId.value = options.edit ? targetNodeId : ''
+}
+
+function handleWorkflowCanvasNodeAction(payload = '') {
+  if (payload?.action === 'open-detail') {
+    openWorkflowCanvasFullscreen(payload.node || payload.nodeId)
+    return
+  }
+  openWorkflowAgentForNode(payload)
 }
 
 function closeWorkflowCanvasFullscreen() {
   workflowFullscreenNodeId.value = ''
   workflowFullscreenEditNodeId.value = ''
+  workflowFullscreenNodeOverride.value = null
 }
 
 function normalizeWorkflowAgentQuickReplies(replies = []) {
@@ -9082,8 +9106,13 @@ function normalizeWorkflowAgentQuickReplies(replies = []) {
     replies
       .map((reply) => String(reply || '').trim())
       .filter(Boolean)
+      .filter((reply) => !isPassiveWorkflowAgentQuickReply(reply))
       .filter((reply) => !isWorkflowAgentConfirmationAction(reply))
   )).slice(0, 6)
+}
+
+function isPassiveWorkflowAgentQuickReply(reply = '') {
+  return /^(等待生成|正在生成|生成中|生成完成后查看|完成后查看|阶段完成后查看)$/.test(String(reply || '').trim())
 }
 
 const workflowAgentQuickReplies = computed(() => {
@@ -10204,7 +10233,7 @@ async function openMaterialDetail(item) {
     meta: item.meta || '',
     status: item.status || '',
     notes: item.notes || '',
-    content: item.content || '',
+    content: materialDisplayContent(item),
     preview: item.preview || null,
     rawItem: item
   })
@@ -10218,7 +10247,7 @@ async function openMaterialDetail(item) {
     meta: detail.meta || materialEditor.meta,
     status: detail.status || materialEditor.status,
     notes: detail.notes || materialEditor.notes,
-    content: detail.content || materialEditor.content,
+    content: materialDisplayContent(detail) || materialEditor.content,
     preview: detail.preview || materialEditor.preview,
     rawItem: detail
   })
@@ -14625,9 +14654,24 @@ function viewWorkflowEvidence() {
 }
 
 function canvasNodeById(nodeId) {
-  return workflowCurrentCanvasNodes.value.find((node) => node.id === nodeId) ||
+  return workflowStageCanvasNodeById(nodeId) ||
+    workflowCurrentCanvasNodes.value.find((node) => node.id === nodeId) ||
     workflowCanvasNodes.value.find((node) => node.id === nodeId) ||
     null
+}
+
+function workflowStageCanvasNodeById(nodeId = '') {
+  if (!nodeId) return null
+  const stageCanvases = workflowStageTotalDesignFlow.value?.stageCanvases ||
+    workflowTotalDesignFlow.value?.stageCanvases ||
+    {}
+  for (const canvas of Object.values(stageCanvases)) {
+    const found = Array.isArray(canvas?.nodes)
+      ? canvas?.nodes.find((node) => node?.id === nodeId)
+      : null
+    if (found) return found
+  }
+  return null
 }
 
 function canvasNodeCenter(nodeId) {
@@ -15054,6 +15098,7 @@ function selectWorkflowCanvasNode(nodeId) {
   workflowAgentNodeId.value = nodeId
   if (!keepFullscreenNode) workflowFullscreenNodeId.value = ''
   if (!keepFullscreenNode) workflowFullscreenEditNodeId.value = ''
+  if (!keepFullscreenNode) workflowFullscreenNodeOverride.value = null
   workflowAgentUploadOpen.value = false
   workflowAgentHistoryOpen.value = false
   workflowAgentInput.value = ''
@@ -15089,7 +15134,7 @@ function isWorkflowAgentConfirmationAction(content = '') {
 }
 
 function isWorkflowStageAdvanceInput(content = '') {
-  return /入画布|进入下一步|下一步|确认进入|确认并进入|确认当前阶段/.test(String(content || '').trim())
+  return /入画布|进入下一步|进入下一阶段|下一步|下一阶段|确认进入|确认并进入|确认当前阶段/.test(String(content || '').trim())
 }
 
 function workflowStageAdvanceUserMessage(content = '') {
@@ -15097,6 +15142,35 @@ function workflowStageAdvanceUserMessage(content = '') {
   return isWorkflowStageAdvanceInput(normalized) || isWorkflowLowFiStageAdvanceAction(normalized)
     ? '进入下一阶段'
     : normalized
+}
+
+function appendWorkflowStageAdvanceUserMessage({
+  content = '',
+  currentStageId = '',
+  nextStageId = '',
+  scopeIds = [],
+  clientMessageId = createClientId()
+} = {}) {
+  const displayContent = workflowStageAdvanceUserMessage(content)
+  const uniqueScopeIds = Array.from(new Set(
+    scopeIds
+      .map((scopeId) => normalizeWorkflowStageId(scopeId))
+      .filter(Boolean)
+  ))
+  uniqueScopeIds.forEach((scopeId, index) => {
+    appendWorkflowAgentMessage('user', displayContent, {
+      scopeId,
+      id: index === 0 ? clientMessageId : `${clientMessageId}-${scopeId}`,
+      meta: {
+        action: 'stage-confirm-next',
+        clientMessageId,
+        sourceScopeId: currentStageId,
+        stageId: currentStageId,
+        nextStageId
+      }
+    })
+  })
+  return clientMessageId
 }
 
 function isWorkflowLowFiStageAdvanceAction(content = '') {
@@ -15318,17 +15392,11 @@ async function confirmAdvancedUxStageWithoutGenericAgentSummary({
   confirmedNextStageId = ''
 } = {}) {
   const summary = advancedUxStageConfirmationSummary(currentStageId)
-  const stageAdvanceUserContent = workflowStageAdvanceUserMessage(action)
-  const stageAdvanceUserMeta = {
-    action: 'stage-confirm-next',
-    clientMessageId: createClientId(),
-    sourceScopeId: currentStageId,
-    stageId: currentStageId,
-    nextStageId: confirmedNextStageId || nextStageId
-  }
-  appendWorkflowAgentMessage('user', stageAdvanceUserContent, {
-    scopeId: confirmedNextStageId || currentStageId,
-    meta: stageAdvanceUserMeta
+  const stageAdvanceClientMessageId = appendWorkflowStageAdvanceUserMessage({
+    content: action,
+    currentStageId,
+    nextStageId: confirmedNextStageId || nextStageId,
+    scopeIds: [currentStageId, confirmedNextStageId || nextStageId]
   })
   appendWorkflowAgentMessage('assistant', `已确认「${workflowStageNameById(currentStageId)}」，正在生成「${workflowStageNameById(nextStageId)}」。`, {
     scopeId: currentStageId,
@@ -15338,7 +15406,7 @@ async function confirmAdvancedUxStageWithoutGenericAgentSummary({
       source: 'system',
       status: 'success',
       statusLabel: workflowAgentStatusLabel('success'),
-      clientMessageId: createClientId(),
+      clientMessageId: stageAdvanceClientMessageId,
       stageId: currentStageId,
       nextStageId
     }
@@ -15381,8 +15449,15 @@ async function confirmWorkflowStageWithAgentSummary(payload = {}) {
     })
     return
   }
+  const stageAdvanceClientMessageId = appendWorkflowStageAdvanceUserMessage({
+    content: action,
+    currentStageId,
+    nextStageId,
+    scopeIds: confirmedNextStageId !== targetScopeId ? [confirmedNextStageId] : []
+  })
   const result = await sendWorkflowAgentMessage(workflowStageAdvanceUserMessage(action), {
     ignoreDraftState: true,
+    clientMessageId: stageAdvanceClientMessageId,
     nodeId: targetScopeId,
     skipStageAdvanceInputHandling: true,
     action: 'stage-confirm-next',
@@ -15966,6 +16041,27 @@ function workflowAgentGeneratedArtifactNode(data = {}, nodeId = '') {
   return returnedNode || currentNode || {}
 }
 
+function workflowGeneratedArtifactFailed(node = {}) {
+  const preview = node?.visualPreview && typeof node.visualPreview === 'object' ? node.visualPreview : {}
+  const artifact = node?.artifact && typeof node.artifact === 'object' ? node.artifact : {}
+  return String(node?.artifactStatus || '').trim() === 'failed' ||
+    String(preview.imageStatus || '').trim() === 'failed' ||
+    String(artifact.imageStatus || '').trim() === 'failed'
+}
+
+function workflowGeneratedArtifactFailureMessage(node = {}) {
+  const preview = node?.visualPreview && typeof node.visualPreview === 'object' ? node.visualPreview : {}
+  const artifact = node?.artifact && typeof node.artifact === 'object' ? node.artifact : {}
+  return String(
+    preview.failureMessage ||
+    preview.configurationMessage ||
+    artifact.failureMessage ||
+    artifact.configurationMessage ||
+    artifact.error ||
+    '图片生成失败，可重新生成。'
+  ).trim()
+}
+
 async function runWorkflowGenerationAction(payload = {}) {
   const nodeId = payload.nodeId || workflowAgentScopeId()
   const generationAction = {
@@ -16058,6 +16154,10 @@ async function runWorkflowGenerationAction(payload = {}) {
       state.workflowRuns = upsertWorkflowRunRecord(state.workflowRuns, nextRun)
     }
     workflowAgentNodeId.value = nodeId
+    const generatedNode = workflowAgentGeneratedArtifactNode(data, nodeId)
+    if (workflowGeneratedArtifactFailed(generatedNode)) {
+      throw new Error(workflowGeneratedArtifactFailureMessage(generatedNode))
+    }
     patchWorkflowCanvasNodeArtifactStatus(nodeId, {
       artifactStatus: 'generated',
       generationAction: {
@@ -16066,7 +16166,6 @@ async function runWorkflowGenerationAction(payload = {}) {
       },
       contentStatusLabel: '已生成'
     })
-    const generatedNode = workflowAgentGeneratedArtifactNode(data, nodeId)
     if (workflowCodeArtifactSource(generatedNode)) {
       appendWorkflowGeneratedCodeAgentMessage(generatedNode, generationAction)
     } else {
@@ -16457,23 +16556,37 @@ function rollbackWorkflowAnalysisVersion(version) {
 
 function ensureActiveWorkflowRunForAgent() {
   if (state.activeWorkflowRun) return state.activeWorkflowRun
-  if (!workflowAnalysisResult.value?.canvas) return null
+  const analysis = workflowAnalysisResult.value
+  if (!analysis) return null
+  const agentCanvas = analysis.canvas || workflowCanvas.value || { nodes: [], edges: [], orderedTabs: [] }
+  const agentCanvasNodes = (Array.isArray(workflowCurrentCanvasNodes.value) && workflowCurrentCanvasNodes.value.length)
+    ? workflowCurrentCanvasNodes.value
+    : Array.isArray(agentCanvas.nodes) ? agentCanvas.nodes : []
+  if (!agentCanvasNodes.length) return null
   const existingRun = (state.workflowRuns || []).find((run) =>
-    run?.documentAnalysis?.canvas === workflowAnalysisResult.value.canvas ||
-    (run?.documentAnalysis?.canvas?.nodes?.length && run.documentAnalysis.canvas.nodes === workflowAnalysisResult.value.canvas.nodes)
+    run?.documentAnalysis === analysis ||
+    (analysis.canvas && run?.documentAnalysis?.canvas === analysis.canvas) ||
+    (analysis.canvas && run?.documentAnalysis?.canvas?.nodes?.length && run.documentAnalysis.canvas.nodes === analysis.canvas.nodes)
   )
   if (existingRun) {
     state.activeWorkflowRun = existingRun
     return existingRun
   }
+  const documentAnalysis = analysis.canvas ? analysis : {
+    ...analysis,
+    canvas: {
+      ...agentCanvas,
+      nodes: agentCanvasNodes
+    }
+  }
   const fallbackRun = {
-    id: workflowAnalysisResult.value.runId || workflowAnalysisResult.value.id || `local-analysis-${Date.now()}`,
-    workflowId: workflowAnalysisResult.value.workflowId || 'document-analysis',
-    workflowName: workflowAnalysisResult.value.blueprint?.title || workflowAnalysisResult.value.title || '需求分析画布',
+    id: analysis.runId || analysis.id || `local-analysis-${Date.now()}`,
+    workflowId: analysis.workflowId || 'document-analysis',
+    workflowName: analysis.blueprint?.title || analysis.title || '需求分析画布',
     assetType: '页面蓝图',
-    input: workflowAnalysisResult.value.summary?.input || '',
-    currentStepId: workflowAgentNodeId.value || workflowAnalysisResult.value.canvas?.nodes?.[0]?.id || 'analysis',
-    steps: (workflowAnalysisResult.value.canvas?.nodes || []).map((node, index) => ({
+    input: analysis.summary?.input || '',
+    currentStepId: workflowAgentNodeId.value || agentCanvasNodes[0]?.id || 'analysis',
+    steps: agentCanvasNodes.map((node, index) => ({
       id: node.id || `node-${index + 1}`,
       title: node.title || `环节 ${index + 1}`,
       goal: node.agentScope || node.summary || '',
@@ -16492,11 +16605,11 @@ function ensureActiveWorkflowRunForAgent() {
     agentQuickReplies: {},
     finalConclusion: null,
     projectId: state.currentProjectId,
-    status: workflowAnalysisResult.value.status || 'analyzed',
-    documentAnalysis: workflowAnalysisResult.value,
-    projectBlueprint: workflowAnalysisResult.value.blueprint || null,
-    createdAt: workflowAnalysisResult.value.createdAt || new Date().toISOString(),
-    updatedAt: workflowAnalysisResult.value.updatedAt || new Date().toISOString()
+    status: analysis.status || 'analyzed',
+    documentAnalysis,
+    projectBlueprint: analysis.blueprint || null,
+    createdAt: analysis.createdAt || new Date().toISOString(),
+    updatedAt: analysis.updatedAt || new Date().toISOString()
   }
   state.activeWorkflowRun = fallbackRun
   state.workflowRuns = upsertWorkflowRunRecord(state.workflowRuns, fallbackRun)
@@ -17834,6 +17947,21 @@ async function sendWorkflowAgentMessage(text = workflowAgentInput.value, options
     return
   }
   if (!options.skipStageAdvanceInputHandling && isWorkflowStageAdvanceInput(content) && confirmWorkflowStageFromAgentInput(content, targetScopeId)) return
+  if (!options.skipStageAdvanceInputHandling && isWorkflowStageAdvanceInput(content) && workflowCanMoveToNextStage.value) {
+    const currentStageId = workflowCurrentStageId.value
+    const stages = normalizeWorkflowTotalFlowStages(workflowTotalDesignFlow.value?.stages || [])
+    const currentIndex = stages.findIndex((stage) => stage.id === currentStageId)
+    const nextStage = stages[currentIndex + 1] || null
+    workflowAgentInput.value = ''
+    void confirmWorkflowStageWithAgentSummary({
+      nodeId: currentStageId,
+      action: content,
+      stageId: currentStageId,
+      nextStageId: nextStage?.id || '',
+      mode: 'stage-agent-confirm-next'
+    })
+    return
+  }
   if (!options.canvasAction && !options.skipLayoutAlternativeInputHandling && isWorkflowAgentLayoutAlternativeRequest(content) && isWorkflowAgentLayoutPlanInputScope(contextNodeId) && hasRecentWorkflowAgentLayoutOptions(targetScopeId)) {
     workflowAgentInput.value = ''
     sendWorkflowAgentCanvasAction('给布局方案', contextNodeId)
@@ -18342,6 +18470,20 @@ function useWorkflowAgentQuickReply(content, sourceMessage = null) {
     const nextStage = stages[currentIndex + 1] || null
     runWorkflowNodeQuickAction({
       nodeId: workflowAgentScopeId(),
+      action: normalizedContent,
+      stageId: currentStageId,
+      nextStageId: nextStage?.id || '',
+      mode: 'stage-agent-confirm-next'
+    })
+    return
+  }
+  if (isWorkflowStageAdvanceInput(normalizedContent) && workflowCanMoveToNextStage.value) {
+    const currentStageId = workflowCurrentStageId.value
+    const stages = normalizeWorkflowTotalFlowStages(workflowTotalDesignFlow.value?.stages || [])
+    const currentIndex = stages.findIndex((stage) => stage.id === currentStageId)
+    const nextStage = stages[currentIndex + 1] || null
+    runWorkflowNodeQuickAction({
+      nodeId: currentStageId,
       action: normalizedContent,
       stageId: currentStageId,
       nextStageId: nextStage?.id || '',

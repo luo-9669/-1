@@ -23,15 +23,19 @@ const DEFAULT_ADVANCED_UX_FRAMEWORK_PATH = fileURLToPath(new URL('../../docs/ski
 const DEFAULT_UX_DOC_OUTPUT_STANDARD_PATH = fileURLToPath(new URL('../../docs/skills/advanced-ux/需求阶段一产出约束.md', import.meta.url))
 const DEFAULT_UX_PAGE_INTERACTION_SKILL_PATH = fileURLToPath(new URL('../../docs/skills/advanced-ux/交互低保阶段二.md', import.meta.url))
 const DEFAULT_ADVANCED_UX_REFERENCE_EXAMPLE_PATH = fileURLToPath(new URL('../../docs/skills/advanced-ux/AI视频爆款复刻-对照参考.md', import.meta.url))
+const DEFAULT_UX_PAGE_INTERACTION_REFERENCE_EXAMPLE_PATH = fileURLToPath(new URL('../../docs/skills/advanced-ux/AI视频爆款复刻工具-阶段二产出参考.md', import.meta.url))
 const ADVANCED_UX_AGENT_SCOPE_ID = 'requirement-dissection'
 const ADVANCED_UX_CURRENT_SECTION_NAMES = [
   '原始需求分析',
   '设计问题定义',
   '用户与场景',
+  '假设与验证',
+  '设计机会',
   '整体交互链路',
   '三套设计方案',
   '异常流补充',
-  '推荐方案建议'
+  '推荐方案建议',
+  '设计优先级与分阶段计划'
 ]
 const ADVANCED_UX_CURRENT_SECTION_LIST = ADVANCED_UX_CURRENT_SECTION_NAMES.map((name) => `## ${name}`).join('、')
 
@@ -93,6 +97,7 @@ export function uploadRoutes(options = {}) {
   const uxDocOutputStandardPath = () => options.uxDocOutputStandardPath || DEFAULT_UX_DOC_OUTPUT_STANDARD_PATH
   const uxPageInteractionSkillPath = () => options.uxPageInteractionSkillPath || DEFAULT_UX_PAGE_INTERACTION_SKILL_PATH
   const advancedUxReferenceExamplePath = () => options.advancedUxReferenceExamplePath || DEFAULT_ADVANCED_UX_REFERENCE_EXAMPLE_PATH
+  const uxPageInteractionReferenceExamplePath = () => options.uxPageInteractionReferenceExamplePath || DEFAULT_UX_PAGE_INTERACTION_REFERENCE_EXAMPLE_PATH
   const readAdvancedUxFrameworkMarkdown = async () => readFile(advancedUxFrameworkPath(), 'utf8')
   const readUxDocOutputStandardMarkdown = async () => readFile(uxDocOutputStandardPath(), 'utf8')
   const readOptionalMarkdownFile = async (filePath = '') => {
@@ -164,7 +169,7 @@ export function uploadRoutes(options = {}) {
       '',
       '输出要求：',
       '- 只输出 Markdown 正文。',
-      `- 严格按最新高级 UX 7 步链路输出，必须包含且仅使用以下 7 个 H2 二级标题：${ADVANCED_UX_CURRENT_SECTION_LIST}。`,
+      `- 严格按最新高级 UX 10 步链路输出，必须包含且仅使用以下 10 个 H2 二级标题：${ADVANCED_UX_CURRENT_SECTION_LIST}。`,
       '- 不得使用旧标题：需求理解、需求拆解、风险假设、流程与信息架构、机会与方案、优先级与分期、交付与验收。',
       '- 不输出 JSON。',
       '- 禁止输出 :::page-layout-artifact。',
@@ -187,25 +192,32 @@ export function uploadRoutes(options = {}) {
       '- 步骤②必须包含体验矛盾表，表头至少包含：矛盾对/矛盾描述、倾向、处理策略、置信度；至少 4 行。',
       '- 步骤③“用户与场景”必须包含标准 Journey Map 表格，覆盖阶段、触点、用户行为、情绪曲线/情绪、痛点、机会点、证据/置信度；至少 4 个阶段。',
       '- 步骤③必须包含页面优先级初判表，表头覆盖页面编号、页面名称、用户阶段、价值、复杂度、建议优先级。',
-      '- 步骤④必须包含入口定义表和主流程步骤表；主流程步骤表至少 6 步，表头覆盖步骤、用户行为、系统响应、产出、页面。',
-      '- 步骤④“整体交互链路”必须包含页面三件套：页面总览表、页面流转表、页面框架表；必须包含弹窗/抽屉定义表，字段覆盖编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
+      '- 步骤④“假设与验证”必须包含假设分类总表、高风险假设聚焦、假设回检点；假设分类总表表头覆盖假设内容、分类、来源追溯、不成立的影响、验证方式、置信度、当前状态。',
+      '- 步骤④高风险假设聚焦表头覆盖高风险假设、置信度、降级策略、触发验证的时间节点；假设回检点必须说明后续在推荐方案建议中如何回检。',
+      '- 步骤⑤“设计机会”必须包含设计机会总表、优先 Top 3-5 机会、机会→步骤映射；设计机会总表表头覆盖机会描述、类型、上游依据、可承接步骤、预期价值、优先级。',
+      '- 步骤⑤优先 Top 3-5 机会表头覆盖排序、机会编号、机会描述、优先理由、设计方向提示；机会→步骤映射表头覆盖机会编号、承接步骤、承接方式。',
+      '- 步骤⑥必须包含入口定义表和主流程步骤表；主流程步骤表至少 6 步，表头覆盖步骤、用户行为、系统响应、产出、页面。',
+      '- 步骤⑥“整体交互链路”必须包含页面三件套：页面总览表、页面流转表、页面框架表；必须包含弹窗/抽屉定义表，字段覆盖编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
       '- 页面三件套必须分别给出表格：页面总览表至少 3 个页面/入口，页面流转表至少 3 条流转，页面框架表表头覆盖区域、内容、说明。',
-      '- 步骤④必须包含信息架构实体表，字段覆盖信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站默认 10-14 个实体，若少于 10 个必须说明当前范围为何不适用。',
-      '- 步骤④“整体交互链路”必须包含完整状态机：状态迁移表、状态迁移图（用 ```text 代码块表达 ST0→ST1 可视化流向）、独立迁移规则表。',
-      '- 步骤④必须包含关键断点与优化节点表，至少 5 个断点，覆盖主路径、异常路径、回流路径；全局交互规范必须用表格覆盖类型、规则、示例、例外。',
-      '- 步骤④或⑤必须实际输出至少 1 个关键页面 ASCII 低保真线框图，不得只写“需要生成”；线框图放在 ```text 代码块中，区域必须和页面框架表对应。',
-      '- 步骤⑤“三套设计方案”必须输出方案对比矩阵和三方案并排对比，至少覆盖目标用户/核心路径/页面组织/关键交互/异常处理/实现复杂度/体验风险/推荐条件。',
-      '- 步骤⑤“三套设计方案”必须输出关键节点低保真并排对比：选择三方案差异最大的 1 个关键节点，用 ```text 代码块并排展示方案一/方案二/方案三的 ASCII 线框差异。',
-      '- 步骤⑥“异常流补充”必须包含异常流表格，至少 8 种异常场景，覆盖输入、处理、网络、权限、超时、并发等类型。',
-      '- 步骤⑦“推荐方案建议”必须包含 Problem-Solution Fit 验证和六顶思考帽评审，再给推荐方案；不得直接跳到推荐结论。',
+      '- 步骤⑥必须包含信息架构实体表，字段覆盖信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站默认 10-14 个实体，若少于 10 个必须说明当前范围为何不适用。',
+      '- 步骤⑥“整体交互链路”必须包含完整状态机：状态迁移表、状态迁移图（用 ```text 代码块表达 ST0→ST1 可视化流向）、独立迁移规则表。',
+      '- 步骤⑥必须包含关键断点与优化节点表，至少 5 个断点，覆盖主路径、异常路径、回流路径；全局交互规范必须用表格覆盖类型、规则、示例、例外。',
+      '- 步骤⑥或⑦必须实际输出至少 1 个关键页面 ASCII 低保真线框图，不得只写“需要生成”；线框图放在 ```text 代码块中，区域必须和页面框架表对应。',
+      '- 图编号（如图1、图6）只能对应真实流程图、状态图或 ASCII 低保真代码块；不得把“当前仅输出 ASCII 文本布局 / 图片待后续生成 / Draw.io 待生成”当作图内容。',
+      '- 步骤⑦“三套设计方案”必须输出方案对比矩阵和三方案并排对比，至少覆盖目标用户/核心路径/页面组织/关键交互/异常处理/实现复杂度/体验风险/推荐条件。',
+      '- 步骤⑦“三套设计方案”必须输出关键节点低保真并排对比：选择三方案差异最大的 1 个关键节点，用 ```text 代码块并排展示方案一/方案二/方案三的 ASCII 线框差异。',
+      '- 步骤⑧“异常流补充”必须包含异常流表格，至少 8 种异常场景，覆盖输入、处理、网络、权限、超时、并发等类型。',
+      '- 步骤⑨“推荐方案建议”必须包含 Problem-Solution Fit 验证、六顶思考帽评审和假设回检，再给推荐方案；不得直接跳到推荐结论。',
       '- “推荐方案建议”章节内必须出现三级标题“### 2. 六顶思考帽评审”，并覆盖白帽、红帽、黑帽、黄帽、绿帽、蓝帽；不能只在别的章节零散提到六帽。',
-      '- “推荐方案建议”必须包含最终方案页面清单、数据埋点方案、竞品对标总结、设计原则、下一步行动；对应表格分别覆盖页面/弹窗、埋点事件、竞品维度、设计原则和行动责任。',
+      '- “推荐方案建议”必须包含最终方案页面清单、假设回检、数据埋点方案、竞品对标总结、设计原则、下一步行动；对应表格分别覆盖页面/弹窗、假设回检、埋点事件、竞品维度、设计原则和行动责任。',
+      '- 步骤⑩“设计优先级与分阶段计划”必须包含优先级排序总览、分期交付计划、待确认决策；优先级表头覆盖功能/机会、用户价值、业务价值、实施成本、综合优先级、分期建议。',
+      '- 步骤⑩分期交付计划表头覆盖阶段、范围、核心目标、交付物、验证标准、预计周期；待确认决策表头覆盖决策事项、影响范围、需要谁确认、确认时限、不确认的影响。',
       '- 必须说明可视化真实产物状态：低保真线框图、Draw.io 主流程图、Draw.io 状态图的触发条件和当前状态；没有真实图片或 .drawio 文件时只能写“待生成”。',
       '- 必须输出状态机表格，表头语义必须覆盖：当前状态、触发事件、目标状态、页面表现、数据变更；状态超过 5 个或多分支交叉时，仍先给状态机表格，再说明需要 Draw.io 状态图承接。',
       '- 必须输出页面框架表格，表头语义必须覆盖：区域、内容、说明；涉及具体页面时按 P 编号输出页面定位、页面框架表格、交互规则表格、异常状态表格。',
       '- 产出页面框架时先用表格描述布局，再判断是否需要低保真线框图；不要用大段纯文字代替页面框架表格。',
       '- 在“设计问题定义 / 功能点总览”中，不要把用户故事写成一个长字段；必须拆成三个独立表格字段：As a、I want to、so that。',
-      '- 本轮主产物仍是高级 UX 7 节点 Markdown；但必须在“推荐方案建议”中加入“页面交互文档产物规划”，明确下一产物文件名为“[产品名]-页面交互框架与说明.md”。',
+      '- 本轮主产物仍是高级 UX 10 节点 Markdown；但必须在“推荐方案建议”中加入“页面交互文档产物规划”，明确下一产物文件名为“[产品名]-页面交互框架与说明.md”。',
       '- 页面交互文档产物规划必须说明：逐页文档包含页面定位、页面框架、交互规则、异常状态；每页交互规则不少于 5 条，且每条写清系统反馈；异常状态覆盖加载中、空状态、错误态、无权限和业务异常。',
       '- 必须输出一个页面交互规则表格，表头覆盖：用户操作、系统反馈、备注；必须输出一个异常状态表格，表头覆盖：状态、表现、处理方式。',
       '- 必须输出全局交互规范规划，覆盖 7 类：加载状态、Toast、空状态、网络异常、弹窗规范、表单规范、返回/导航；每类说明规则、示例、例外。',
@@ -242,7 +254,7 @@ export function uploadRoutes(options = {}) {
       '- 禁止写入 Evidence Pack 之外的真实链接、竞品事实、行业数据或市场结论。',
       advancedUxEvidencePackPrompt(evidencePack),
       '- 禁止输出页面骨架协议；如需表达页面框架，只能使用 Markdown 表格、text 代码块或说明后续需出图。',
-      `- 保持最新高级 UX 7 节点结构：${ADVANCED_UX_CURRENT_SECTION_NAMES.join('、')}。`,
+      `- 保持最新高级 UX 10 节点结构：${ADVANCED_UX_CURRENT_SECTION_NAMES.join('、')}。`,
       '- 不得使用旧标题：需求理解、需求拆解、风险假设、流程与信息架构、机会与方案、优先级与分期、交付与验收。',
       '- 每个节点必须有独立二级标题，标题可以自然表达，例如“## 节点 02：设计问题定义”或“## 02 设计问题定义：真正要解决什么？”。',
       '- 必须使用 Markdown 层级标题（H1→H2→H3→H4），禁止跳级。',
@@ -250,14 +262,14 @@ export function uploadRoutes(options = {}) {
       '- 单段文字不超过100字，超过则分段或转为表格。',
       '- 表格与文字比例约 6:4。',
       '- 页面框架：≤3个区域用表格，>4个区域的核心页面必须出低保真线框图。',
-      '- 必须补齐方法论骨架：原始需求分析含 GWT 和 5Whys，设计问题定义含 HMW，用户与场景含标准 Journey Map，推荐方案建议含 Problem-Solution Fit 和六顶思考帽评审。',
+      '- 必须补齐方法论骨架：原始需求分析含 GWT 和 5Whys，设计问题定义含 HMW，用户与场景含标准 Journey Map，假设与验证含假设分类/高风险假设/假设回检点，设计机会含机会总表/Top 机会/机会映射，推荐方案建议含 Problem-Solution Fit、六顶思考帽评审和假设回检，设计优先级与分阶段计划含优先级排序/分期计划/待确认决策。',
       '- 必须补齐细颗粒度验收项：需求理解清单至少 6 行且放在原始诉求识别之后、需求清晰度评分表之前；需求清晰度评分表至少 5 个维度；关键缺口清单至少 5 个缺口；追问清单至少 5 个追问；GWT 至少 3 条；5 Whys 至少 5 层；HMW 至少 3 条；Journey Map 至少 4 个阶段。',
-      '- 必须补齐新版阶段一强制表格：L1/L2/L3 需求拆解表、目标矩阵表、体验矛盾表、页面优先级初判表、入口定义表、主流程步骤表、关键断点与优化节点表、异常流表。',
+      '- 必须补齐新版阶段一强制表格：L1/L2/L3 需求拆解表、目标矩阵表、体验矛盾表、页面优先级初判表、假设分类总表、高风险假设聚焦表、设计机会总表、优先 Top 3-5 机会表、机会→步骤映射表、入口定义表、主流程步骤表、关键断点与优化节点表、异常流表、优先级排序总览表、分期交付计划表、待确认决策表。',
       '- 必须补齐链路评审产物：整体交互链路含页面三件套、弹窗/抽屉定义表、状态迁移图、迁移规则表和至少 1 个 ASCII 低保真线框图。',
       '- 页面三件套必须分别输出页面总览表、页面流转表、页面框架表；不要只写“如下”或把三者混成一个表。',
       '- 必须补齐信息架构实体表：字段覆盖信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站默认 10-14 个实体，若少于 10 个必须说明当前范围为何不适用。',
       '- 必须补齐方案对比力：三套设计方案下要有方案对比矩阵、三方案并排对比和关键节点低保真并排对比，不得只分别描述三个方案。',
-      '- 必须补齐推荐交付表：最终方案页面清单、数据埋点方案、竞品对标总结、设计原则、下一步行动。',
+      '- 必须补齐推荐交付表：最终方案页面清单、假设回检表、数据埋点方案、竞品对标总结、设计原则、下一步行动。',
       '- 必须补齐可视化产出状态：整体交互链路中说明低保真线框图、Draw.io 主流程图、Draw.io 状态图的触发条件和当前产物状态；未真实生成 .drawio/.xml 时写待生成。',
       '- 必须输出状态机表格，表头语义必须覆盖：当前状态、触发事件、目标状态、页面表现、数据变更；状态超过 5 个或多分支交叉时，仍先给状态机表格，再说明需要 Draw.io 状态图承接。',
       '- 必须输出页面框架表格，表头语义必须覆盖：区域、内容、说明；涉及具体页面时按 P 编号输出页面定位、页面框架表格、交互规则表格、异常状态表格。',
@@ -280,6 +292,12 @@ export function uploadRoutes(options = {}) {
       '- 在“设计问题定义 / 功能点详情”中，每个功能点必须补齐：补充体验要求里的边界条件、信息表达；依赖关系里的前置依赖、被依赖；优先级判断里的用户价值、实现复杂度、建议优先级。',
       '- 在“用户与场景 / 旅程地图”中，必须用表格覆盖阶段、用户目标、用户行为、触点、情绪、痛点、机会点、证据/置信度。',
       '- 在“用户与场景 / 体验风险清单”或“异常流补充 / 异常与风险”中，触发路径不能只写页面名或入口名，必须写成 3 步以上路径链，用当前项目里的真实用户动作、系统状态、业务结果动态表达。',
+      '- 在“假设与验证 / 假设分类总表”中，必须用表格覆盖假设内容、分类、来源追溯、不成立的影响、验证方式、置信度、当前状态。',
+      '- 在“假设与验证 / 高风险假设聚焦”中，必须用表格覆盖高风险假设、置信度、降级策略、触发验证的时间节点。',
+      '- 在“假设与验证 / 假设回检点”中，必须说明后续推荐方案建议如何逐条回检。',
+      '- 在“设计机会 / 设计机会总表”中，必须用表格覆盖机会描述、类型、上游依据、可承接步骤、预期价值、优先级。',
+      '- 在“设计机会 / 优先 Top 3-5 机会”中，必须用表格覆盖排序、机会编号、机会描述、优先理由、设计方向提示。',
+      '- 在“设计机会 / 机会→步骤映射”中，必须用表格覆盖机会编号、承接步骤、承接方式。',
       '- 在“整体交互链路 / 信息架构”中，表格必须包含：信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站需求默认输出 10-14 个信息实体，若少于 10 个必须写明为什么当前范围不适用。',
       '- 信息实体不要写死行业模板，必须从当前需求、功能点、用户流程、业务流程、风险和验收项反推；输出前按抽象覆盖面自检：用户/身份、核心业务对象、配置/规格、任务或交易容器、状态对象、结算或确认记录、凭证/码/证书/确认材料、权益/激励、通知/消息、评价/反馈/支持、运营配置/审核、位置/服务资源；不适用的覆盖面要跳过。',
       '- 在“整体交互链路 / 用户流程图、业务流程图”中，不要只输出一行箭头串；必须使用 ```text 代码块输出多行 ASCII 流程图，由模型按当前项目内容生成主路径、关键决策/分支、异常回退、用户心理/意图、系统处理、状态变化、失败/重试路径。',
@@ -288,6 +306,7 @@ export function uploadRoutes(options = {}) {
       '- 在“整体交互链路 / 页面三件套”中，必须分别输出页面总览表、页面流转表、页面框架表；页面框架表必须和 ASCII 低保真区域一致。',
       '- 在“整体交互链路 / 弹窗与抽屉定义表”中，必须包含编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
       '- 在“整体交互链路 / 低保真线框图”中，必须实际输出至少 1 个关键页面 ASCII 线框图，放入 ```text 代码块；不得只写后续生成。',
+      '- 图编号（如图1、图6）必须指向真实图形内容或 ASCII 代码块；“待生成/触发条件/真实图片尚未生成/Draw.io 尚未生成”只能写在产物状态表中，不得作为图内容。',
       '- 在“整体交互链路 / 页面框架表格”或“三套设计方案 / 页面级方案”中，必须输出至少 1 个核心页面的页面框架表格，表头包含区域、内容、说明；页面区域由当前项目页面职责反推，不写固定行业区域。',
       '- 在“整体交互链路 / 关键断点与优化节点”中，节点不能只写页面名，必须写成“当前项目阶段-具体动作/场景”；全量小程序/App/网站默认输出 8-12 个断点节点，覆盖当前项目的主路径阶段、关键对象生命周期、异常路径、回流路径；不适用的路径类型要跳过。',
       '- 在“三套设计方案 / 关键交互流程（Top 3 优先机会）”中，每个 Top 必须用四级标题“#### Top N：当前项目方案名”，并为每个 Top 输出结构表，至少覆盖状态流转、界面/触点跳转、关键反馈、异常/回退路径、低保真描述；字段可按项目改名，但语义不能缺失。',
@@ -298,7 +317,11 @@ export function uploadRoutes(options = {}) {
       '- 在“推荐方案建议 / Problem-Solution Fit 验证”中，必须用表格说明核心问题、对应方案、匹配证据、未匹配风险、验证方式、置信度。',
       '- 在“推荐方案建议 / 六顶思考帽评审”中，必须用白帽、红帽、黑帽、黄帽、绿帽、蓝帽多维审视后再给推荐结论。',
       '- “推荐方案建议”章节内必须保留明确三级标题“### 2. 六顶思考帽评审”；如果上一轮只在“三套设计方案”或正文里提到六帽，必须移动或补写到这里。',
-      '- 在“推荐方案建议 / 页面交互文档产物规划”中，必须明确下一产物文件名为“[产品名]-页面交互框架与说明.md”，并说明它基于本高级 UX 7 节点结论继续生成。',
+      '- 在“推荐方案建议 / 假设回检”中，必须逐条回检“假设与验证”的关键假设，说明是否成立、对推荐方案的影响和后续验证动作。',
+      '- 在“推荐方案建议 / 页面交互文档产物规划”中，必须明确下一产物文件名为“[产品名]-页面交互框架与说明.md”，并说明它基于本高级 UX 10 节点结论继续生成。',
+      '- 在“设计优先级与分阶段计划 / 优先级排序总览”中，必须用表格覆盖功能/机会、用户价值、业务价值、实施成本、综合优先级、分期建议。',
+      '- 在“设计优先级与分阶段计划 / 分期交付计划”中，必须用表格覆盖阶段、范围、核心目标、交付物、验证标准、预计周期。',
+      '- 在“设计优先级与分阶段计划 / 待确认决策”中，必须用表格覆盖决策事项、影响范围、需要谁确认、确认时限、不确认的影响。',
       '- 页面交互文档规划必须包含页面定位、页面框架表格、交互规则表格、异常状态表格；每页交互规则不少于 5 条；交互规则表头覆盖用户操作、系统反馈、备注；异常状态表头覆盖状态、表现、处理方式，并覆盖加载中、空状态、错误态、无权限和业务异常。',
       '- 全局交互规范规划必须覆盖 7 类：加载状态、Toast、空状态、网络异常、弹窗规范、表单规范、返回/导航；每类按“规则 / 示例 / 例外”三段式表达。',
       '- 低保真线框图规划必须包含：核心页面每页 1 张、单张生成、不一次生成多张；灰度色值 #F5F5F5、#CCCCCC、#E0E0E0、#D0D0D0、#666666、#999999；必须逐条写出 5 项禁止项：禁止使用任何品牌色、禁止出现真实文案、禁止出现真实图片、禁止使用装饰性元素、禁止混合不同设备比例；验收必须包含“区域数量与框架表格中的区域一致”。',
@@ -668,6 +691,39 @@ export function uploadRoutes(options = {}) {
     } else if (pagePriorityRows.length < 5) {
       issues.push('页面优先级初判表至少需要 5 个页面/入口')
     }
+    const assumptionRows = advancedUxRowsForAnyColumnGroup(tables, [
+      ['假设内容', '分类', '来源追溯', '不成立的影响', '验证方式', '置信度', '当前状态']
+    ])
+    if (!assumptionRows.length) {
+      issues.push('缺少假设与验证下的假设分类总表')
+    }
+    const highRiskAssumptionRows = advancedUxRowsForAnyColumnGroup(tables, [
+      ['高风险假设', '置信度', '降级策略', '触发验证的时间节点']
+    ])
+    if (!highRiskAssumptionRows.length) {
+      issues.push('缺少假设与验证下的高风险假设聚焦表')
+    }
+    if (!/假设回检/.test(text)) {
+      issues.push('缺少假设回检')
+    }
+    const opportunityRows = advancedUxRowsForAnyColumnGroup(tables, [
+      ['机会描述', '类型', '上游依据', '可承接步骤', '预期价值', '优先级']
+    ])
+    if (!opportunityRows.length) {
+      issues.push('缺少设计机会下的设计机会总表')
+    }
+    const topOpportunityRows = advancedUxRowsForAnyColumnGroup(tables, [
+      ['排序', '机会编号', '机会描述', '优先理由', '设计方向提示']
+    ])
+    if (!topOpportunityRows.length) {
+      issues.push('缺少设计机会下的优先 Top 3-5 机会')
+    }
+    const opportunityMappingRows = advancedUxRowsForAnyColumnGroup(tables, [
+      ['机会编号', '承接步骤', '承接方式']
+    ])
+    if (!opportunityMappingRows.length) {
+      issues.push('缺少设计机会下的机会→步骤映射表')
+    }
     const entryRows = advancedUxRowsForAnyColumnGroup(tables, [
       ['入口位置', '入口形态', '触发条件', '优先级'],
       ['入口', '触发条件', '优先级']
@@ -755,6 +811,9 @@ export function uploadRoutes(options = {}) {
     if (!/低保真线框图|ASCII\s*线框|线框图/.test(text) || !hasTextCodeBlock) {
       issues.push('缺少实际 ASCII 低保真线框图：不得只写待生成')
     }
+    if (/图\s*\d+[\s\S]{0,80}当前仅输出\s*ASCII\s*文本布局[\s\S]{0,80}(?:真实低保真图片|Draw\.io|待后续)/.test(text)) {
+      issues.push('图编号内容仍是兜底说明：图1/图6等必须对应真实 ASCII 图形代码块，待生成状态只能放在产物状态表')
+    }
     if (!advancedUxTableHasColumns(tables, ['维度', '方案一', '方案二', '方案三'])) {
       issues.push('缺少三方案横向对比矩阵：需覆盖维度、方案一、方案二、方案三')
     } else if (advancedUxMaxRowsForColumns(tables, ['维度', '方案一', '方案二', '方案三']) < 5) {
@@ -819,6 +878,15 @@ export function uploadRoutes(options = {}) {
       issues.push('缺少下一步行动表：需覆盖行动项、负责角色、优先级')
     } else if (nextActionRows.length < 5) {
       issues.push('下一步行动表至少需要 5 个行动项')
+    }
+    if (!advancedUxTableHasColumns(tables, ['功能/机会', '用户价值', '业务价值', '实施成本', '综合优先级', '分期建议'])) {
+      issues.push('缺少设计优先级与分阶段计划下的优先级排序总览')
+    }
+    if (!advancedUxTableHasColumns(tables, ['阶段', '范围', '核心目标', '交付物', '验证标准', '预计周期'])) {
+      issues.push('缺少设计优先级与分阶段计划下的分期交付计划')
+    }
+    if (!advancedUxTableHasColumns(tables, ['决策事项', '影响范围', '需要谁确认', '确认时限', '不确认的影响'])) {
+      issues.push('缺少设计优先级与分阶段计划下的待确认决策')
     }
     return issues
   }
@@ -1310,7 +1378,7 @@ export function uploadRoutes(options = {}) {
       confirmationLines: unique(confirmationLines).slice(-10)
     }
   }
-  const pageInteractionDocumentPrompt = (payload = {}, report = {}, outputStandardMarkdown = '', pageInteractionSkillMarkdown = '', qualityIssues = []) => {
+  const pageInteractionDocumentPrompt = (payload = {}, report = {}, outputStandardMarkdown = '', pageInteractionSkillMarkdown = '', pageInteractionReferenceMarkdown = '', qualityIssues = []) => {
     const stageTwoContext = advancedUxStageTwoContext(payload)
     return {
       systemPrompt: [
@@ -1343,6 +1411,15 @@ export function uploadRoutes(options = {}) {
             '## 13. 方案验证与收敛',
             '## 14. 交付物清单'
           ].join('\n'),
+      '',
+      pageInteractionReferenceMarkdown
+        ? [
+            '下面是一份阶段二页面交互文档产出结构完整度对照参考。它只用于理解页面总览、页面流转、逐页说明、状态机、交互规则、交付物清单的颗粒度和完整度。',
+            '禁止复制、套用或改写参考文档中的业务内容、竞品、数据、产品名、页面名、指标、链接或行业结论。',
+            '',
+            pageInteractionReferenceMarkdown
+          ].join('\n')
+        : '',
       '',
       Array.isArray(qualityIssues) && qualityIssues.length ? `上一轮质量问题：${qualityIssues.slice(0, 12).join('；')}` : '',
       '',
@@ -1394,7 +1471,7 @@ export function uploadRoutes(options = {}) {
         .map((doc) => `## ${doc.name || '未命名文档'}\n${doc.text || doc.content || doc.summary || doc.reason || ''}`)
         .join('\n\n') || '无',
       '',
-      '阶段一最终产出文档 / 高级 UX 7 节点 Markdown：',
+      '阶段一最终产出文档 / 高级 UX 10 节点 Markdown：',
       report.markdown || '无',
       '',
       '阶段一对话过程中的变更和补充：',
@@ -1412,9 +1489,10 @@ export function uploadRoutes(options = {}) {
     if (!provider || provider.name === 'deterministic' || typeof provider.generate !== 'function') {
       throw advancedUxMarkdownFailure('未配置可用模型，无法生成页面交互文档。')
     }
-    const [outputStandardMarkdown, pageInteractionSkillMarkdown] = await Promise.all([
+    const [outputStandardMarkdown, pageInteractionSkillMarkdown, pageInteractionReferenceMarkdown] = await Promise.all([
       readUxDocOutputStandardMarkdown(),
-      readOptionalMarkdownFile(uxPageInteractionSkillPath())
+      readOptionalMarkdownFile(uxPageInteractionSkillPath()),
+      readOptionalMarkdownFile(uxPageInteractionReferenceExamplePath())
     ])
     const timeoutMs = advancedUxNoTimeoutMs()
     const buildPrompt = (markdown = '', issues = []) => pageInteractionDocumentPrompt(
@@ -1422,6 +1500,7 @@ export function uploadRoutes(options = {}) {
       { ...report, markdown: markdown || report.markdown || '' },
       outputStandardMarkdown,
       pageInteractionSkillMarkdown,
+      pageInteractionReferenceMarkdown,
       issues
     )
     const modelResult = await withTimeout(
@@ -1467,6 +1546,7 @@ export function uploadRoutes(options = {}) {
       sourceReportFileName: report.fileName || '',
       outputStandardPath: uxDocOutputStandardPath(),
       skillPath: uxPageInteractionSkillPath(),
+      referenceExamplePath: pageInteractionReferenceMarkdown ? uxPageInteractionReferenceExamplePath() : '',
       generatedAt: new Date().toISOString(),
       provider: modelResult?.provider || provider.name || '',
       model: modelResult?.model || payload.model || ''
@@ -2140,7 +2220,7 @@ export function uploadRoutes(options = {}) {
           title: isFailedReport ? '高级 UX Markdown 未通过质量门禁' : '高级 UX 需求分析',
           summary: isFailedReport
             ? 'Markdown 文件已生成，但未通过质量门禁，暂未导入画布。'
-            : '高级 UX Markdown 已生成并导入 7 个画布节点。',
+            : '高级 UX Markdown 已生成并导入 10 个画布节点。',
           canvasType: 'advanced-ux-requirement-canvas'
         }
       : {
@@ -2184,7 +2264,7 @@ export function uploadRoutes(options = {}) {
       '你是高级 UX 需求分析专家。',
       '请基于高级 UX 需求分析 Markdown 框架、用户需求、已解析文档和当前结构化分析，直接输出一份 Markdown 报告。',
       '必须只输出 Markdown，不要输出 JSON、代码块或解释前后缀。',
-      `必须包含且仅用以下 7 个二级标题：${ADVANCED_UX_CURRENT_SECTION_LIST}。`,
+      `必须包含且仅用以下 10 个二级标题：${ADVANCED_UX_CURRENT_SECTION_LIST}。`,
       '不得使用旧二级标题：## 需求理解、## 需求拆解、## 风险假设、## 流程与信息架构、## 机会与方案、## 优先级与分期、## 交付与验收。',
       '每个二级标题下必须使用固定三级标题协议，便于后端导入画布详情块。',
       '原始需求分析必须包含：### 1. 原始需求复述、### 2. 需求理解清单、### 3. 需求清晰度评分、### 4. GWT 功能行为（Given / When / Then）、### 5. 5 Whys 根因追溯、### 6. 完整性深度检查（5维度）、### 7. 完整性缺口清单、### 8. 待确认事项、### 9. 下一步判断。',
@@ -2192,6 +2272,8 @@ export function uploadRoutes(options = {}) {
       '设计问题定义必须包含：### 1. 功能点总览、### 2. 功能点详情、### 3. HMW 问题、### 4. 设计目标、### 5. 成功判断标准；功能点总览表格不要使用“用户故事”单列，必须拆成 As a、I want to、so that 三个字段；功能点详情用 #### 功能点 N：名称，并包含类型、As a、I want to、so that、功能描述、体验验收标准、补充体验要求、依赖关系、优先级判断、置信度。',
       '功能点详情字段必须拆细：补充体验要求下面必须有“边界条件”“信息表达”；依赖关系下面必须有“前置依赖”“被依赖”；优先级判断下面必须有“用户价值”“实现复杂度”“建议优先级”。',
       '用户与场景必须包含：### 1. 目标用户、### 2. 使用场景、### 3. 标准 Journey Map、### 4. 用户任务链路、### 5. 情绪与痛点、### 6. 假设清单、### 7. 体验风险清单；Journey Map 表头必须覆盖阶段、触点、用户行为、情绪、痛点、机会点、证据/置信度。',
+      '假设与验证必须包含：### 1. 假设分类总表、### 2. 高风险假设聚焦、### 3. 假设回检点；假设分类总表表头必须覆盖假设内容、分类、来源追溯、不成立的影响、验证方式、置信度、当前状态；高风险假设聚焦表头必须覆盖高风险假设、置信度、降级策略、触发验证的时间节点。',
+      '设计机会必须包含：### 1. 设计机会总表、### 2. 优先 Top 3-5 机会、### 3. 机会→步骤映射；设计机会总表表头必须覆盖机会描述、类型、上游依据、可承接步骤、预期价值、优先级；Top 机会表头必须覆盖排序、机会编号、机会描述、优先理由、设计方向提示；映射表头必须覆盖机会编号、承接步骤、承接方式。',
       '整体交互链路必须包含：### 1. 用户流程图、### 2. 业务流程图、### 3. 页面三件套、### 4. 弹窗与抽屉定义表、### 5. 信息架构、### 6. 状态机表格、### 7. 状态迁移图、### 8. 迁移规则表、### 9. 低保真线框图、### 10. 关键断点与优化节点；流程图和线框图必须用 text 代码块表示。',
       '用户流程图和业务流程图不能只输出一行箭头串，必须分别放入 ```text 代码块，使用多行 ASCII 流程图表达；用户流程图至少包含主路径、关键决策/分支、异常回退、用户心理/意图；业务流程图至少包含用户动作、系统处理、外部依赖或后台处理、状态变化、失败/重试路径。所有节点名称都必须来自当前项目，不得套用固定行业示例。',
       '信息架构表格必须包含“信息实体、核心属性、关系/依赖、状态/流转、设计提示”五列；全量小程序/App/网站需求默认输出 10-14 个信息实体，除非当前输入明确只是单点功能优化。',
@@ -2203,7 +2285,8 @@ export function uploadRoutes(options = {}) {
       '关键交互流程（Top 3 优先机会）必须包含 3 个四级标题：#### Top 1：当前项目方案名、#### Top 2：当前项目方案名、#### Top 3：当前项目方案名；每个 Top 下用表格表达状态流转、界面/触点跳转、关键反馈、异常/回退路径、低保真描述。字段名称可以根据项目调整，但这 5 类语义必须出现。',
       '优先方案收敛表格必须包含“Top、方案、理由、用户行为依据、建议落点、置信度”；Top 字段必须写成“Top 1：方案名称 / Top 2：方案名称 / Top 3：方案名称”，不要只写 1、2、3。',
       '异常流补充必须包含：### 1. 异常流总览、### 2. 失败路径、### 3. 空态/权限/网络/未保存返回、### 4. 恢复动作、### 5. 待确认风险。',
-      '推荐方案建议必须包含：### 1. Problem-Solution Fit 验证、### 2. 六顶思考帽评审、### 3. 推荐方案、### 4. 决策依据、### 5. 优先级与分期、### 6. 交付物清单、### 7. 验收标准、### 8. 开发对接Checklist、### 9. 数据埋点方案、### 10. 上线后验证计划、### 11. 页面交互文档产物规划。',
+      '推荐方案建议必须包含：### 1. Problem-Solution Fit 验证、### 2. 六顶思考帽评审、### 3. 推荐方案、### 4. 决策依据、### 5. 假设回检、### 6. 交付物清单、### 7. 验收标准、### 8. 开发对接Checklist、### 9. 数据埋点方案、### 10. 上线后验证计划、### 11. 页面交互文档产物规划。',
+      '设计优先级与分阶段计划必须包含：### 1. 优先级排序总览、### 2. 分期交付计划、### 3. 待确认决策；优先级排序总览表头必须覆盖功能/机会、用户价值、业务价值、实施成本、综合优先级、分期建议；分期交付计划表头必须覆盖阶段、范围、核心目标、交付物、验证标准、预计周期；待确认决策表头必须覆盖决策事项、影响范围、需要谁确认、确认时限、不确认的影响。',
       '页面交互文档产物规划必须明确下一产物文件名为“[产品名]-页面交互框架与说明.md”，逐页文档包含页面定位、页面框架、交互规则、异常状态；每页交互规则不少于 5 条，且写清系统反馈；异常状态覆盖加载中、空状态、错误态、无权限和业务异常。',
       '必须包含页面交互规则表格（用户操作、系统反馈、备注）、异常状态表格（状态、表现、处理方式）、全局交互规范 7 类（加载状态、Toast、空状态、网络异常、弹窗规范、表单规范、返回/导航），每类按规则 / 示例 / 例外表达。',
       '低保真线框图规划必须包含核心页面每页 1 张、单张生成、不一次生成多张；灰度色值 #F5F5F5、#CCCCCC、#E0E0E0、#D0D0D0、#666666、#999999；禁止使用任何品牌色、禁止出现真实文案、禁止出现真实图片、禁止使用装饰性元素、禁止混合不同设备比例；验收包含“区域数量与框架表格中的区域一致”。',

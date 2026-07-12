@@ -97,6 +97,11 @@ export function createWorkspaceRun(input = {}) {
 export function createWorkspaceMaterial(input = {}) {
   const now = nowIso()
   const type = input.type || 'knowledge'
+  const chunks = Array.isArray(input.chunks) ? input.chunks : []
+  const chunkContent = chunks
+    .map((chunk) => String(chunk?.text || chunk?.content || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
   const preview = input.preview && typeof input.preview === 'object'
     ? {
         format: input.preview.format || '',
@@ -118,7 +123,7 @@ export function createWorkspaceMaterial(input = {}) {
     meta: input.meta || '',
     status: input.status || '已保存',
     notes: input.notes || '',
-    content: input.content || '',
+    content: input.content || chunkContent || '',
     preview,
     requirementSource: input.requirementSource || '',
     knowledgeStatus: input.knowledgeStatus || '',
@@ -139,7 +144,7 @@ export function createWorkspaceMaterial(input = {}) {
     expiresAt: input.expiresAt || '',
     tags: Array.isArray(input.tags) ? input.tags : [],
     relations: Array.isArray(input.relations) ? input.relations : [],
-    chunks: Array.isArray(input.chunks) ? input.chunks : [],
+    chunks,
     evidence: Array.isArray(input.evidence) ? input.evidence : [],
     createdAt: input.createdAt || now,
     updatedAt: input.updatedAt || now

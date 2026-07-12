@@ -311,7 +311,7 @@ export function createAdvancedUxRequirementAnalysisSkill() {
   return normalizeSkill({
     id: 'advanced-ux-requirement-analysis',
     name: '高级 UX 需求分析',
-    description: '复制总流程运行链路，但需求分析第一阶段按最新高级 UX 7 节点论证链推进，并在后续阶段生成页面交互框架、Draw.io 和低保真线框图产物。',
+    description: '复制总流程运行链路，但需求分析第一阶段按最新高级 UX 10 节点论证链推进，并在后续阶段生成页面交互框架、Draw.io 和低保真线框图产物。',
     category: '交互设计',
     source: 'system',
     mode: 'total-design-flow',
@@ -323,35 +323,41 @@ export function createAdvancedUxRequirementAnalysisSkill() {
       '原始需求分析：识别原始输入、真实诉求、需求清晰度、GWT 行为表、5 Whys、关键缺口和追问清单',
       '设计问题定义：把需求转译为目标矩阵、体验矛盾、HMW 问题、非目标和成功判断标准',
       '用户与场景：定义目标用户、关键场景、核心任务、Journey Map、体验风险和页面优先级',
+      '假设与验证：沉淀假设分类总表、高风险假设聚焦和后续假设回检点',
+      '设计机会：基于功能缺口、体验痛点和风险转化输出设计机会总表、Top 机会和机会到步骤映射',
       '整体交互链路：梳理主流程、页面三件套、弹窗/抽屉、状态机、信息架构、关键断点和全局交互规范',
       '三套设计方案：围绕关键节点输出稳妥/效率/引导三套完整设计方案、对比矩阵和关键节点低保真对比',
       '异常流补充：补齐取消、返回、校验失败、接口错误、网络、权限、过期、重复提交、中断恢复和再次进入',
-      '推荐方案建议：完成 Problem-Solution Fit、六顶思考帽、推荐决策、优先级、数据埋点和验收标准',
+      '推荐方案建议：完成 Problem-Solution Fit、六顶思考帽、推荐决策、假设回检、数据埋点和验收标准',
+      '设计优先级与分阶段计划：输出优先级排序总览、分期交付计划和待确认决策',
       '页面交互文档规划：说明下一产物为 [产品名]-页面交互框架与说明.md，覆盖页面总览、页面流转、主流程、状态机、逐页交互、全局交互规范、低保真和 Draw.io 触发条件'
     ],
     stages: [
       { id: 'ux-original-requirement-analysis', name: '原始需求分析' },
       { id: 'ux-design-problem-definition', name: '设计问题定义' },
       { id: 'ux-user-scenario', name: '用户与场景' },
+      { id: 'ux-assumption-validation', name: '假设与验证' },
+      { id: 'ux-design-opportunity', name: '设计机会' },
       { id: 'ux-interaction-chain', name: '整体交互链路' },
       { id: 'ux-three-design-solutions', name: '三套设计方案' },
       { id: 'ux-exception-flow', name: '异常流补充' },
-      { id: 'ux-recommendation-decision', name: '推荐方案建议' }
+      { id: 'ux-recommendation-decision', name: '推荐方案建议' },
+      { id: 'ux-priority-phasing', name: '设计优先级与分阶段计划' }
     ],
     agentInteraction: {
       style: 'total-flow-compatible',
       nextActions: [
-        { id: 'run-advanced-ux', label: '开始高级 UX 分析', targetStageId: 'ux-original-requirement-analysis', intent: '按 7 步链路分析' },
+        { id: 'run-advanced-ux', label: '开始高级 UX 分析', targetStageId: 'ux-original-requirement-analysis', intent: '按 10 步链路分析' },
         { id: 'continue-total-flow', label: '进入交互低保', targetStageId: 'interaction-lofi', intent: '复用总流程下游阶段' }
       ],
       rules: ['每个判断标注置信度', '事实、推断、建议、风险必须分层', '信息不足时返回 needs-confirmation，不编造竞品或指标', '阶段二画布主体是页面节点', '没有真实图片或 .drawio/.xml 文件时，只能标注低保真/Draw.io 待生成']
     },
-    followUpRules: ['P0 缺口先追问', '用户说继续时沿 7 节点链路推进', '进入下游阶段时复用总流程 6 大阶段'],
-    outputTypes: ['高级 UX 7 节点分析 Markdown', '页面交互框架与说明 Markdown', 'Draw.io 主流程图', 'Draw.io 状态图', '低保真线框图图片', '总流程画布'],
-    outputFormat: '高级 UX 需求分析：先按原始需求分析、设计问题定义、用户与场景、整体交互链路、三套设计方案、异常流补充、推荐方案建议生成 Markdown 并导入需求分析画布；再生成 [产品名]-页面交互框架与说明.md，包含页面总览、页面流转总览、页面框架、文本布局图、交互规则、异常状态、全局交互规范；Draw.io 主流程图/状态图作为文件产物展示，低保真线框图图片绑定页面节点。',
+    followUpRules: ['P0 缺口先追问', '用户说继续时沿 10 节点链路推进', '进入下游阶段时复用总流程 6 大阶段'],
+    outputTypes: ['高级 UX 10 节点分析 Markdown', '页面交互框架与说明 Markdown', 'Draw.io 主流程图', 'Draw.io 状态图', '低保真线框图图片', '总流程画布'],
+    outputFormat: '高级 UX 需求分析：先按原始需求分析、设计问题定义、用户与场景、假设与验证、设计机会、整体交互链路、三套设计方案、异常流补充、推荐方案建议、设计优先级与分阶段计划生成 Markdown 并导入需求分析画布；再生成 [产品名]-页面交互框架与说明.md，包含页面总览、页面流转总览、页面框架、文本布局图、交互规则、异常状态、全局交互规范；Draw.io 主流程图/状态图作为文件产物展示，低保真线框图图片绑定页面节点。',
     qualityChecks: ['advanced-ux-chain', 'confidence-labels', 'fact-inference-risk-separation', 'needs-confirmation', 'page-interaction-doc-planning', 'visual-artifact-status', 'total-flow-compatible'],
     exampleInput: '帮我深度分析一个 AI 创作工具的 UX 需求，并继续进入总流程。',
-    exampleOutput: '按原始需求分析、设计问题定义、用户与场景、整体交互链路、三套设计方案、异常流补充、推荐方案建议输出，并生成可进入交互低保的总流程画布。'
+    exampleOutput: '按原始需求分析、设计问题定义、用户与场景、假设与验证、设计机会、整体交互链路、三套设计方案、异常流补充、推荐方案建议、设计优先级与分阶段计划输出，并生成可进入交互低保的总流程画布。'
   })
 }
 

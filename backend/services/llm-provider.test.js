@@ -40,6 +40,42 @@ test('openai compatible responses request forwards max output token limit', asyn
   assert.equal(capturedBody.max_output_tokens, 1200)
 })
 
+test('openai compatible generate falls back to curl transport after fetch timeout', async () => {
+  let fallbackCalled = false
+  let capturedFallbackBody = null
+  const provider = createOpenAICompatibleAgentProvider({
+    apiKey: 'test-key',
+    baseUrl: 'http://model.local/v1',
+    defaultModel: 'gpt-test',
+    apiSurface: 'responses',
+    fetchImpl: async () => {
+      const error = new Error('The operation was aborted due to timeout')
+      error.name = 'AbortError'
+      throw error
+    },
+    curlPostJsonImpl: async ({ body }) => {
+      fallbackCalled = true
+      capturedFallbackBody = body
+      return {
+        output_text: '{"ok":true}',
+        usage: { input_tokens: 3, output_tokens: 5, total_tokens: 8 }
+      }
+    }
+  })
+
+  const result = await provider.generate({
+    systemPrompt: 'json only',
+    userPrompt: 'hello',
+    maxOutputTokens: 1200
+  })
+
+  assert.equal(fallbackCalled, true)
+  assert.equal(capturedFallbackBody.model, 'gpt-test')
+  assert.equal(capturedFallbackBody.max_output_tokens, 1200)
+  assert.equal(result.content, '{"ok":true}')
+  assert.equal(result.usage.totalTokens, 8)
+})
+
 test('openai compatible chat request forwards max token limit', async () => {
   let capturedBody = null
   const provider = createOpenAICompatibleAgentProvider({

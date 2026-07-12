@@ -59,10 +59,14 @@ function compactReplies(items = [], fallback = []) {
   return [...items, ...fallback]
     .map((item) => String(item || '').trim())
     .filter((item) => {
-      if (!item || seen.has(item)) return false
+      if (!item || isPassiveWorkflowAgentQuickReply(item) || seen.has(item)) return false
       seen.add(item)
       return true
     })
+}
+
+function isPassiveWorkflowAgentQuickReply(reply = '') {
+  return /^(等待生成|正在生成|生成中|生成完成后查看|完成后查看|阶段完成后查看)$/.test(String(reply || '').trim())
 }
 
 function keepRequiredQuickReply(replies = [], requiredReply = '', limit = 6) {
@@ -173,13 +177,22 @@ function isPendingWorkflowAgentAssistantMessage(message = {}) {
   return message?.role === 'assistant' && ['pending', 'retrieving', 'generating', 'merging-canvas'].includes(message?.meta?.status)
 }
 
+function normalizeWorkflowAgentUserContent(message = {}) {
+  const content = stringifyWorkflowAgentDisplayValue(message.content)
+  const action = String(message?.meta?.action || message?.action || '').trim()
+  if (message?.role === 'user' && action === 'stage-confirm-next' && /请确认「[^」]+」阶段结果/.test(content)) {
+    return '进入下一阶段'
+  }
+  return content
+}
+
 function normalizeWorkflowAgentSessionMessages(messages = []) {
   const normalizedMessages = messages.map((message, index) => ({
     id: message.id || `message-${index}`,
     role: message.role || 'user',
     content: message.role === 'assistant'
       ? normalizeWorkflowAgentReplyContent(message.content)
-      : stringifyWorkflowAgentDisplayValue(message.content),
+      : normalizeWorkflowAgentUserContent(message),
     createdAt: message.createdAt || '',
     trace: Array.isArray(message.trace) ? message.trace : [],
     meta: message.meta || null
@@ -246,7 +259,61 @@ function advancedUxMergedAgentSessionMessages(run = {}, scopeId = '') {
       }
     }))
   )
-  return advancedUxMessagesWithoutDuplicatePlainFailures(messages, run)
+  return advancedUxMessagesWithoutDuplicatePlainFailures(
+    advancedUxMessagesWithVisibleStageAdvanceUsers(messages),
+    run
+  )
+}
+
+function isStageAdvanceAssistantConfirmation(message = {}) {
+  if (message?.role !== 'assistant') return false
+  return ['stage-confirm-next', 'advanced-ux-stage-confirm-next'].includes(String(message?.meta?.action || message?.action || '').trim())
+}
+
+function isVisibleStageAdvanceUserMessage(message = {}, requestId = '') {
+  if (message?.role !== 'user') return false
+  if (String(message?.content || '').trim() !== '进入下一阶段') return false
+  if (!requestId) return true
+  return workflowAgentMessageRequestId(message) === requestId
+}
+
+function advancedUxStageAdvanceUserMessageFor(assistantMessage = {}, index = 0) {
+  const meta = assistantMessage.meta || {}
+  const requestId = workflowAgentMessageRequestId(assistantMessage) || `advanced-ux-stage-confirm-${index}`
+  return {
+    id: `${assistantMessage.id || requestId}-visible-user-advance`,
+    role: 'user',
+    content: '进入下一阶段',
+    createdAt: assistantMessage.createdAt || '',
+    meta: {
+      action: 'stage-confirm-next',
+      clientMessageId: requestId,
+      sourceScopeId: meta.sourceScopeId || meta.stageId || '',
+      stageId: meta.stageId || meta.sourceScopeId || '',
+      nextStageId: meta.nextStageId || ''
+    }
+  }
+}
+
+function advancedUxMessagesWithVisibleStageAdvanceUsers(messages = []) {
+  const visibleAdvanceRequestIds = new Set(messages
+    .filter((message) => isVisibleStageAdvanceUserMessage(message, workflowAgentMessageRequestId(message)))
+    .map(workflowAgentMessageRequestId)
+    .filter(Boolean))
+  const output = []
+  messages.forEach((message, index) => {
+    const requestId = workflowAgentMessageRequestId(message)
+    if (
+      isStageAdvanceAssistantConfirmation(message) &&
+      requestId &&
+      !visibleAdvanceRequestIds.has(requestId)
+    ) {
+      output.push(advancedUxStageAdvanceUserMessageFor(message, index))
+      visibleAdvanceRequestIds.add(requestId)
+    }
+    output.push(message)
+  })
+  return output
 }
 
 function advancedUxMessagesWithoutDuplicatePlainFailures(messages = [], run = {}) {

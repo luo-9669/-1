@@ -80,6 +80,16 @@ const ADVANCED_UX_ANALYSIS_PIPELINE_TABS = [
     sourceRefs: ['riskAssessment', 'gapConfirmation', 'boundaryConditionMatrix']
   },
   {
+    id: 'ux-assumption-validation',
+    title: '假设与验证',
+    sourceRefs: ['evidenceAndAssumptions', 'riskAssessment', 'gapConfirmation']
+  },
+  {
+    id: 'ux-design-opportunity',
+    title: '设计机会',
+    sourceRefs: ['designOpportunityMatrix', 'competitiveAnalysis']
+  },
+  {
     id: 'ux-interaction-chain',
     title: '整体交互链路',
     sourceRefs: ['navigationStructure', 'pageHierarchyTree', 'userJourneyMap', 'dataFlowGraph', 'featureJumpGraph', 'exceptionRecoveryMatrix', 'stateMachineMap']
@@ -98,6 +108,11 @@ const ADVANCED_UX_ANALYSIS_PIPELINE_TABS = [
     id: 'ux-recommendation-decision',
     title: '推荐方案建议',
     sourceRefs: ['acceptanceBasis']
+  },
+  {
+    id: 'ux-priority-phasing',
+    title: '设计优先级与分阶段计划',
+    sourceRefs: ['priorityRoadmap', 'scopeBoundary', 'acceptanceBasis']
   }
 ]
 
@@ -105,23 +120,28 @@ const ADVANCED_UX_LEGACY_TAB_ID_ALIASES = {
   'ux-requirement-understanding': 'ux-original-requirement-analysis',
   'ux-requirement-decomposition': 'ux-design-problem-definition',
   'ux-risk-assumption': 'ux-user-scenario',
+  'ux-assumption-validation-board': 'ux-assumption-validation',
+  'ux-hypothesis-validation': 'ux-assumption-validation',
   'ux-flow-info-architecture': 'ux-interaction-chain',
   'ux-opportunity-solution': 'ux-three-design-solutions',
-  'ux-priority-roadmap': 'ux-exception-flow',
+  'ux-priority-roadmap': 'ux-priority-phasing',
   'ux-delivery-acceptance': 'ux-recommendation-decision',
   'ux-requirement-completeness': 'ux-user-scenario',
   'ux-flow-architecture': 'ux-interaction-chain',
-  'ux-design-opportunity': 'ux-three-design-solutions',
-  'ux-design-priority': 'ux-exception-flow'
+  'ux-design-priority': 'ux-priority-phasing'
 }
 
 const ADVANCED_UX_LEGACY_TITLE_ALIASES = {
   '需求理解': 'ux-original-requirement-analysis',
   '需求拆解': 'ux-design-problem-definition',
   '风险假设': 'ux-user-scenario',
+  '假设梳理与验证': 'ux-assumption-validation',
+  '假设验证': 'ux-assumption-validation',
+  '设计机会识别': 'ux-design-opportunity',
   '流程与信息架构': 'ux-interaction-chain',
-  '机会与方案': 'ux-three-design-solutions',
-  '优先级与分期': 'ux-exception-flow',
+  '机会与方案': 'ux-design-opportunity',
+  '优先级与分期': 'ux-priority-phasing',
+  '设计优先级与分期': 'ux-priority-phasing',
   '交付与验收': 'ux-recommendation-decision'
 }
 
@@ -2381,7 +2401,7 @@ function priorityRoadmapForAnalysis(scopeBoundary = {}, designOpportunityMatrix 
       { id: 'priority-out', title: '暂不纳入', items: listFromValues(scopeBoundary.outOfScope, ['未确认扩展功能'], 6), rule: '超出当前输入和验收边界' }
     ],
     milestones: [
-      { id: 'milestone-analysis', title: '需求分析确认', deliverables: ['7 个分析详情 tab', '页面覆盖矩阵', '业务规则与状态流'] },
+      { id: 'milestone-analysis', title: '需求分析确认', deliverables: ['10 个分析详情 tab', '页面覆盖矩阵', '业务规则与状态流'] },
       { id: 'milestone-lofi', title: '交互低保', deliverables: ['页面框架', '交互说明', '状态和异常路径'] },
       { id: 'milestone-output', title: 'UI/HTML/Vue 与验收', deliverables: ['视觉产物', '可预览代码', '验收沉淀'] }
     ]
@@ -3121,6 +3141,16 @@ function requirementTabContent(tab = {}, artifact = {}) {
       `场景假设：${artifactList(artifact.userScenarios?.coreScenarios, 3).join('、') || '待确认'}`,
       `待验证问题：${(artifact.gapConfirmation?.questions || []).length} 项`
     ],
+    'ux-assumption-validation': [
+      `假设来源：${artifactList(evidence.assumptions, 3).join('、') || '待确认'}`,
+      `风险验证：${artifactList(artifact.riskAssessment?.validationMethods, 3).join('、') || '待补充'}`,
+      `阻塞问题：${(artifact.gapConfirmation?.questions || []).length} 项`
+    ],
+    'ux-design-opportunity': [
+      `设计机会：${artifactList((artifact.designOpportunityMatrix?.opportunities || []).map((item) => item.title), 3).join('；') || '待确认'}`,
+      `竞品证据：${competitive.evidenceStatus || competitive.evidenceNotice || '待补充'}`,
+      `承接方向：链路设计、三方案输出、异常流补全`
+    ],
     'ux-interaction-chain': [
       `导航入口：${artifactList(artifact.navigationStructure?.globalEntries, 3).join('、') || '待确认'}`,
       `页面层级：${artifact.pageHierarchyTree?.leafPageCount || pages.length || 0} 个叶子页面`,
@@ -3138,6 +3168,11 @@ function requirementTabContent(tab = {}, artifact = {}) {
     'ux-recommendation-decision': [
       `推荐依据：${artifactList(artifact.priorityRoadmap?.milestones?.map((item) => item.title || item.name), 3).join('、') || '待确认'}`,
       `交付物：${artifactList(artifact.downstreamHints?.handoffItems, 3).join('、') || '待模型补充'}`
+    ],
+    'ux-priority-phasing': [
+      `P0：${artifactList(scope.p0, 3).join('、') || '待确认'}`,
+      `分期：${artifactList(artifact.priorityRoadmap?.milestones?.map((item) => item.title || item.name), 3).join('、') || '待确认'}`,
+      `验收：${artifactList(artifact.acceptanceBasis?.functional, 2).join('；') || '待补充'}`
     ]
   }
   return artifactList(contentByTab[tab.id] || [tab.summary], 5)
@@ -3301,24 +3336,513 @@ function advancedUxReportPlaceholder(markdown = '', overrides = {}) {
 function advancedUxMarkdownSectionTemplate(tab = {}, analysis = {}) {
   const demand = cleanText(analysis.input || analysis.summary || analysis.title || '当前需求')
   const title = tab.title
-  const base = [
+  const safeProduct = demand.length > 30 ? '当前产品' : demand
+  const commonNote = '说明：以下内容为无模型/弱模型场景的结构化兜底骨架，只使用用户输入与低置信度推断，不替代正式模型深度分析。'
+  const sectionTemplates = {
+    'ux-original-requirement-analysis': [
+      `## ${title}`,
+      '',
+      '### 1. 原始诉求识别',
+      '',
+      `> "${demand}"`,
+      '',
+      commonNote,
+      '',
+      '### 2. 需求理解清单',
+      '',
+      '| # | 需求要素 | 理解转译 | 类型 | 置信度 | 依据 |',
+      '|---|---|---|---|---|---|',
+      `| 1 | 产品形态 | ${safeProduct} 需要形成可操作的数字产品/功能方案 | 推断 | 低 | 用户输入 |`,
+      '| 2 | 核心任务 | 用户需要完成入口、处理、反馈、交付闭环 | 推断 | 低 | 需求未给出完整流程 |',
+      '| 3 | 用户对象 | 目标用户、角色权限和使用频次待确认 | 推断 | 低 | 原始需求缺少画像 |',
+      '| 4 | 输入方式 | 表单、上传、选择或对话输入待确认 | 推断 | 低 | 原始需求未说明 |',
+      '| 5 | 输出规格 | 交付结果、格式、质量标准待确认 | 推断 | 低 | 原始需求未说明 |',
+      '| 6 | 使用场景 | 首次使用、重复使用、异常恢复都需覆盖 | 推断 | 低 | UX 阶段一规范 |',
+      '| 7 | 技术约束 | 接口、权限、性能、模型能力边界待确认 | 推断 | 低 | 约束未输入 |',
+      '| 8 | 成功标准 | 需定义任务完成率、时长、错误恢复和满意度 | 推断 | 低 | 验收指标缺失 |',
+      '',
+      '### 3. 需求清晰度评分表',
+      '',
+      '| 维度 | 评分(1-5) | 说明 |',
+      '|---|---|---|',
+      '| 产品形态 | 2 | 方向存在，但终端、角色和业务边界仍需确认 |',
+      '| 主流程 | 2 | 缺少从入口到交付的完整步骤 |',
+      '| 用户定位 | 1 | 未明确主用户、次用户和权限差异 |',
+      '| 输出标准 | 1 | 未明确交付物、质量阈值和验收指标 |',
+      '| 体验标准 | 1 | 未明确效率、容错、可解释性和反馈要求 |',
+      '| **综合** | **1.4/5** | 可先做假设驱动方案，但必须标注风险 |',
+      '',
+      '### 4. GWT 功能行为描述',
+      '',
+      '| # | 功能 | Given | When | Then | 置信度 |',
+      '|---|---|---|---|---|---|',
+      '| G1 | 进入入口 | 用户已打开产品入口 | 用户点击主入口 | 系统展示任务起始页和关键说明 | 低 |',
+      '| G2 | 提交核心信息 | 用户已填写必要信息 | 用户点击提交/生成/保存 | 系统校验输入并进入处理中状态 | 低 |',
+      '| G3 | 异常恢复 | 系统处理失败或数据为空 | 用户点击重试/返回修改 | 系统保留上下文并提供恢复路径 | 低 |',
+      '',
+      '### 5. 5 Whys 根因追溯',
+      '',
+      '| 层级 | 问题 | 回答 |',
+      '|---|---|---|',
+      '| Why 1 | 为什么需要这个产品/功能？ | 用户希望降低完成关键任务的成本 |',
+      '| Why 2 | 为什么当前成本高？ | 流程、信息、判断或工具能力不够集中 |',
+      '| Why 3 | 为什么不够集中会影响体验？ | 用户需要在多个来源间切换并承担判断成本 |',
+      '| Why 4 | 为什么判断成本需要产品解决？ | 产品可以通过结构化引导、状态反馈和异常恢复减少不确定性 |',
+      '| Why 5 | 根因：真正要解决什么？ | 帮用户在有限信息下稳定完成任务，并清楚知道下一步 |',
+      '',
+      '### 6. L1/L2/L3 需求拆解表',
+      '',
+      '| 层级 | 功能模块 | 子功能 | 优先级 | 置信度 |',
+      '|---|---|---|---|---|',
+      '| L1-核心 | 任务入口 | 创建/进入核心任务 | P0 | 低 |',
+      '| L1-核心 | 信息输入 | 收集完成任务所需信息 | P0 | 低 |',
+      '| L1-核心 | 结果反馈 | 展示处理进度、成功和失败 | P0 | 低 |',
+      '| L2-增强 | 历史记录 | 保存最近任务和可继续操作 | P1 | 低 |',
+      '| L2-增强 | 协助说明 | 对关键字段和异常给解释 | P1 | 低 |',
+      '| L3-增值 | 数据洞察 | 汇总使用效果和优化建议 | P2 | 低 |',
+      '',
+      '### 7. 关键缺口清单',
+      '',
+      '| # | 缺口描述 | 影响范围 | 紧急度 | 建议处理 |',
+      '|---|---|---|---|---|',
+      '| 1 | 目标用户未明确 | 信息架构/权限 | 高 | 需追问确认 |',
+      '| 2 | 核心流程未明确 | 页面总览/跳转 | 高 | 先按假设设计 |',
+      '| 3 | 输入输出规格未明确 | 表单/结果页 | 高 | 需定义验收 |',
+      '| 4 | 异常和边界未明确 | 失败恢复 | 中 | 阶段二补齐 |',
+      '| 5 | 数据和接口依赖未明确 | 前后端交付 | 中 | 标为待确认 |',
+      '',
+      '### 8. 追问清单',
+      '',
+      '| # | 追问问题 | 阻塞对象 | 若暂不确认的处理方式 | 优先级 |',
+      '|---|---|---|---|---|',
+      '| Q1 | 目标用户是谁？ | 用户旅程和权限 | 按主用户低置信度推进 | P0 |',
+      '| Q2 | 用户完成任务的第一入口是什么？ | 页面总览 | 设计默认首页入口 | P0 |',
+      '| Q3 | 成功结果是什么？ | 结果页和验收 | 用任务完成状态占位 | P0 |',
+      '| Q4 | 哪些异常必须恢复？ | 异常流 | 覆盖加载、空、错、无权限 | P1 |',
+      '| Q5 | 是否有角色权限差异？ | 交互规则 | 先标注权限待确认 | P1 |',
+      '',
+      '### 9. 下一步判断',
+      '',
+      '| 判断项 | 结论 | 置信度 |',
+      '|---|---|---|',
+      '| 是否可进入设计？ | 可基于假设进入，但必须保留待确认风险 | 中 |',
+      '| 最大风险 | 核心流程和输出标准不清导致页面范围偏差 | 中 |',
+      '| 建议 | 进入设计问题定义，并在阶段二页面交互文档继续收敛 | 中 |'
+    ],
+    'ux-design-problem-definition': [
+      `## ${title}`,
+      '',
+      '### 1. 目标矩阵表',
+      '',
+      '| 目标类型 | 目标描述 | 可衡量指标 | 置信度 |',
+      '|---|---|---|---|',
+      '| 业务目标 | 让核心任务形成可复用闭环 | 任务完成率、转化率 | 低 |',
+      '| 用户目标 | 降低从进入到完成的理解成本 | 首次完成时长、错误率 | 低 |',
+      '| 设计目标 | 清晰呈现入口、状态、结果和恢复动作 | 可用性测试通过率 | 低 |',
+      '| 风险目标 | 减少失败后退出 | 重试成功率、恢复率 | 低 |',
+      '| 交付目标 | 阶段二能生成逐页交互说明 | 页面覆盖率 | 中 |',
+      '',
+      '### 2. 体验矛盾表',
+      '',
+      '| 矛盾对 | 矛盾描述 | 倾向 | 处理策略 | 置信度 |',
+      '|---|---|---|---|---|',
+      '| 快速开始 vs 信息完整 | 输入少更快，但结果可能不准 | 先快后补 | 渐进式收集 | 低 |',
+      '| 自动处理 vs 用户可控 | 自动化降低成本，但需要可解释 | 保留确认 | 关键节点给预览 | 低 |',
+      '| 新手引导 vs 熟练效率 | 引导太多会打断熟练用户 | 分层展示 | 默认简洁、按需展开 | 低 |',
+      '| 全量页面 vs MVP 收敛 | 页面完整但成本高 | 先 P0 | P1/P2 延后 | 低 |',
+      '',
+      '### 3. HMW 问题卡片',
+      '',
+      '| 编号 | HMW 问题 | 洞察来源 | 选中 |',
+      '|---|---|---|---|',
+      '| HMW1 | 我们如何可能让用户在 1 分钟内理解下一步？ | 5 Whys | 是 |',
+      '| HMW2 | 我们如何可能让失败状态仍可恢复？ | 异常风险 | 是 |',
+      '| HMW3 | 我们如何可能在信息不足时保持低风险推进？ | 需求缺口 | 是 |',
+      '',
+      '### 4. 成功判断标准',
+      '',
+      '| 标准 | 验收方式 | 置信度 |',
+      '|---|---|---|',
+      '| 用户能找到主入口 | 原型任务测试 | 低 |',
+      '| 用户知道处理状态 | 状态覆盖检查 | 低 |',
+      '| 用户失败后知道如何恢复 | 异常流评审 | 低 |'
+    ],
+    'ux-user-scenario': [
+      `## ${title}`,
+      '',
+      '### 1. 用户旅程地图',
+      '',
+      '| 阶段 | 触点 | 用户行为 | 情绪 | 痛点 | 机会点 | 证据/置信度 |',
+      '|---|---|---|---|---|---|---|',
+      '| 进入 | 首页/入口 | 判断是否开始 | 犹豫 | 不知道价值 | 明确任务收益 | 低 |',
+      '| 输入 | 表单/上传/选择 | 提供必要信息 | 紧张 | 不知道填什么 | 示例和校验 | 低 |',
+      '| 处理 | 进度页/状态区 | 等待系统反馈 | 焦虑 | 不知道还要多久 | 阶段进度 | 低 |',
+      '| 完成 | 结果页 | 查看结果并下一步 | 期待 | 不知道是否成功 | 结果解释和主操作 | 低 |',
+      '| 回流 | 历史/重试 | 修改或继续 | 谨慎 | 容易丢上下文 | 保存草稿和恢复 | 低 |',
+      '',
+      '### 2. 体验风险清单',
+      '',
+      '| 风险 | 触发路径 | 影响 | 缓解方式 | 置信度 |',
+      '|---|---|---|---|---|',
+      '| 入口不清 | 打开产品 -> 找不到主操作 | 放弃 | 强化主按钮 | 低 |',
+      '| 输入失败 | 填写 -> 校验失败 -> 不知原因 | 挫败 | 就近提示 | 低 |',
+      '| 等待不确定 | 提交 -> 长时间处理 | 流失 | 进度和后台等待 | 低 |',
+      '',
+      '### 3. 页面优先级初判表',
+      '',
+      '| 页面编号 | 页面名称 | 用户阶段 | 价值 | 复杂度 | 建议优先级 |',
+      '|---|---|---|---|---|---|',
+      '| P01 | 任务入口页 | 进入 | 高 | 中 | P0 |',
+      '| P02 | 信息填写页 | 输入 | 高 | 中 | P0 |',
+      '| P03 | 处理中状态页 | 处理 | 中 | 中 | P0 |',
+      '| P04 | 结果详情页 | 完成 | 高 | 中 | P0 |',
+      '| P05 | 历史记录页 | 回流 | 中 | 低 | P1 |'
+    ],
+    'ux-assumption-validation': [
+      `## ${title}`,
+      '',
+      '### 1. 假设分类总表',
+      '',
+      '| # | 假设内容 | 分类 | 来源追溯 | 不成立的影响 | 验证方式 | 置信度 | 当前状态 |',
+      '|---|---|---|---|---|---|---|---|',
+      '| A1 | 目标用户愿意通过该产品完成核心任务 | 用户假设 | 步骤① 用户对象推断 | 页面入口和主流程需要重做 | 用户访谈/原型测试 | 低 | 待验证 |',
+      '| A2 | 分步引导能降低首次理解成本 | 体验假设 | 步骤② 体验矛盾 | 若不成立需切换工作台式布局 | 可用性测试 | 低 | 待验证 |',
+      '| A3 | 用户能提供完成任务所需输入 | 用户假设 | 步骤① 输入方式缺口 | 表单和校验策略需要调整 | 灰度数据验证 | 低 | 待验证 |',
+      '| A4 | 结果反馈足以支持下一步决策 | 体验假设 | 步骤③ 完成阶段痛点 | 结果页解释和二次操作需加强 | 原型评审 | 低 | 待验证 |',
+      '| A5 | 当前业务流程可先按单角色推进 | 业务假设 | 步骤① 权限缺口 | 权限矩阵和页面可见性需重做 | 业务确认 | 低 | 待验证 |',
+      '| A6 | 异常可通过原地重试恢复 | 体验假设 | 步骤③ 失败恢复机会 | 需要新增独立恢复页面或人工介入 | 异常演练 | 低 | 待验证 |',
+      '| A7 | 一期优先闭环比效率工作台更稳妥 | 业务假设 | 步骤② MVP 收敛矛盾 | 若不成立需提前建设高密工作台 | 干系人评审 | 中 | 待验证 |',
+      '| A8 | 页面交互文档足以承接后续视觉和代码阶段 | 业务假设 | 阶段二产物约束 | 下游 UI/HTML 产物缺少依据 | 文档门禁检查 | 中 | 待验证 |',
+      '',
+      '### 2. 高风险假设聚焦',
+      '',
+      '| 高风险假设 | 置信度 | 降级策略 | 触发验证的时间节点 |',
+      '|---|---|---|---|',
+      '| 目标用户和核心任务未明确 | 低 | 先按主用户低风险闭环推进，保留角色扩展点 | 阶段二页面总览前 |',
+      '| 输入输出规格未明确 | 低 | 结果页使用可解释占位和待确认字段 | 原型评审前 |',
+      '| 权限差异未明确 | 低 | 页面框架标注权限规则待确认 | 交互低保评审前 |',
+      '',
+      '### 3. 假设回检点',
+      '',
+      '| 回检对象 | 回检方式 | 关联后续步骤 |',
+      '|---|---|---|',
+      '| A1-A3 用户与输入假设 | 原型任务测试或访谈 | 步骤⑤ 设计机会、步骤⑥ 链路设计 |',
+      '| A4-A6 体验与异常假设 | 状态机和异常流评审 | 步骤⑧ 异常流补充 |',
+      '| A7-A8 业务交付假设 | 分期计划和文档门禁 | 步骤⑩ 设计优先级与分阶段计划 |'
+    ],
+    'ux-design-opportunity': [
+      `## ${title}`,
+      '',
+      '### 1. 设计机会总表',
+      '',
+      '| # | 机会描述 | 类型 | 上游依据 | 可承接步骤 | 预期价值 | 优先级 |',
+      '|---|---|---|---|---|---|---|',
+      '| O1 | 明确主入口和任务收益 | 体验机会 | 步骤③ 进入阶段痛点 | 步骤⑥ | 降低首次理解成本 | P0 |',
+      '| O2 | 渐进式收集必要信息 | 功能机会 | 步骤② 快速开始 vs 信息完整 | 步骤⑥/⑦ | 减少一次性输入压力 | P0 |',
+      '| O3 | 就近校验和错误定位 | 体验机会 | 步骤① 输入缺口 | 步骤⑧ | 降低失败后退出 | P0 |',
+      '| O4 | 处理中进度可见 | 风险转化机会 | 步骤③ 等待不确定 | 步骤⑥/⑧ | 缓解等待焦虑 | P0 |',
+      '| O5 | 失败保留上下文并可重试 | 风险转化机会 | 步骤④ 高风险假设 | 步骤⑧ | 提升恢复率 | P0 |',
+      '| O6 | 结果解释和下一步建议 | 体验机会 | 步骤③ 完成阶段痛点 | 步骤⑦/⑨ | 提升结果可用性 | P1 |',
+      '| O7 | 历史记录和继续任务 | 功能机会 | 步骤③ 回流痛点 | 步骤⑩ | 支持复用和留存 | P1 |',
+      '| O8 | 权限和边界显性提示 | 风险转化机会 | 步骤④ 权限假设 | 步骤⑧ | 减少误操作 | P1 |',
+      '',
+      '### 2. 优先 Top 3-5 机会',
+      '',
+      '| 排序 | 机会编号 | 机会描述 | 优先理由 | 设计方向提示 |',
+      '|---|---|---|---|---|',
+      '| 1 | O1 | 明确主入口和任务收益 | 影响所有用户的第一步 | 首页/入口页突出主操作 |',
+      '| 2 | O2 | 渐进式收集必要信息 | 平衡效率和准确性 | 分步表单或向导 |',
+      '| 3 | O5 | 失败保留上下文并可重试 | 直接降低流失 | 异常态保留输入和重试 |',
+      '| 4 | O6 | 结果解释和下一步建议 | 决定任务是否闭环 | 结果页加入解释和主次动作 |',
+      '',
+      '### 3. 机会→步骤映射',
+      '',
+      '| 机会编号 | 承接步骤 | 承接方式 |',
+      '|---|---|---|',
+      '| O1 | 步骤⑥ 整体交互链路 | 在 S1 入口节点强化价值说明和开始动作 |',
+      '| O2 | 步骤⑦ 三套设计方案 | 方案A使用稳妥分步，方案B使用效率工作台 |',
+      '| O5 | 步骤⑧ 异常流补充 | 所有失败态必须保留上下文并提供恢复动作 |',
+      '| O6 | 步骤⑨ 推荐方案建议 | 推荐结果页解释能力作为一期或二期分界 |'
+    ],
+    'ux-interaction-chain': [
+      `## ${title}`,
+      '',
+      '### 1. 流程路径表',
+      '',
+      '| 步骤 | 用户行为 | 系统响应 | 产出 | 页面 |',
+      '|---|---|---|---|---|',
+      '| S1 | 进入任务入口 | 展示主操作和说明 | 开始意图 | P01 |',
+      '| S2 | 提供关键信息 | 校验输入 | 可提交状态 | P02 |',
+      '| S3 | 提交任务 | 进入处理中 | 任务记录 | P03 |',
+      '| S4 | 等待结果 | 展示进度和预计耗时 | 状态反馈 | P03 |',
+      '| S5 | 查看结果 | 展示结果和下一步 | 完成反馈 | P04 |',
+      '| S6 | 修改或重试 | 回到可编辑状态 | 恢复路径 | P02/P03 |',
+      '',
+      '### 2. 页面三件套',
+      '',
+      '#### 页面总览表',
+      '',
+      '| 页面编号 | 页面名称 | 类型 | 核心职责 |',
+      '|---|---|---|---|',
+      '| P01 | 任务入口页 | 核心页面 | 承接需求并启动任务 |',
+      '| P02 | 信息填写页 | 核心页面 | 收集必要信息 |',
+      '| P03 | 处理中状态页 | 状态页面 | 展示进度和异常恢复 |',
+      '| P04 | 结果详情页 | 核心页面 | 展示结果与下一步 |',
+      '',
+      '#### 页面流转表',
+      '',
+      '| 源页面 | 目标页面 | 触发动作 | 传递数据 |',
+      '|---|---|---|---|',
+      '| P01 | P02 | 点击开始 | 任务类型 |',
+      '| P02 | P03 | 提交 | 输入信息 |',
+      '| P03 | P04 | 处理成功 | 结果 ID |',
+      '| P03 | P02 | 处理失败返回修改 | 错误原因 |',
+      '',
+      '#### 页面框架表',
+      '',
+      '| 区域 | 内容 | 说明 |',
+      '|---|---|---|',
+      '| 顶部状态区 | 标题、返回、进度 | 固定显示当前阶段 |',
+      '| 主体内容区 | 表单/列表/结果 | 根据页面职责变化 |',
+      '| 底部操作区 | 主按钮、次按钮 | 承接下一步和恢复动作 |',
+      '',
+      '### 3. 状态机表',
+      '',
+      '| 当前状态 | 触发事件 | 目标状态 | 页面表现 | 数据变更 |',
+      '|---|---|---|---|---|',
+      '| ST0 初始 | 进入入口 | ST1 待输入 | 展示入口页 | 无 |',
+      '| ST1 待输入 | 提交合法信息 | ST2 处理中 | 按钮 loading | 创建任务 |',
+      '| ST2 处理中 | 处理成功 | ST3 成功 | 展示结果 | 写入结果 |',
+      '| ST2 处理中 | 处理失败 | ST4 失败 | 错误提示 | 保留输入 |',
+      '| ST4 失败 | 点击重试 | ST2 处理中 | 重新 loading | 更新任务 |',
+      '',
+      '### 4. 信息架构实体表',
+      '',
+      '| 信息实体 | 核心属性 | 关系/依赖 | 状态/流转 | 设计提示 |',
+      '|---|---|---|---|---|',
+      '| 用户 | id、角色、权限 | 拥有任务 | 登录/无权限 | 权限提示 |',
+      '| 任务 | id、类型、状态 | 依赖输入和结果 | 初始/处理中/完成/失败 | 状态可见 |',
+      '| 输入信息 | 字段、附件、校验 | 生成任务 | 未填/有效/错误 | 就近校验 |',
+      '| 结果 | 内容、版本、时间 | 属于任务 | 可查看/可修改 | 展示解释 |',
+      '| 异常 | 错误码、恢复动作 | 关联任务 | 可重试/不可重试 | 给恢复路径 |',
+      '',
+      '### 5. 关键断点与优化节点表',
+      '',
+      '| 断点节点 | 断点风险 | 优化动作 | 覆盖路径 | 置信度 |',
+      '|---|---|---|---|---|',
+      '| S1 入口理解 | 用户不知为何开始 | 强化价值说明 | 主路径 | 低 |',
+      '| S2 输入校验 | 信息缺失 | 就近提示和示例 | 主路径 | 低 |',
+      '| S3 等待处理 | 用户退出 | 进度与后台等待 | 主路径 | 低 |',
+      '| S4 失败恢复 | 不知如何重试 | 保留输入并解释原因 | 异常路径 | 低 |',
+      '| S5 结果下一步 | 不知道后续操作 | 提供主次动作 | 回流路径 | 低 |',
+      '',
+      '### 6. 全局交互规范表',
+      '',
+      '| 规范类型 | 规则 | 示例 | 例外 |',
+      '|---|---|---|---|',
+      '| 加载状态 | 超过 300ms 显示 loading | 提交任务 | 本地即时切换 |',
+      '| Toast | 仅承载轻量成功反馈 | 保存成功 | 复杂错误不用 Toast |',
+      '| 空状态 | 说明原因并给主操作 | 无结果 | 权限空态需解释权限 |',
+      '| 网络异常 | 保留上下文并可重试 | 列表失败 | 文件损坏另行提示 |',
+      '| 弹窗规范 | 关键确认才弹窗 | 删除确认 | 普通筛选不用弹窗 |',
+      '| 表单规范 | 就近校验和错误定位 | 必填缺失 | 非阻断提示可弱化 |',
+      '| 返回/导航 | 返回不丢上下文 | 未保存确认 | 浏览页可直接返回 |',
+      '',
+      '### 7. 低保真线框图',
+      '',
+      '```text',
+      '┌────────────────────┐',
+      '│ 顶部状态区          │',
+      '├────────────────────┤',
+      '│ 主体内容区          │',
+      '│ 表单 / 列表 / 结果   │',
+      '├────────────────────┤',
+      '│ 底部操作区          │',
+      '└────────────────────┘',
+      '```'
+    ],
+    'ux-three-design-solutions': [
+      `## ${title}`,
+      '',
+      '### 1. 方案卡片',
+      '',
+      '| 方案 | 核心策略 | 适用条件 | 主要风险 |',
+      '|---|---|---|---|',
+      '| 方案A 稳妥分步 | 用清晰步骤降低不确定 | 需求边界不清 | 流程偏长 |',
+      '| 方案B 效率工作台 | 聚合信息和操作 | 高频用户 | 信息密度高 |',
+      '| 方案C 引导助手 | 用问答补齐信息 | 新手用户 | 依赖理解稳定性 |',
+      '',
+      '### 2. 三方案对比矩阵',
+      '',
+      '| 维度 | 方案一 | 方案二 | 方案三 | 取舍说明 |',
+      '|---|---|---|---|---|',
+      '| 效率 | 中 | 高 | 中 | 二期可融合工作台 |',
+      '| 学习成本 | 低 | 中 | 低 | 一期优先低成本 |',
+      '| 异常恢复 | 强 | 中 | 中 | 分步更容易定位 |',
+      '| 实现复杂度 | 中 | 高 | 高 | 一期控制成本 |',
+      '| 风险 | 低 | 中 | 中 | 推荐方案A |',
+      '',
+      '### 3. 关键节点低保真对比',
+      '',
+      '```text',
+      '方案一：分步页        方案二：工作台        方案三：助手',
+      '┌──────────┐      ┌─────┬─────┐      ┌──────────┐',
+      '│ 单步输入 │      │ 输入│预览 │      │ 对话引导 │',
+      '│ 下一步   │      │ 操作│状态 │      │ 卡片确认 │',
+      '└──────────┘      └─────┴─────┘      └──────────┘',
+      '```',
+      '',
+      '### 4. 优先方案收敛',
+      '',
+      '| Top | 方案 | 理由 | 建议落点 | 置信度 |',
+      '|---|---|---|---|---|',
+      '| Top 1：稳妥分步 | 方案A | 需求不确定时风险最低 | 一期主流程 | 低 |',
+      '| Top 2：局部工作台 | 方案B | 适合结果页效率提升 | 二期融合 | 低 |',
+      '| Top 3：问答引导 | 方案C | 适合新手补齐信息 | 后续探索 | 低 |'
+    ],
+    'ux-exception-flow': [
+      `## ${title}`,
+      '',
+      '### 1. 异常流矩阵表',
+      '',
+      '| 异常类型 | 触发场景 | 用户影响 | 页面表现 | 处理方式 |',
+      '|---|---|---|---|---|',
+      '| 输入为空 | 用户直接提交 | 无法继续 | 就近提示 | 定位必填项 |',
+      '| 格式错误 | 输入不合法 | 提交失败 | 字段错误 | 给示例 |',
+      '| 网络失败 | 请求超时 | 数据不可用 | 错误态 | 重试 |',
+      '| 权限不足 | 未登录/无授权 | 操作被拦截 | 权限提示 | 登录或联系管理员 |',
+      '| 处理中超时 | 长任务无结果 | 焦虑流失 | 进度提示 | 后台等待 |',
+      '| 并发提交 | 重复点击 | 重复任务 | 按钮禁用 | 防重复 |',
+      '| 空结果 | 查询无数据 | 无法选择 | 空状态 | 重置筛选 |',
+      '| 业务失败 | 规则不满足 | 无法完成 | 业务原因说明 | 返回修改 |',
+      '',
+      '### 2. 恢复动作',
+      '',
+      '| 异常 | 恢复动作 | 保留数据 | 置信度 |',
+      '|---|---|---|---|',
+      '| 输入错误 | 返回字段修改 | 保留已填 | 低 |',
+      '| 网络失败 | 原地重试 | 保留筛选/输入 | 低 |',
+      '| 权限不足 | 登录后恢复 | 保留来源页 | 低 |'
+    ],
+    'ux-recommendation-decision': [
+      `## ${title}`,
+      '',
+      '### 1. 推荐决策卡片',
+      '',
+      '| 维度 | 内容 |',
+      '|---|---|',
+      '| 推荐方案 | 方案A 稳妥分步作为一期主方案 |',
+      '| 核心理由 | 当前信息不足，分步方案更容易校验、解释和恢复 |',
+      '| 融合点 | 在结果页吸收方案B的局部效率能力 |',
+      '| 不优先项 | 暂不优先完整工作台和全对话式主流程 |',
+      '| 核心交付物 | 页面总览、逐页交互说明、状态机、异常流、验收点 |',
+      '| 置信度 | 低 |',
+      '',
+      '### 2. 六帽评审表',
+      '',
+      '| 帽子 | 关注点 | 结论 |',
+      '|---|---|---|',
+      '| 白帽 | 事实 | 仅有用户原始需求，需补证据 |',
+      '| 红帽 | 感受 | 用户可能希望快速看到可落地方案 |',
+      '| 黑帽 | 风险 | 页面范围和输出标准不清 |',
+      '| 黄帽 | 价值 | 分步闭环有助于降低失败成本 |',
+      '| 绿帽 | 创新 | 后续可融合助手和工作台 |',
+      '| 蓝帽 | 收敛 | 先按低风险 MVP 推进 |',
+      '',
+      '### 3. 假设回检',
+      '',
+      '| 假设编号 | 假设内容 | 当前状态 | 对推荐方案的影响 | 处理建议 |',
+      '|---|---|---|---|---|',
+      '| A1 | 目标用户愿意通过该产品完成核心任务 | 待验证 | 影响入口和主流程优先级 | 继续推进但需原型验证 |',
+      '| A2 | 分步引导能降低首次理解成本 | 待验证 | 影响推荐方案A的稳健性 | 在阶段二保留工作台替代方案 |',
+      '| A5 | 当前业务流程可先按单角色推进 | 待验证 | 影响权限页面和规则 | 页面交互文档中标注权限待确认 |',
+      '',
+      '### 4. 数据埋点方案表',
+      '',
+      '| 事件名称 | 触发条件 | 上报参数 | 用途 | 优先级 |',
+      '|---|---|---|---|---|',
+      '| entry_click | 点击入口 | entry_source | 入口转化 | P0 |',
+      '| submit_start | 点击提交 | task_type | 漏斗起点 | P0 |',
+      '| submit_fail | 提交失败 | error_code | 失败诊断 | P0 |',
+      '| task_success | 任务成功 | duration | 效率评估 | P0 |',
+      '| retry_click | 点击重试 | error_type | 恢复评估 | P1 |',
+      '',
+      '### 5. 最终方案页面清单',
+      '',
+      '| 页面编号 | 页面名称 | 页面类型 | 核心职责 | 状态机 | 优先级 |',
+      '|---|---|---|---|---|---|',
+      '| P01 | 任务入口页 | 核心页 | 启动任务 | ST0/ST1 | P0 |',
+      '| P02 | 信息填写页 | 核心页 | 收集输入 | ST1/ST2 | P0 |',
+      '| P03 | 处理中状态页 | 状态页 | 展示进度 | ST2/ST4 | P0 |',
+      '| P04 | 结果详情页 | 核心页 | 展示结果 | ST3 | P0 |',
+      '| P05 | 历史记录页 | 辅助页 | 回流任务 | ST3/ST4 | P1 |',
+      '',
+      '### 6. 竞品对标总结表',
+      '',
+      '| 能力维度 | 自身规划 | 参考状态 | 置信度 |',
+      '|---|---|---|---|',
+      '| 入口清晰度 | 主入口突出 | 待验证 | 低 |',
+      '| 状态反馈 | 进度可见 | 待验证 | 低 |',
+      '| 异常恢复 | 原地重试 | 待验证 | 低 |',
+      '',
+      '### 7. 设计原则表',
+      '',
+      '| 原则 | 描述 | 置信度 |',
+      '|---|---|---|',
+      '| 先闭环 | 保证用户能完成主任务 | 低 |',
+      '| 可解释 | 关键状态给原因和下一步 | 低 |',
+      '| 可恢复 | 失败不丢上下文 | 低 |',
+      '| 渐进披露 | 复杂信息按需展开 | 低 |',
+      '',
+      '### 8. 下一步行动表',
+      '',
+      '| 行动项 | 负责角色 | 优先级 |',
+      '|---|---|---|',
+      '| 确认目标用户 | 产品/业务 | P0 |',
+      '| 确认核心流程 | 产品/UX | P0 |',
+      '| 生成页面交互框架与说明.md | UX/Agent | P0 |',
+      '| 补齐接口和权限 | 后端/产品 | P1 |',
+      '| 评审异常状态 | UX/测试 | P1 |'
+    ],
+    'ux-priority-phasing': [
+      `## ${title}`,
+      '',
+      '### 1. 优先级排序总览',
+      '',
+      '| 排序 | 功能/机会 | 用户价值 | 业务价值 | 实施成本 | 综合优先级 | 分期建议 |',
+      '|---|---|---|---|---|---|---|',
+      '| 1 | O1 主入口和任务收益 | 高 | 高 | 中 | P0 | 一期 |',
+      '| 2 | O2 渐进式信息收集 | 高 | 高 | 中 | P0 | 一期 |',
+      '| 3 | O5 失败恢复闭环 | 高 | 中 | 中 | P0 | 一期 |',
+      '| 4 | O6 结果解释和下一步 | 中 | 中 | 中 | P1 | 二期 |',
+      '| 5 | O7 历史记录和继续任务 | 中 | 中 | 低 | P1 | 二期 |',
+      '',
+      '### 2. 分期交付计划',
+      '',
+      '| 阶段 | 范围 | 核心目标 | 交付物 | 验证标准 | 预计周期 |',
+      '|---|---|---|---|---|---|',
+      '| 一期（MVP） | 主入口、输入、处理、结果、失败恢复 | 跑通核心任务闭环 | P0 页面交互文档、状态机、异常表 | 完成率和错误恢复可评审 | 1-2 周 |',
+      '| 二期（增强） | 历史、结果解释、效率控件 | 提升复用和效率 | P1 页面与埋点 | 留存和复用指标可观测 | 2-3 周 |',
+      '| 三期（扩展） | 多角色、复杂权限、数据洞察 | 扩展组织级使用 | 权限矩阵、运营后台或分析页 | 角色路径验证通过 | 待评估 |',
+      '',
+      '### 3. 待确认决策',
+      '',
+      '| # | 决策事项 | 影响范围 | 需要谁确认 | 确认时限 | 不确认的影响 |',
+      '|---|---|---|---|---|---|',
+      '| 1 | 目标用户和角色权限 | 页面总览、权限规则 | 产品/业务 | 阶段二前 | 页面范围可能偏差 |',
+      '| 2 | 核心输入输出规格 | 表单、结果页、接口 | 产品/技术 | 原型评审前 | 结果页和验收标准不稳定 |',
+      '| 3 | 一期是否包含历史记录 | 分期范围、埋点 | 产品/业务 | 排期前 | MVP 范围膨胀或复用不足 |'
+    ]
+  }
+  return (sectionTemplates[tab.id] || [
     `## ${title}`,
     '',
-    `### 本节点结论`,
+    '### 本节点结论',
     '',
-    `围绕「${demand}」完成${title}分析。当前内容由高级 UX 需求分析框架生成，后续画布节点从本章节自动导入。`,
+    `围绕「${demand}」完成${title}分析。`,
     '',
-    `### 关键产出`,
-    '',
-    `- 事实：用户输入为「${demand}」。`,
-    '- 推断：信息不足时按行业常见模式推进，所有未确认判断保持低置信度。',
-    '- 建议：优先补齐 P0 阻塞问题，再进入下一阶段设计。',
-    '',
-    `### 待确认`,
-    '',
-    '- 目标用户、核心场景、业务目标、技术/时间/人力约束需要继续确认。'
-  ]
-  return base.join('\n')
+    commonNote
+  ]).join('\n').replace(`## ${title}\n\n`, `## ${title}\n\n需求对象：${demand}\n\n`)
 }
 
 export function buildAdvancedUxMarkdownReport(analysis = {}, options = {}) {
@@ -3527,6 +4051,67 @@ function normalizeAdvancedUxTopLabels(markdown = '') {
 function parseMarkdownCodeBlock(markdown = '') {
   const match = String(markdown || '').match(/```(?:\w+)?\n([\s\S]*?)```/)
   return cleanText(match?.[1] || '')
+}
+
+function advancedUxDiagramSubsectionTitle(title = '') {
+  return /用户流程图|业务流程图|状态迁移图|低保真线框图|关键页面低保真|核心页面低保真|关键节点低保真对比|低保真并排对比/.test(cleanText(title))
+}
+
+function advancedUxTextLooksLikeDiagram(markdown = '') {
+  const source = String(markdown || '').trim()
+  if (!source) return false
+  if (/^\s*\|.+\|\s*\n\s*\|?\s*:?-{3,}/m.test(source)) return false
+  return /[┌┐└┘├┤┬┴┼│─━┃╭╮╰╯]/.test(source) ||
+    /(?:^|\n)\s*(?:↓|↑|→|←|↔|=>|->|-->|├|└)/.test(source) ||
+    /ST\d+[\s\S]{0,40}(?:→|->)[\s\S]{0,40}ST\d+/i.test(source) ||
+    /\[[^\]\n]{2,40}\][\s\S]{0,80}(?:↓|→|->|├|└)/.test(source)
+}
+
+// Spec alignment only: stage-one output docs require flowcharts, state diagrams,
+// ASCII wireframes, and key-node low-fi comparisons to be fenced text blocks.
+// This wraps already-generated diagram text so imports/previews match the docs
+// without inventing or replacing any business content.
+function wrapAdvancedUxNaturalDiagramBlocks(markdown = '') {
+  const text = String(markdown || '').replace(/\r\n/g, '\n')
+  if (!text.trim()) return ''
+  const headingPattern = /^#{2,4}\s+(.+?)\s*$/gm
+  const headings = [...text.matchAll(headingPattern)]
+  if (!headings.length) return text
+  let cursor = 0
+  const chunks = []
+  headings.forEach((match, index) => {
+    const headingStart = match.index || 0
+    const headingEnd = headingStart + match[0].length
+    const nextHeadingStart = headings[index + 1]?.index ?? text.length
+    chunks.push(text.slice(cursor, headingEnd))
+    const body = text.slice(headingEnd, nextHeadingStart)
+    const title = cleanText(match[1] || '').replace(/^\d+[.、]\s*/, '')
+    const trimmedBody = body.trim()
+    if (
+      advancedUxDiagramSubsectionTitle(title) &&
+      trimmedBody &&
+      !/```/.test(trimmedBody) &&
+      advancedUxTextLooksLikeDiagram(trimmedBody)
+    ) {
+      chunks.push(`\n\n\`\`\`text\n${trimmedBody}\n\`\`\`\n`)
+    } else {
+      chunks.push(body)
+    }
+    cursor = nextHeadingStart
+  })
+  chunks.push(text.slice(cursor))
+  return chunks.join('').replace(/\n{4,}/g, '\n\n\n').trim()
+}
+
+function sanitizeAdvancedUxPlaceholderFigureContent(markdown = '') {
+  return String(markdown || '').replace(
+    /\|\s*图\s*\d+\s*\|\s*当前仅输出\s*ASCII\s*文本布局；真实低保真图片和\s*Draw\.io\s*文件待后续按触发条件生成\s*\|/g,
+    '| 真实低保真/Draw.io 文件状态 | 待生成：需按触发条件生成实际图片或 .drawio/.xml；不得作为图内容编号。 |'
+  )
+}
+
+function normalizeAdvancedUxMarkdownArtifacts(markdown = '') {
+  return wrapAdvancedUxNaturalDiagramBlocks(sanitizeAdvancedUxPlaceholderFigureContent(markdown))
 }
 
 function advancedUxBlockTypeForSubsection(title = '', table = null, code = '') {
@@ -3762,7 +4347,7 @@ function withAdvancedUxGeneratingState(totalFlow = {}, analysis = {}) {
 }
 
 export function importAdvancedUxMarkdownReportToTotalFlow(totalFlow = {}, report = {}) {
-  const markdown = normalizeAdvancedUxTopLabels(splitAdvancedUxUserStoryTables(String(report.markdown || '').trim()))
+  const markdown = normalizeAdvancedUxMarkdownArtifacts(normalizeAdvancedUxTopLabels(splitAdvancedUxUserStoryTables(String(report.markdown || '').trim())))
   const parsed = parseAdvancedUxMarkdownSections(markdown)
   const parsedSections = parsed.sections.map((section) => ({
     ...section,
@@ -3874,7 +4459,7 @@ export function importAdvancedUxMarkdownReportToTotalFlow(totalFlow = {}, report
 
 export function failAdvancedUxMarkdownGenerationInTotalFlow(totalFlow = {}, message = '高级 UX 分析 Markdown 生成失败，请重新分析。') {
   const requirementCanvas = totalFlow.stageCanvases?.['requirement-dissection'] || {}
-  const markdown = normalizeAdvancedUxTopLabels(splitAdvancedUxUserStoryTables(String(totalFlow.advancedUxReport?.markdown || '').trim()))
+  const markdown = normalizeAdvancedUxMarkdownArtifacts(normalizeAdvancedUxTopLabels(splitAdvancedUxUserStoryTables(String(totalFlow.advancedUxReport?.markdown || '').trim())))
   const parsed = parseAdvancedUxMarkdownSections(markdown)
   const parsedSections = parsed.sections.map((section) => ({
     ...section,
@@ -5840,6 +6425,31 @@ function interactionNodesWithArtifacts(totalFlow = {}) {
   return (Array.isArray(nodes) ? nodes : []).filter((node) => node?.pageLayoutArtifact || node?.interactionSpecArtifact)
 }
 
+function sourceNodeSignature(sourceNode = {}) {
+  const artifact = sourceNode?.pageLayoutArtifact || {}
+  const interactionSpec = sourceNode?.interactionSpecArtifact || {}
+  return JSON.stringify({
+    id: cleanText(sourceNode?.id || sourceNode?.sourcePageId || sourceNode?.pageId || ''),
+    title: cleanText(sourceNode?.title || ''),
+    layoutVersion: cleanText(artifact.version || ''),
+    interactionSpecVersion: cleanText(interactionSpec.version || ''),
+    wireframe: cleanText(artifact.asciiWireframe || artifact.rawText || ''),
+    regions: Array.isArray(artifact.layout?.regions)
+      ? artifact.layout.regions.map((region) => [region.id, region.label, region.type].map(cleanText))
+      : [],
+    interactions: Array.isArray(interactionSpec.interactionRows)
+      ? interactionSpec.interactionRows.map((row) => [row.target, row.targetRegionId, row.gesture, row.feedback].map(cleanText))
+      : [],
+    states: Array.isArray(interactionSpec.stateMatrix)
+      ? interactionSpec.stateMatrix.map((state) => [state.state, state.display, state.recovery].map(cleanText))
+      : []
+  })
+}
+
+function sourceStageSignature(sourceNodes = []) {
+  return sourceNodes.map(sourceNodeSignature).join('\n---\n')
+}
+
 function findInteractionSourceNode(totalFlow = {}, node = {}) {
   const interactionNodes = interactionNodesWithArtifacts(totalFlow)
   if (!interactionNodes.length) return null
@@ -5924,7 +6534,8 @@ function upstreamArtifactPatch(sourceNode = {}) {
     ...(interactionSpec ? { sourceInteractionSpecArtifact: interactionSpec } : {}),
     sourceStageId: 'interaction-lofi',
     sourceNodeId: sourceNode.id || '',
-    sourcePageId: sourceNode.id || sourceNode.sourcePageId || '',
+    sourcePageId: sourceNode.sourcePageId || sourceNode.pageId || sourceNode.id || '',
+    upstreamSourceSignature: sourceNodeSignature(sourceNode),
     upstreamPageLayoutVersion: artifact?.version || '',
     upstreamInteractionSpecVersion: interactionSpec?.version || '',
     upstreamEvidenceRefs: evidenceRefIds(artifact),
@@ -5996,6 +6607,321 @@ function enrichVisualNodeWithSource(node = {}, sourceNode = {}) {
       evidenceRefs: patch.upstreamEvidenceRefs
     }
   }
+}
+
+function nodeHasGeneratedVisualArtifact(node = {}) {
+  const preview = node?.visualPreview && typeof node.visualPreview === 'object' ? node.visualPreview : {}
+  const artifact = node?.artifact && typeof node.artifact === 'object' ? node.artifact : {}
+  return node?.artifactStatus === 'generated' ||
+    preview.imageStatus === 'generated' ||
+    Boolean(preview.imageUrl || preview.imageDataUrl || artifact.imageUrl || artifact.imageDataUrl)
+}
+
+function nodeHasGeneratedCodeArtifact(node = {}) {
+  const preview = node?.codePreview && typeof node.codePreview === 'object' ? node.codePreview : {}
+  const artifact = node?.artifact && typeof node.artifact === 'object' ? node.artifact : {}
+  return node?.artifactStatus === 'generated' ||
+    Boolean(preview.code || artifact.code || artifact.html || artifact.source || node?.code)
+}
+
+function isPageDerivedVisualNode(node = {}) {
+  const id = cleanText(node?.id || '')
+  const title = cleanText(node?.title || '')
+  return id.startsWith('ui-') || /\s*UI视觉\s*$/i.test(title)
+}
+
+function isPageDerivedHtmlNode(node = {}) {
+  const id = cleanText(node?.id || '')
+  const title = cleanText(node?.title || '')
+  return node?.htmlOutputKind === 'page' || id.startsWith('html-page-') || /\s*HTML\s*$/i.test(title)
+}
+
+function stageShouldSkipDownstreamRealign(totalFlow = {}, canvas = {}, stageId = '') {
+  if (isRecoverableDownstreamFailedPlaceholder(totalFlow, canvas, stageId)) return false
+  const stageStatus = cleanText(totalFlow?.stageStatuses?.[stageId]?.status || '')
+  return stageStatus === 'failed' ||
+    cleanText(canvas?.status || '') === 'failed' ||
+    cleanText(canvas?.canvasType || '') === 'advanced-ux-stage-failed'
+}
+
+function downstreamNodeHasGeneratedArtifact(stageId = '', node = {}) {
+  if (stageId === 'ui-visual') return nodeHasGeneratedVisualArtifact(node)
+  if (stageId === 'html-output') return nodeHasGeneratedCodeArtifact(node)
+  return false
+}
+
+function downstreamNodeHasSourceScopedFailure(totalFlow = {}, stageId = '', node = {}) {
+  if (!findInteractionSourceNode(totalFlow, node)) return false
+  return cleanText(node?.artifactStatus || '') === 'failed' ||
+    cleanText(node?.status || '') === 'failed' ||
+    Boolean(cleanText(node?.failureReason || node?.importError || ''))
+}
+
+function isRecoverableDownstreamFailedPlaceholder(totalFlow = {}, canvas = {}, stageId = '') {
+  if (!['ui-visual', 'html-output'].includes(stageId)) return false
+  if (!interactionNodesWithArtifacts(totalFlow).length) return false
+  const failed = cleanText(totalFlow?.stageStatuses?.[stageId]?.status || '') === 'failed' ||
+    cleanText(canvas?.status || '') === 'failed' ||
+    cleanText(canvas?.canvasType || '') === 'advanced-ux-stage-failed'
+  if (!failed) return false
+  const nodes = Array.isArray(canvas?.nodes) ? canvas.nodes : []
+  if (nodes.some((node) => downstreamNodeHasGeneratedArtifact(stageId, node))) return false
+  if (nodes.some((node) => downstreamNodeHasSourceScopedFailure(totalFlow, stageId, node))) return false
+  return true
+}
+
+function recoverDownstreamCanvasStatus(canvas = {}, stageId = '') {
+  if (stageId === 'ui-visual') {
+    return {
+      ...canvas,
+      title: canvas.title || 'UI视觉画布',
+      summary: '已从交互低保页面恢复 UI 视觉生成目标。',
+      status: 'pending',
+      canvasType: 'ui-visual-page-canvas',
+      layoutRule: 'page-grid',
+      failureReason: '',
+      importError: ''
+    }
+  }
+  if (stageId === 'html-output') {
+    return {
+      ...canvas,
+      title: canvas.title || 'HTML 页面画布',
+      summary: '已从交互低保页面恢复 HTML 生成目标。',
+      status: 'pending',
+      canvasType: 'html-page-canvas',
+      layoutRule: 'page-grid',
+      failureReason: '',
+      importError: ''
+    }
+  }
+  return canvas
+}
+
+function recoverDownstreamStageStatus(totalFlow = {}, recoveredStageIds = new Set()) {
+  if (!recoveredStageIds.size) return totalFlow
+  const stageStatuses = { ...(totalFlow.stageStatuses || {}) }
+  for (const stageId of recoveredStageIds) {
+    stageStatuses[stageId] = {
+      ...(stageStatuses[stageId] || {}),
+      status: 'waiting',
+      recoveredFromFailedPlaceholder: true,
+      pendingSummary: false
+    }
+  }
+  const currentStageRecovered = recoveredStageIds.has(cleanText(totalFlow.currentStage || ''))
+  return {
+    ...totalFlow,
+    stageStatuses,
+    ...(currentStageRecovered && cleanText(totalFlow.contentStatus || '') === 'failed'
+      ? {
+          contentStatus: 'waiting-model',
+          contentStatusLabel: '模型增强中'
+        }
+      : {})
+  }
+}
+
+function downstreamNodeSourceChanged(node = {}, sourceNode = {}) {
+  const previousSignature = cleanText(node?.upstreamSourceSignature || '')
+  return Boolean(previousSignature && previousSignature !== sourceNodeSignature(sourceNode))
+}
+
+function shouldRealignDownstreamPageCanvas(totalFlow = {}, canvas = {}, stageId = '') {
+  if (stageShouldSkipDownstreamRealign(totalFlow, canvas, stageId)) return false
+  const sourceNodes = interactionNodesWithArtifacts(totalFlow)
+  const canvasNodes = Array.isArray(canvas?.nodes) ? canvas.nodes : []
+  const pageNodes = canvasNodes.filter((node) =>
+    stageId === 'ui-visual' ? isPageDerivedVisualNode(node) : isPageDerivedHtmlNode(node)
+  )
+  if (!sourceNodes.length) return false
+  if (!pageNodes.length) return !canvasNodes.length || stageId === 'html-output'
+  const matchedSourceIds = new Set(pageNodes
+    .map((node) => findInteractionSourceNode(totalFlow, node)?.id)
+    .filter(Boolean))
+  const missesSource = sourceNodes.some((sourceNode) => !matchedSourceIds.has(sourceNode.id))
+  const hasStalePageDerivedNode = pageNodes.some((node) => !findInteractionSourceNode(totalFlow, node))
+  const hasChangedSource = pageNodes.some((node) => {
+    const sourceNode = findInteractionSourceNode(totalFlow, node)
+    return sourceNode ? downstreamNodeSourceChanged(node, sourceNode) : false
+  })
+  return missesSource || hasStalePageDerivedNode || hasChangedSource || pageNodes.length !== sourceNodes.length
+}
+
+function visualNodeFromInteractionSource(sourceNode = {}, existingNode = null, index = 0) {
+  const sourceTitle = cleanText(sourceNode?.title || sourceNode?.visualBrief?.pageTitle || `页面 ${index + 1}`)
+    .replace(/\s*(交互低保|页面框架|低保真|框架图)\s*$/i, '')
+    .trim() || `页面 ${index + 1}`
+  const sourceId = cleanText(sourceNode?.id || sourceNode?.sourcePageId || sourceNode?.pageId || `page-${index + 1}`)
+  const node = applyStageNodeDefaults('ui-visual', {
+    ...(existingNode && typeof existingNode === 'object' ? existingNode : {}),
+    id: existingNode?.id || `ui-${sourceId}`,
+    stageId: 'ui-visual',
+    sourcePageId: sourceNode.sourcePageId || sourceNode.pageId || sourceNode.id || sourceId,
+    sliceId: sourceNode.sliceId || sourceNode.sourceSliceId || '',
+    title: `${sourceTitle} UI视觉`,
+    summary: `基于「${sourceTitle}」交互低保生成视觉层级、组件状态和高保真图。`,
+    content: [
+      '视觉重点：信息层级、主按钮、卡片/列表/表单状态',
+      '组件：导航、核心区域、状态提示、底部/浮层操作',
+      '状态：默认、加载、空、失败、禁用'
+    ],
+    detailSections: [
+      stageDetailSection('高保真图片', ['可通过 Agent 调用 gpt-image-2 生成页面视觉稿', '生成时必须继承上一阶段页面骨架']),
+      stageDetailSection('视觉目标', [`让「${sourceTitle}」符合业务场景并可直接进入高保真设计。`]),
+      stageDetailSection('组件建议', ['导航', '按钮', '卡片/列表', '弹窗/抽屉', 'Toast/状态条'])
+    ],
+    x: Number.isFinite(Number(existingNode?.x)) ? Number(existingNode.x) : 80 + (index % 4) * 400,
+    y: Number.isFinite(Number(existingNode?.y)) ? Number(existingNode.y) : 140 + Math.floor(index / 4) * 300,
+    width: Number(existingNode?.width || 340),
+    height: Number(existingNode?.height || 230)
+  }, index, [], {})
+  return enrichVisualNodeWithSource(node, sourceNode)
+}
+
+function visualNodeForSourceAlignment(sourceNode = {}, existingNode = null, index = 0) {
+  if (!existingNode || !downstreamNodeSourceChanged(existingNode, sourceNode)) return visualNodeFromInteractionSource(sourceNode, existingNode, index)
+  const stalePreview = existingNode.visualPreview && typeof existingNode.visualPreview === 'object'
+    ? {
+        ...existingNode.visualPreview,
+        imageStatus: 'pending',
+        imageUrl: '',
+        imageDataUrl: '',
+        localImagePath: '',
+        localImageContentType: ''
+      }
+    : undefined
+  return visualNodeFromInteractionSource(sourceNode, {
+    ...existingNode,
+    artifactStatus: 'pending',
+    artifact: undefined,
+    visualPreview: stalePreview
+  }, index)
+}
+
+function htmlPageFromInteractionSource(sourceNode = {}, index = 0) {
+  const sourceTitle = cleanText(sourceNode?.title || `页面 ${index + 1}`)
+    .replace(/\s*(交互低保|页面框架|低保真|框架图)\s*$/i, '')
+    .trim() || `页面 ${index + 1}`
+  const sourceId = cleanText(sourceNode?.sourcePageId || sourceNode?.pageId || sourceNode?.id || `page-${index + 1}`)
+  return {
+    id: sourceId,
+    title: sourceTitle,
+    sourcePageId: sourceId,
+    pageId: sourceId,
+    sliceId: sourceNode.sliceId || sourceNode.sourceSliceId || ''
+  }
+}
+
+function codeNodeForSourceAlignment(sourceNode = {}, existingNode = null, index = 0, sourceNodes = []) {
+  const page = htmlPageFromInteractionSource(sourceNode, index)
+  const baseNode = htmlPageNode(page, index, {}, '', sourceNodes.map(htmlPageFromInteractionSource))
+  const sourceChanged = existingNode && downstreamNodeSourceChanged(existingNode, sourceNode)
+  const node = existingNode
+    ? {
+        ...baseNode,
+        x: Number.isFinite(Number(existingNode.x)) ? Number(existingNode.x) : baseNode.x,
+        y: Number.isFinite(Number(existingNode.y)) ? Number(existingNode.y) : baseNode.y,
+        width: Number(existingNode.width || baseNode.width),
+        height: Number(existingNode.height || baseNode.height),
+        artifactStatus: sourceChanged ? 'pending' : (existingNode.artifactStatus || baseNode.artifactStatus),
+        artifact: sourceChanged ? undefined : existingNode.artifact,
+        codePreview: sourceChanged
+          ? baseNode.codePreview
+          : {
+              ...(baseNode.codePreview || {}),
+              ...(existingNode.codePreview || {})
+            },
+        generationActions: Array.isArray(existingNode.generationActions) && existingNode.generationActions.length
+          ? existingNode.generationActions
+          : baseNode.generationActions
+      }
+    : baseNode
+  return enrichCodeNodeWithSource(node, sourceNode, 'html')
+}
+
+function htmlTotalNodeForSourceAlignment(sourceNodes = [], existingNode = null) {
+  const pages = sourceNodes.map(htmlPageFromInteractionSource)
+  const baseNode = htmlTotalInteractiveNode(pages, {}, '')
+  const nextSignature = sourceStageSignature(sourceNodes)
+  const previousSignature = cleanText(existingNode?.upstreamSourceSignature || '')
+  const sourceChanged = Boolean(previousSignature && previousSignature !== nextSignature)
+  if (!existingNode) {
+    return {
+      ...baseNode,
+      upstreamSourceSignature: nextSignature
+    }
+  }
+  return {
+    ...baseNode,
+    x: Number.isFinite(Number(existingNode.x)) ? Number(existingNode.x) : baseNode.x,
+    y: Number.isFinite(Number(existingNode.y)) ? Number(existingNode.y) : baseNode.y,
+    width: Number(existingNode.width || baseNode.width),
+    height: Number(existingNode.height || baseNode.height),
+    artifactStatus: sourceChanged ? 'pending' : (existingNode.artifactStatus || baseNode.artifactStatus),
+    artifact: sourceChanged ? undefined : existingNode.artifact,
+    codePreview: sourceChanged
+      ? baseNode.codePreview
+      : {
+          ...(baseNode.codePreview || {}),
+          ...(existingNode.codePreview || {})
+        },
+    generationActions: Array.isArray(existingNode.generationActions) && existingNode.generationActions.length
+      ? existingNode.generationActions
+      : baseNode.generationActions,
+    upstreamSourceSignature: nextSignature
+  }
+}
+
+function realignVisualCanvasToInteractionSources(totalFlow = {}, visualCanvas = {}) {
+  const recoveringFailedPlaceholder = isRecoverableDownstreamFailedPlaceholder(totalFlow, visualCanvas, 'ui-visual')
+  if (!shouldRealignDownstreamPageCanvas(totalFlow, visualCanvas, 'ui-visual')) return recoveringFailedPlaceholder
+    ? recoverDownstreamCanvasStatus(visualCanvas, 'ui-visual')
+    : null
+  const visualNodes = Array.isArray(visualCanvas?.nodes) ? visualCanvas.nodes : []
+  const sourceNodes = interactionNodesWithArtifacts(totalFlow)
+  const nodes = sourceNodes.map((sourceNode, index) => {
+    const existingNode = visualNodes.find((node) => findInteractionSourceNode(totalFlow, node)?.id === sourceNode.id) || null
+    return visualNodeForSourceAlignment(sourceNode, existingNode, index)
+  })
+  const fallbackCanvas = stageCanvasFromNodes(nodes)
+  return recoverDownstreamCanvasStatus({
+    ...visualCanvas,
+    nodes,
+    edges: Array.isArray(visualCanvas?.edges) && visualCanvas.edges.length && visualCanvas.edges.every((edge) =>
+      nodes.some((node) => node.id === edge.from) && nodes.some((node) => node.id === edge.to)
+    )
+      ? visualCanvas.edges
+      : fallbackCanvas.edges,
+    orderedTabs: nodes.map((node) => ({ key: node.id, label: node.title }))
+  }, recoveringFailedPlaceholder ? 'ui-visual' : '')
+}
+
+function realignHtmlCanvasToInteractionSources(totalFlow = {}, htmlCanvas = {}) {
+  const recoveringFailedPlaceholder = isRecoverableDownstreamFailedPlaceholder(totalFlow, htmlCanvas, 'html-output')
+  if (!shouldRealignDownstreamPageCanvas(totalFlow, htmlCanvas, 'html-output')) return recoveringFailedPlaceholder
+    ? recoverDownstreamCanvasStatus(htmlCanvas, 'html-output')
+    : null
+  const htmlNodes = Array.isArray(htmlCanvas?.nodes) ? htmlCanvas.nodes : []
+  const sourceNodes = interactionNodesWithArtifacts(totalFlow)
+  const pageNodes = sourceNodes.map((sourceNode, index) => {
+    const existingNode = htmlNodes.find((node) => findInteractionSourceNode(totalFlow, node)?.id === sourceNode.id && isPageDerivedHtmlNode(node)) || null
+    return codeNodeForSourceAlignment(sourceNode, existingNode, index, sourceNodes)
+  })
+  const existingTotalNode = htmlNodes.find((node) => node.htmlOutputKind === 'total-interactive' || /总交互/.test(node.title || '')) || null
+  const totalNode = htmlTotalNodeForSourceAlignment(sourceNodes, existingTotalNode)
+  const nodes = [...pageNodes, totalNode]
+  const fallbackCanvas = stageCanvasFromNodes(nodes)
+  return recoverDownstreamCanvasStatus({
+    ...htmlCanvas,
+    nodes,
+    edges: Array.isArray(htmlCanvas?.edges) && htmlCanvas.edges.length && htmlCanvas.edges.every((edge) =>
+      nodes.some((node) => node.id === edge.from) && nodes.some((node) => node.id === edge.to)
+    )
+      ? htmlCanvas.edges
+      : fallbackCanvas.edges,
+    orderedTabs: nodes.map((node) => ({ key: node.id, label: node.title }))
+  }, recoveringFailedPlaceholder ? 'html-output' : '')
 }
 
 function enrichCodeNodeWithSource(node = {}, sourceNode = {}, kind = 'html') {
@@ -6082,25 +7008,40 @@ export function withDownstreamStageArtifactContext(totalFlow = {}) {
   const hasSources = interactionNodesWithArtifacts(totalFlow).length > 0
   if (!hasSources) return totalFlow
   const stageCanvases = { ...(totalFlow.stageCanvases || {}) }
+  const recoveredFailedStageIds = new Set()
   const visualCanvas = stageCanvases['ui-visual']
   if (Array.isArray(visualCanvas?.nodes)) {
-    stageCanvases['ui-visual'] = {
-      ...visualCanvas,
-      nodes: visualCanvas.nodes.map((node) => {
-        const sourceNode = findInteractionSourceNode(totalFlow, node)
-        return sourceNode ? enrichVisualNodeWithSource(node, sourceNode) : node
-      })
+    const recoveringFailedPlaceholder = isRecoverableDownstreamFailedPlaceholder(totalFlow, visualCanvas, 'ui-visual')
+    const alignedVisualCanvas = realignVisualCanvasToInteractionSources(totalFlow, visualCanvas)
+    if (alignedVisualCanvas) {
+      stageCanvases['ui-visual'] = alignedVisualCanvas
+      if (recoveringFailedPlaceholder) recoveredFailedStageIds.add('ui-visual')
+    } else {
+      stageCanvases['ui-visual'] = {
+        ...visualCanvas,
+        nodes: visualCanvas.nodes.map((node) => {
+          const sourceNode = findInteractionSourceNode(totalFlow, node)
+          return sourceNode ? enrichVisualNodeWithSource(node, sourceNode) : node
+        })
+      }
     }
   }
   const htmlCanvas = stageCanvases['html-output']
   if (Array.isArray(htmlCanvas?.nodes)) {
-    stageCanvases['html-output'] = {
-      ...htmlCanvas,
-      nodes: htmlCanvas.nodes.map((node) => {
-        if (node.htmlOutputKind === 'total-interactive' || /总交互/.test(node.title || '')) return node
-        const sourceNode = findInteractionSourceNode(totalFlow, node)
-        return sourceNode ? enrichCodeNodeWithSource(node, sourceNode, 'html') : node
-      })
+    const recoveringFailedPlaceholder = isRecoverableDownstreamFailedPlaceholder(totalFlow, htmlCanvas, 'html-output')
+    const alignedHtmlCanvas = realignHtmlCanvasToInteractionSources(totalFlow, htmlCanvas)
+    if (alignedHtmlCanvas) {
+      stageCanvases['html-output'] = alignedHtmlCanvas
+      if (recoveringFailedPlaceholder) recoveredFailedStageIds.add('html-output')
+    } else {
+      stageCanvases['html-output'] = {
+        ...htmlCanvas,
+        nodes: htmlCanvas.nodes.map((node) => {
+          if (node.htmlOutputKind === 'total-interactive' || /总交互/.test(node.title || '')) return node
+          const sourceNode = findInteractionSourceNode(totalFlow, node)
+          return sourceNode ? enrichCodeNodeWithSource(node, sourceNode, 'html') : node
+        })
+      }
     }
   }
   const vueCanvas = stageCanvases['vue-output']
@@ -6111,7 +7052,7 @@ export function withDownstreamStageArtifactContext(totalFlow = {}) {
     }
   }
   return {
-    ...totalFlow,
+    ...recoverDownstreamStageStatus(totalFlow, recoveredFailedStageIds),
     stageCanvases
   }
 }

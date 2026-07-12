@@ -2907,6 +2907,7 @@ test('canvas artifact generation stores image provider failures on the stage nod
 
   const stageNode = result.analysis.totalDesignFlow.stageCanvases['ui-visual'].nodes[0]
   assert.equal(stageNode.artifactStatus, 'failed')
+  assert.equal(stageNode.generationActions[0].status, 'failed')
   assert.equal(stageNode.visualPreview.imageStatus, 'failed')
   assert.match(stageNode.visualPreview.configurationMessage, /图片服务返回空响应/)
   assert.equal(result.artifact.imageStatus, 'failed')

@@ -995,7 +995,7 @@ function renderAgentMarkdownBlock(block = {}, blockIndex = 0) {
           : null,
         h('tbody', rows.map((row, rowIndex) =>
           h('tr', { key: `row-${rowIndex}` }, (Array.isArray(row) ? row : []).map((cell, cellIndex) =>
-            h('td', { key: `cell-${rowIndex}-${cellIndex}` }, String(cell || ''))
+            h('td', { key: `cell-${rowIndex}-${cellIndex}` }, markdownTableCellContent(cell, headers[cellIndex]))
           ))
         ))
       ])
@@ -1008,6 +1008,39 @@ function renderAgentMarkdownBlock(block = {}, blockIndex = 0) {
     ))
   }
   return h('p', { key }, String(block.text || ''))
+}
+
+// Display-only spec alignment: the Advanced UX docs define six-hat review tables
+// with colored hat markers. Keep copy/download text unchanged and only decorate
+// matching cells in the preview renderer.
+function sixHatMarkdownLabel(value = '') {
+  const text = String(value || '').trim()
+  if (!text) return null
+  const hats = [
+    { name: '白帽', marker: '⚪', tone: 'white' },
+    { name: '红帽', marker: '🔴', tone: 'red' },
+    { name: '黑帽', marker: '⚫', tone: 'black' },
+    { name: '黄帽', marker: '🟡', tone: 'yellow' },
+    { name: '绿帽', marker: '🟢', tone: 'green' },
+    { name: '蓝帽', marker: '🔵', tone: 'blue' }
+  ]
+  const hat = hats.find((item) => text.includes(item.name))
+  if (!hat) return null
+  const label = text.replace(/^[⚪🔴⚫🟡🟢🔵🤍❤️🖤💛💚]\s*/, '')
+  return h('span', { class: `agent-six-hat-label agent-six-hat-${hat.tone}` }, [
+    h('span', { class: 'agent-six-hat-marker', 'aria-hidden': 'true' }, hat.marker),
+    h('span', label)
+  ])
+}
+
+function markdownTableCellContent(cell = '', header = '') {
+  const text = String(cell || '')
+  const headerText = String(header || '').trim()
+  if (/帽子|六帽|六顶/.test(headerText) || /^(?:[⚪🔴⚫🟡🟢🔵🤍❤️🖤💛💚]\s*)?(?:白帽|红帽|黑帽|黄帽|绿帽|蓝帽)/.test(text.trim())) {
+    const label = sixHatMarkdownLabel(text)
+    if (label) return label
+  }
+  return text
 }
 
 function renderAgentPageLayoutBlock(block = {}, blockIndex = 0) {
@@ -1473,9 +1506,9 @@ const visibleQuickReplies = computed(() => {
 const latestRecommendationMessageKey = computed(() => {
   for (let index = visibleMessages.value.length - 1; index >= 0; index -= 1) {
     const message = visibleMessages.value[index]
-    if (messageRole(message) !== 'assistant') continue
-    if (isMessageBusy(message) || isMessageFailed(message)) continue
-    if (shouldSuppressMessageRecommendations(message)) continue
+    if (messageRole(message) !== 'assistant') return ''
+    if (isMessageBusy(message) || isMessageFailed(message)) return ''
+    if (shouldSuppressMessageRecommendations(message)) return ''
     return messageKey(message, index)
   }
   return ''
@@ -1845,6 +1878,7 @@ function isEditingMessage(message = {}) {
 }
 
 function hasMessageActions(message) {
+  if (shouldSuppressMessageActions(message)) return false
   return canCopyMessage(message) ||
     canRetryMessage(message) ||
     canEditMessage(message) ||
@@ -1866,8 +1900,20 @@ function visibleMessageRecommendations(message) {
 const defaultAssistantRecommendations = ['待确认的问题', '建议', '下一步']
 
 function shouldSuppressMessageRecommendations(message = {}) {
+  return isStageConfirmationSystemMessage(message)
+}
+
+function shouldSuppressMessageActions(message = {}) {
+  return isStageConfirmationSystemMessage(message)
+}
+
+function isStageConfirmationSystemMessage(message = {}) {
   const action = String(messageMeta(message).action || message.action || '').trim()
-  return ['stage-confirm-next', 'advanced-ux-stage-confirm-next'].includes(action)
+  if (['stage-confirm-next', 'advanced-ux-stage-confirm-next'].includes(action)) return true
+  if (messageRole(message) !== 'assistant') return false
+  const content = messageContent(message)
+  return /已确认「[^」]+」，正在生成「[^」]+」/.test(content) ||
+    /已确认当前阶段，进入「[^」]+」/.test(content)
 }
 
 function isApplyToCanvasRecommendation(reply = '') {

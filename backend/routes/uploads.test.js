@@ -24,6 +24,7 @@ function completeAdvancedUxMarkdown(markdown = '') {
     /#F5F5F5[\s\S]*#999999/.test(text) &&
     /加载状态[\s\S]*返回\/导航/.test(text) &&
     /需求清晰度评分/.test(text) &&
+    /需求要素[\s\S]*理解转译[\s\S]*置信度[\s\S]*依据/.test(text) &&
     /追问问题/.test(text) &&
     /信息实体[\s\S]*核心属性[\s\S]*关系\/依赖[\s\S]*状态\/流转[\s\S]*设计提示/.test(text) &&
     /层级[\s\S]*功能模块[\s\S]*子功能[\s\S]*优先级[\s\S]*置信度/.test(text) &&
@@ -31,10 +32,34 @@ function completeAdvancedUxMarkdown(markdown = '') {
     /页面编号[\s\S]*页面名称[\s\S]*用户阶段[\s\S]*价值[\s\S]*复杂度[\s\S]*建议优先级/.test(text) &&
     /事件名称[\s\S]*触发条件[\s\S]*上报参数[\s\S]*用途[\s\S]*优先级/.test(text) &&
     /能力维度[\s\S]*置信度/.test(text) &&
-    /行动项[\s\S]*负责角色[\s\S]*优先级/.test(text)) {
+    /行动项[\s\S]*负责角色[\s\S]*优先级/.test(text) &&
+    /假设内容[\s\S]*分类[\s\S]*来源追溯[\s\S]*不成立的影响[\s\S]*验证方式[\s\S]*当前状态/.test(text) &&
+    /高风险假设[\s\S]*降级策略[\s\S]*触发验证的时间节点/.test(text) &&
+    /机会描述[\s\S]*类型[\s\S]*上游依据[\s\S]*可承接步骤[\s\S]*预期价值/.test(text) &&
+    /机会编号[\s\S]*承接步骤[\s\S]*承接方式/.test(text) &&
+    /功能\/机会[\s\S]*用户价值[\s\S]*业务价值[\s\S]*实施成本[\s\S]*综合优先级[\s\S]*分期建议/.test(text) &&
+    /决策事项[\s\S]*影响范围[\s\S]*需要谁确认[\s\S]*确认时限[\s\S]*不确认的影响/.test(text)) {
     return text
   }
   const requiredBlocks = [
+    '',
+    '### 0. 原始诉求识别',
+    '',
+    '| 维度 | 提取内容 | 置信度 |',
+    '|------|----------|--------|',
+    '| 原始输入 | 用户希望完成当前产品或功能设计 | 高 |',
+    '| 真实诉求 | 用可落地的页面、流程、状态和交付计划降低不确定性 | 中 |',
+    '',
+    '### 0.0 需求理解清单',
+    '',
+    '| 需求要素 | 理解转译 | 置信度 | 依据 |',
+    '|----------|----------|--------|------|',
+    '| 产品形态 | 当前需求需要一个数字化工具或功能闭环 | 高 | 用户输入 |',
+    '| 核心任务 | 用户需要完成从入口到结果的主流程 | 中 | 任务语义推断 |',
+    '| 用户对象 | 以核心使用者为主，轻量管理员为辅 | 中 | 场景推断 |',
+    '| 输入方式 | 需要明确用户提交或选择的核心材料 | 中 | 流程推断 |',
+    '| 输出规格 | 需要可预览、可重试、可导出的结果 | 中 | 验收推断 |',
+    '| 成功标准 | 以任务完成率、失败恢复率和耗时为核心 | 中 | 体验目标推断 |',
     '',
     '### 0. 需求清晰度评分',
     '',
@@ -390,7 +415,7 @@ function completeAdvancedUxMarkdown(markdown = '') {
     '',
     '### 6. 页面交互文档产物规划',
     '',
-    '下一产物文件名：`[产品名]-页面交互框架与说明.md`，基于本高级 UX 7 节点结论继续生成。',
+    '下一产物文件名：`[产品名]-页面交互框架与说明.md`，基于本高级 UX 10 节点结论继续生成。',
     '',
     '| 产物 | 必须/可选 | 工具 | 输出格式 | 质量验收项 |',
     '|------|----------|------|----------|------------|',
@@ -424,10 +449,100 @@ function completeAdvancedUxMarkdown(markdown = '') {
     '| 绿帽 | 创新 | 可融合引导和效率方案 | 保留扩展空间 |',
     '| 蓝帽 | 总结 | 推荐先上线稳妥闭环，再增强效率 | 分期推进 |'
   ].join('\n')
-  const withBlocks = text.includes('\n## 三套设计方案')
-    ? text.replace(/\n## 三套设计方案/, `\n${requiredBlocks}\n\n## 三套设计方案`)
-    : `${text}\n${requiredBlocks}`
-  return `${withBlocks}\n${recommendationBlocks}`
+  const assumptionSection = [
+    '',
+    '## 假设与验证',
+    '',
+    '### 1. 假设分类总表',
+    '',
+    '| 假设内容 | 分类 | 来源追溯 | 不成立的影响 | 验证方式 | 置信度 | 当前状态 |',
+    '|----------|------|----------|--------------|----------|--------|----------|',
+    '| 用户愿意完成核心任务 | 用户假设 | 用户输入和任务推断 | 主流程转化不足 | 原型任务测试 | 中 | 待验证 |',
+    '| 系统反馈能降低不确定感 | 体验假设 | Journey Map 痛点 | 用户中途流失 | 可用性测试 | 中 | 待验证 |',
+    '',
+    '### 2. 高风险假设聚焦',
+    '',
+    '| 高风险假设 | 置信度 | 降级策略 | 触发验证的时间节点 |',
+    '|------------|--------|----------|--------------------|',
+    '| 核心处理结果能满足用户预期 | 中 | 保留人工编辑、重试和返回路径 | MVP 原型评审后 |',
+    '',
+    '### 3. 假设回检点',
+    '',
+    '| 假设编号 | 回检节点 | 回检方式 |',
+    '|----------|----------|----------|',
+    '| H1 | 推荐方案建议 | 对照 PSF、六帽评审和原型测试结果逐条回检 |'
+  ].join('\n')
+  const opportunitySection = [
+    '',
+    '## 设计机会',
+    '',
+    '### 1. 设计机会总表',
+    '',
+    '| 机会编号 | 机会描述 | 类型 | 上游依据 | 可承接步骤 | 预期价值 | 优先级 |',
+    '|----------|----------|------|----------|------------|----------|--------|',
+    '| O1 | 主路径状态反馈前置 | 体验 | Journey Map 痛点 | 步骤06 整体交互链路 | 降低等待和失败焦虑 | P0 |',
+    '| O2 | 失败恢复路径显性化 | 风险转化 | 异常流风险 | 步骤08 异常流补充 | 提升任务恢复率 | P0 |',
+    '',
+    '### 2. 优先 Top 3-5 机会',
+    '',
+    '| 排序 | 机会编号 | 机会描述 | 优先理由 | 设计方向提示 |',
+    '|------|----------|----------|----------|--------------|',
+    '| Top 1 | O1 | 主路径状态反馈前置 | 覆盖最多用户路径 | 在核心页面展示进度、下一步和可恢复动作 |',
+    '| Top 2 | O2 | 失败恢复路径显性化 | 降低 AI 或接口失败损耗 | 每个失败态给重试、返回和保留上下文 |',
+    '',
+    '### 3. 机会→步骤映射',
+    '',
+    '| 机会编号 | 承接步骤 | 承接方式 |',
+    '|----------|----------|----------|',
+    '| O1 | 步骤06 整体交互链路 | 进入流程、页面框架和状态机 |',
+    '| O2 | 步骤08 异常流补充 | 进入异常表和恢复动作 |'
+  ].join('\n')
+  const prioritySection = [
+    '',
+    '## 设计优先级与分阶段计划',
+    '',
+    '### 1. 优先级排序总览',
+    '',
+    '| 功能/机会 | 用户价值 | 业务价值 | 实施成本 | 综合优先级 | 分期建议 |',
+    '|-----------|----------|----------|----------|------------|----------|',
+    '| O1 主路径状态反馈前置 | 高 | 高 | 中 | P0 | 一期 |',
+    '| O2 失败恢复路径显性化 | 高 | 中 | 中 | P0 | 一期 |',
+    '',
+    '### 2. 分期交付计划',
+    '',
+    '| 阶段 | 范围 | 核心目标 | 交付物 | 验证标准 | 预计周期 |',
+    '|------|------|----------|--------|----------|----------|',
+    '| 一期 | 核心闭环与异常恢复 | 让用户完成主任务 | 页面交互文档、低保真、埋点 | 任务完成率和恢复率达标 | 2周 |',
+    '| 二期 | 效率增强和复用能力 | 提升高频用户效率 | 模板、历史、批量入口 | 回访率提升 | 2周 |',
+    '',
+    '### 3. 待确认决策',
+    '',
+    '| 决策事项 | 影响范围 | 需要谁确认 | 确认时限 | 不确认的影响 |',
+    '|----------|----------|------------|----------|--------------|',
+    '| 核心输入范围 | 入口和校验 | PM/研发 | 开发前 | 主流程边界不稳定 |',
+    '| 输出验收标准 | 结果页和埋点 | PM/数据 | 原型评审前 | 无法判断方案成败 |'
+  ].join('\n')
+  let normalizedText = text
+  if (!/^##\s+.*假设与验证/m.test(normalizedText)) {
+    normalizedText = normalizedText.includes('\n## 整体交互链路')
+      ? normalizedText.replace(/\n## 整体交互链路/, `\n${assumptionSection}\n\n## 整体交互链路`)
+      : `${normalizedText}\n${assumptionSection}`
+  }
+  if (!/^##\s+.*设计机会/m.test(normalizedText)) {
+    normalizedText = normalizedText.includes('\n## 整体交互链路')
+      ? normalizedText.replace(/\n## 整体交互链路/, `\n${opportunitySection}\n\n## 整体交互链路`)
+      : `${normalizedText}\n${opportunitySection}`
+  }
+  if (!/^##\s+.*设计优先级与分阶段计划/m.test(normalizedText)) {
+    normalizedText = `${normalizedText}\n${prioritySection}`
+  }
+  const withBlocks = normalizedText.includes('\n## 三套设计方案')
+    ? normalizedText.replace(/\n## 三套设计方案/, `\n${requiredBlocks}\n\n## 三套设计方案`)
+    : `${normalizedText}\n${requiredBlocks}`
+  if (withBlocks.includes('\n## 推荐方案建议')) {
+    return withBlocks.replace(/\n## 推荐方案建议/, `\n## 推荐方案建议\n${recommendationBlocks}`)
+  }
+  return `${withBlocks}\n\n## 推荐方案建议\n${recommendationBlocks}`
 }
 
 function completePageInteractionMarkdown(markdown = '') {
@@ -1077,7 +1192,7 @@ test('advanced UX stage regeneration imports page interaction document into inte
   const pageInteractionMarkdown = [
     '# AI视频工具-页面交互框架与说明',
     '## 1. 文档概述',
-    '基于高级 UX 7 节点结论继续生成页面级交互文档。',
+    '基于高级 UX 10 节点结论继续生成页面级交互文档。',
     '## 2. 核心用户流程',
     '创作者提交爆款链接，系统拆解结构，再进入复刻配置和结果预览。',
     '## 3. 状态机',
@@ -1441,7 +1556,7 @@ test('analysis stream forwards provider status before final workflow analysis', 
   assert.ok(finalIndex > modelDeltaIndex)
 })
 
-test('advanced UX analysis stream returns only requirement markdown and imports seven canvas nodes', async () => {
+test('advanced UX analysis stream returns only requirement markdown and imports ten canvas nodes', async () => {
   const calls = []
   const advancedMarkdown = completeAdvancedUxMarkdown([
     '## 原始需求分析',
@@ -1594,7 +1709,7 @@ test('advanced UX analysis stream returns only requirement markdown and imports 
 
   assert.ok(initialStageArtifact)
   assert.equal(initialStageArtifact.status, 'generating')
-  assert.equal(initialStageArtifact.stageCanvas.nodes.length, 7)
+  assert.equal(initialStageArtifact.stageCanvas.nodes.length, 10)
   assert.ok(initialStageArtifact.stageCanvas.nodes.every((node) => node.artifactStatus === 'generating'))
   assert.ok(reportArtifact)
   assert.equal(reportArtifact.status, 'generated')
@@ -1602,9 +1717,9 @@ test('advanced UX analysis stream returns only requirement markdown and imports 
   assert.match(reportArtifact.markdown || '', /## 原始需求分析[\s\S]*## 推荐方案建议/)
   assert.match(reportArtifact.markdown || '', /鞋履尺码|尺码助手/)
   assert.equal(reportArtifact.artifactType, 'requirements-markdown')
-  assert.equal(finalArtifact.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(finalArtifact.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.equal(finalArtifact.totalDesignFlow.advancedUxReport.status, 'imported')
-  assert.equal(done.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(done.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.equal(done.advancedUxReport.status, 'imported')
   assert.equal(done.advancedUxReport.markdown, reportArtifact.markdown)
   assert.match(reportArtifact.markdown || '', /\|\s*#\s*\|\s*功能点\s*\|\s*类型\s*\|\s*As a\s*\|\s*I want to\s*\|\s*so that\s*\|\s*验收标准数\s*\|\s*初步优先级\s*\|/)
@@ -1649,7 +1764,7 @@ test('advanced UX analysis stream returns only requirement markdown and imports 
   assert.ok(calls.some((context) => /关键决策\/分支/.test(context.systemPrompt || '') && /失败\/重试路径/.test(context.systemPrompt || '')))
   assert.ok(calls.some((context) => /关键交互流程（Top 3 优先机会）/.test(context.systemPrompt || '') && /低保真描述/.test(context.systemPrompt || '')))
   assert.ok(calls.some((context) => /当前项目阶段-具体动作\/场景/.test(context.systemPrompt || '')))
-  assert.equal(calls.some((context) => /UX 页面交互文档生成专家/.test(context.systemPrompt || '') && /高级 UX 7 节点 Markdown/.test(context.userPrompt || '')), false)
+  assert.equal(calls.some((context) => /UX 页面交互文档生成专家/.test(context.systemPrompt || '') && /高级 UX 10 节点 Markdown/.test(context.userPrompt || '')), false)
   assert.equal(calls.some((context) => /Draw\.io \/ diagrams\.net XML 文件生成专家/.test(context.systemPrompt || '') && /核心用户流程/.test(context.userPrompt || '')), false)
   assert.equal(calls.some((context) => /输出必须是完整 <mxfile>/.test(context.systemPrompt || '')), false)
   assert.ok(calls.some((context) => /加载状态、Toast、空状态、网络异常、弹窗规范、表单规范、返回\/导航/.test(context.systemPrompt || '')))
@@ -2261,7 +2376,9 @@ test('advanced UX interaction lofi prompt includes stage one report and confirme
   assert.match(calls[0].userPrompt || '', /Agent 上下文/)
   assert.match(calls[0].userPrompt || '', /用户确认新增 P04 售后申请页/)
   assert.match(calls[0].userPrompt || '', /售后申请必须覆盖退换货原因和凭证上传/)
-  assert.match(calls[0].userPrompt || '', /高级 UX 7 节点 Markdown/)
+  assert.match(calls[0].userPrompt || '', /高级 UX 10 节点 Markdown/)
+  assert.match(calls[0].systemPrompt || '', /阶段二页面交互文档产出结构完整度对照参考/)
+  assert.match(calls[0].systemPrompt || '', /禁止复制、套用或改写参考文档中的业务内容/)
 })
 
 test('advanced UX page interaction document rejects legacy stage two output missing latest gates', async () => {
@@ -3658,7 +3775,7 @@ test('advanced UX repair regenerates historical markdown and reimports canvas', 
   assert.equal(result.report.previousReports.length, 1)
   assert.equal(result.report.previousReports[0].fileName, '高级UX需求分析-20260709-1922.md')
   assert.equal(result.report.previousReports[0].markdown, oldMarkdown)
-  assert.equal(result.run.documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(result.run.documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.ok(result.run.documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.every((node) => node.artifactStatus === 'generated'))
   const message = result.run.agentSessions['requirement-dissection'].find((item) => item.meta?.action === 'advanced-ux-markdown-report')
   assert.match(message.meta.fileName, /规范修正版\.md$/)
@@ -3915,7 +4032,7 @@ test('advanced UX analysis stream persists final workflow run from backend', asy
   assert.equal(persisted.status, 'analyzed')
   assert.equal(persisted.documentAnalysis.advancedUxReport.status, 'imported')
   assert.match(persisted.documentAnalysis.advancedUxReport.markdown, /## 原始需求分析/)
-  assert.equal(persisted.documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(persisted.documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
   assert.equal(persisted.referenceFiles['requirement-dissection'][0].name, '鞋履需求.md')
   const session = persisted.agentSessions['requirement-dissection']
   assert.equal(session[0].role, 'user')

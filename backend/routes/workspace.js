@@ -58,6 +58,7 @@ import {
   buildInteractionSpecArtifactFromPageLayoutArtifact,
   parsePageLayoutArtifactFromText
 } from '../services/page-layout-artifact-renderer.js'
+import { advancedUxInteractionLofiCanvasFromPageInteractionDocument } from '../services/advanced-ux-page-interaction.js'
 import { withWorkflowStageRuntime } from '../services/stage-runtime.js'
 import { buildProjectPackageKnowledgeImport } from '../services/project-package-import-service.js'
 import { createProjectRuntimeService } from '../services/project-runtime-service.js'
@@ -67,9 +68,43 @@ import { buildWebsiteKnowledgeImport, websiteBlueprintDocumentFromImport } from 
 import { createAgentProviderFromModelSettings } from '../services/llm-provider.js'
 import { safeParseModelJson } from '../services/generation-runner.js'
 import { storageRoot } from '../server/server-config.mjs'
+import { isDatabaseAvailable } from '../services/database-store.mjs'
 
 const DEFAULT_GENERATED_IMAGE_DIR = join(storageRoot, 'workspace', 'generated-images')
 const DEFAULT_MATERIAL_PREVIEW_DIR = join(storageRoot, 'workspace', 'material-previews')
+
+function safeUrlHost(value = '') {
+  try {
+    return new URL(String(value || '')).host
+  } catch {
+    return ''
+  }
+}
+
+async function workspaceStorageStatus(store = {}) {
+  const databaseAvailable = await isDatabaseAvailable()
+  const supabaseUrl = process.env.COZE_SUPABASE_URL || ''
+  const filePath = store.filePath || ''
+  return {
+    ok: true,
+    storageMode: databaseAvailable ? 'database+file-cache' : 'file-fallback',
+    database: {
+      available: databaseAvailable,
+      supabaseHost: safeUrlHost(supabaseUrl),
+      env: {
+        COZE_SUPABASE_URL: Boolean(process.env.COZE_SUPABASE_URL),
+        COZE_SUPABASE_ANON_KEY: Boolean(process.env.COZE_SUPABASE_ANON_KEY),
+        COZE_SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.COZE_SUPABASE_SERVICE_ROLE_KEY)
+      }
+    },
+    file: {
+      enabled: Boolean(filePath),
+      path: filePath,
+      storageRoot,
+      usingTmp: storageRoot.startsWith('/tmp/')
+    }
+  }
+}
 
 function normalizeDocumentText(document = {}) {
   return String(document.text || document.content || document.markdown || '').trim()
@@ -254,6 +289,24 @@ async function persistPrototypeDemoScreenshotAttachments(asset = {}, options = {
             : screenshotAsset
         })
       : asset.screenshotAssets
+  }
+}
+
+function stripPrototypeDemoInlineStorage(asset = {}) {
+  const demo = asset?.prototypeDemo
+  if (!demo || typeof demo !== 'object' || Array.isArray(demo)) return asset
+  const stripStorageDataUrl = (item = {}) => ({
+    ...item,
+    storageDataUrl: ''
+  })
+  return {
+    ...asset,
+    prototypeDemo: {
+      ...demo,
+      screens: Array.isArray(demo.screens) ? demo.screens.map(stripStorageDataUrl) : demo.screens,
+      screenshotAssets: Array.isArray(demo.screenshotAssets) ? demo.screenshotAssets.map(stripStorageDataUrl) : demo.screenshotAssets
+    },
+    screenshotAssets: Array.isArray(asset.screenshotAssets) ? asset.screenshotAssets.map(stripStorageDataUrl) : asset.screenshotAssets
   }
 }
 
@@ -946,7 +999,44 @@ function suppressAdvancedUxPendingInteractionFallbackCanvas(totalFlow = {}, run 
   const pageInteractionDocument = advancedUxPageInteractionDocumentFromRun(run, totalFlow)
   const pageInteractionStatus = String(pageInteractionDocument?.status || '').trim()
   const pageInteractionFailed = ['failed', 'quality_failed', 'import_failed'].includes(pageInteractionStatus) || String(pageInteractionDocument?.importError || '').trim()
-  if (pageInteractionDocument?.markdown) return totalFlow
+  if (pageInteractionDocument?.markdown) {
+    const existingInteractionNodes = Array.isArray(totalFlow.stageCanvases?.['interaction-lofi']?.nodes)
+      ? totalFlow.stageCanvases['interaction-lofi'].nodes
+      : []
+    const hasImportedInteractionCanvas = existingInteractionNodes.some((node) =>
+      String(node?.contentStatus || '') !== 'model-pending' &&
+      String(node?.contentSource || '') !== 'model-pending' &&
+      (
+        node?.pageLayoutArtifact?.asciiWireframe ||
+        node?.interactionSpecArtifact?.interactionRows?.length ||
+        node?.interactionSpec?.length
+      )
+    )
+    if (hasImportedInteractionCanvas) return totalFlow
+    const importedCanvas = advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageInteractionDocument)
+    if (!importedCanvas?.nodes?.length) return totalFlow
+    return {
+      ...totalFlow,
+      currentStage: totalFlow.currentStage || 'interaction-lofi',
+      pageInteractionDocumentArtifact: totalFlow.pageInteractionDocumentArtifact || pageInteractionDocument,
+      advancedUxReport: {
+        ...(totalFlow.advancedUxReport || {}),
+        pageInteractionDocument
+      },
+      stageStatuses: {
+        ...(totalFlow.stageStatuses || {}),
+        'interaction-lofi': {
+          ...(totalFlow.stageStatuses?.['interaction-lofi'] || {}),
+          status: 'completed',
+          pendingSummary: false
+        }
+      },
+      stageCanvases: {
+        ...(totalFlow.stageCanvases || {}),
+        'interaction-lofi': importedCanvas
+      }
+    }
+  }
   if (pageInteractionFailed) {
     const canvas = advancedUxStageFailedCanvas('interaction-lofi', pageInteractionDocument.importError || '页面交互框架与说明 Markdown 生成失败')
     return {
@@ -1001,6 +1091,59 @@ function suppressAdvancedUxPendingInteractionFallbackCanvas(totalFlow = {}, run 
     stageCanvases: {
       ...(totalFlow.stageCanvases || {}),
       'interaction-lofi': canvas
+    }
+  }
+}
+
+function normalizeFailedCurrentStageContentStatus(totalFlow = {}) {
+  if (!totalFlow || typeof totalFlow !== 'object') return totalFlow
+  const currentStage = String(totalFlow.currentStage || '').trim()
+  if (!currentStage) return totalFlow
+  const currentStageStatus = String(totalFlow.stageStatuses?.[currentStage]?.status || '').trim()
+  if (currentStageStatus !== 'failed') return totalFlow
+  return {
+    ...totalFlow,
+    contentStatus: 'failed',
+    contentStatusLabel: '生成失败'
+  }
+}
+
+function stageCanvasHasGeneratedArtifact(canvas = {}) {
+  const nodes = Array.isArray(canvas?.nodes) ? canvas.nodes : []
+  return nodes.some((node) =>
+    String(node?.artifactStatus || '').trim() === 'generated' ||
+    String(node?.visualPreview?.imageStatus || '').trim() === 'generated' ||
+    Boolean(node?.visualPreview?.imageUrl || node?.visualPreview?.imageDataUrl || node?.artifact?.imageUrl || node?.artifact?.imageDataUrl) ||
+    Boolean(node?.codePreview?.code || node?.artifact?.code || node?.artifact?.html || node?.code)
+  )
+}
+
+function normalizeFailedCurrentStageCanvas(totalFlow = {}) {
+  if (!totalFlow || typeof totalFlow !== 'object') return totalFlow
+  const currentStage = String(totalFlow.currentStage || '').trim()
+  if (!currentStage) return totalFlow
+  const currentStageStatus = String(totalFlow.stageStatuses?.[currentStage]?.status || '').trim()
+  if (currentStageStatus !== 'failed') return totalFlow
+  const canvas = totalFlow.stageCanvases?.[currentStage]
+  if (!canvas || typeof canvas !== 'object') return totalFlow
+  if (stageCanvasHasGeneratedArtifact(canvas)) return totalFlow
+  const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : []
+  const hasFailedNode = nodes.some((node) =>
+    String(node?.artifactStatus || '').trim() === 'failed' ||
+    String(node?.status || '').trim() === 'failed' ||
+    String(node?.failureReason || node?.importError || '').trim()
+  )
+  if (hasFailedNode && String(canvas.status || '').trim() === 'failed') return totalFlow
+  const errorMessage = nodes
+    .map((node) => String(node?.failureReason || node?.importError || '').trim())
+    .find(Boolean) ||
+    String(canvas.failureReason || canvas.importError || '').trim() ||
+    `${currentStage === 'ui-visual' ? 'UI视觉' : '当前阶段'}生成失败`
+  return {
+    ...totalFlow,
+    stageCanvases: {
+      ...(totalFlow.stageCanvases || {}),
+      [currentStage]: advancedUxStageFailedCanvas(currentStage, errorMessage)
     }
   }
 }
@@ -1315,6 +1458,68 @@ async function recoverGeneratedVisualArtifactsFromFiles(totalFlow = {}, run = {}
   }
 }
 
+function uiVisualNodeHasImageArtifact(node = {}) {
+  return Boolean(
+    node?.visualPreview?.imageUrl ||
+    node?.visualPreview?.imageDataUrl ||
+    node?.artifact?.imageUrl ||
+    node?.artifact?.imageDataUrl
+  )
+}
+
+function uiVisualNodeHasFailedImageArtifact(node = {}) {
+  const previewStatus = String(node?.visualPreview?.imageStatus || '').trim()
+  const artifactStatus = String(node?.artifact?.imageStatus || '').trim()
+  return previewStatus === 'failed' || artifactStatus === 'failed'
+}
+
+function normalizeFailedUiVisualImageArtifacts(totalFlow = {}) {
+  const visualCanvas = totalFlow?.stageCanvases?.['ui-visual']
+  if (!Array.isArray(visualCanvas?.nodes)) return totalFlow
+  let changed = false
+  const nodes = visualCanvas.nodes.map((node) => {
+    if (!node?.id || uiVisualNodeHasImageArtifact(node) || !uiVisualNodeHasFailedImageArtifact(node)) return node
+    const generationActions = Array.isArray(node.generationActions)
+      ? node.generationActions.map((action) => {
+          if (!action || typeof action !== 'object') return action
+          const status = String(action.status || '').trim()
+          if (!['generated', 'generating', 'completed', 'success'].includes(status)) return action
+          changed = true
+          return {
+            ...action,
+            status: 'failed'
+          }
+        })
+      : node.generationActions
+    const nextNode = {
+      ...node,
+      artifactStatus: 'failed',
+      generationActions,
+      contentStatusLabel: '生成失败'
+    }
+    if (
+      node.artifactStatus !== nextNode.artifactStatus ||
+      node.contentStatusLabel !== nextNode.contentStatusLabel ||
+      generationActions !== node.generationActions
+    ) {
+      changed = true
+      return nextNode
+    }
+    return node
+  })
+  if (!changed) return totalFlow
+  return {
+    ...totalFlow,
+    stageCanvases: {
+      ...(totalFlow.stageCanvases || {}),
+      'ui-visual': {
+        ...visualCanvas,
+        nodes
+      }
+    }
+  }
+}
+
 function preserveConfirmedStageProgress(nextTotalFlow = {}, previousTotalFlow = {}) {
   const previousConfirmations = previousTotalFlow?.stageConfirmations || {}
   const confirmationEntries = Object.values(previousConfirmations)
@@ -1540,14 +1745,17 @@ async function hydrateWorkflowRunDetail(store, run = {}, options = {}) {
     previousTotalFlow
   )
   const recoveredTotalFlow = await recoverGeneratedVisualArtifactsFromFiles(baseTotalFlow, run, options)
-  const failureHydratedTotalFlow = hydrateAdvancedUxFailedRequirementCanvas(recoveredTotalFlow, run)
+  const normalizedVisualFailureTotalFlow = normalizeFailedUiVisualImageArtifacts(recoveredTotalFlow)
+  const failureHydratedTotalFlow = hydrateAdvancedUxFailedRequirementCanvas(normalizedVisualFailureTotalFlow, run)
   const sourceGatedTotalFlow = suppressAdvancedUxPendingInteractionFallbackCanvas(
     applyAgentPageLayoutArtifactsToInteractionCanvas(failureHydratedTotalFlow, run),
     run
   )
   const hydratedTotalFlow = withWorkflowStageRuntime(
     withDownstreamStageArtifactContext(
-      sourceGatedTotalFlow
+      normalizeFailedCurrentStageCanvas(
+        normalizeFailedCurrentStageContentStatus(sourceGatedTotalFlow)
+      )
     )
   )
   if (!shouldHydrate && hydratedTotalFlow === previousTotalFlow) return run
@@ -1981,6 +2189,7 @@ export function workspaceRoutes(store, options = {}) {
   return {
     ...authService.routes(),
     'GET /api/workspace': async () => workspaceSnapshot(store),
+    'GET /api/workspace/storage-status': async () => workspaceStorageStatus(store),
     'PATCH /api/workspace/context': async (payload) => saveWorkspaceContext(store, payload),
     'GET /api/workspace/model-settings': async () => ({
       modelSettings: modelSettingsView(store)
@@ -2336,7 +2545,7 @@ export function workspaceRoutes(store, options = {}) {
             })
           : null
         const prototypeAsset = imported.prototypeDemo
-          ? await addAsset(store, await persistPrototypeDemoScreenshotAttachments({
+          ? await addAsset(store, stripPrototypeDemoInlineStorage(await persistPrototypeDemoScreenshotAttachments({
               id: stableMaterialId([
                 payload.projectId,
                 'project-package-prototype-demo',
@@ -2355,7 +2564,7 @@ export function workspaceRoutes(store, options = {}) {
               sourceUrl: payload.fileName || '',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString()
-            }, options))
+            }, options)))
           : null
         const assetCount = Number(Boolean(blueprintAsset)) + Number(Boolean(prototypeAsset))
         const parseJob = await updateParseJob(store, runningJob.id, {

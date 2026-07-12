@@ -143,7 +143,7 @@
         <section v-if="shouldRenderAgentWorkbench" class="workflow-stage-agent-workbench" aria-label="阶段 Agent 确认">
           <slot name="agent-workbench" :stage-id="activeStageId" :stage-label="activeStageLabel" :node="stageAgentNode" :next="confirmStageAndGoNext" />
         </section>
-        <div v-if="shouldRenderCanvasBoard" ref="viewportRef" class="workflow-canvas-scrollarea" @wheel="handleCanvasWheel">
+        <div v-if="shouldRenderCanvasBoard" ref="viewportRef" class="workflow-canvas-scrollarea" @wheel="handleCanvasWheel" @click.capture="handleCanvasActionClick">
           <div
             class="workflow-canvas-surface"
             :class="{ 'requirement-dissection-board': isRequirementDissectionStageId(activeStageId) }"
@@ -165,97 +165,101 @@
               :class="{ active: activeNode?.id === node.id, spotlight: spotlightNodeId === node.id, 'visual-canvas-node': isVisualGalleryDetail(node), 'preview-code-node': isPreviewCodeDetail(node) }"
               :style="isRequirementDissectionStageId(activeStageId) ? undefined : { left: `${node.x}px`, top: `${node.y}px`, width: `${node.width}px`, minHeight: `${node.height}px` }"
               :aria-label="`聚焦画布节点：${node.title || node.id}`"
-              @click="$emit('focus-node', node.id)"
             >
-              <div class="canvas-node-head">
-                <div>
-                  <h3>{{ node.title }}</h3>
-                </div>
-                <div class="canvas-node-actions">
-                  <button type="button" @click.stop="$emit('open-agent', node.id)">Agent</button>
-                  <button type="button" @click.stop="$emit('fullscreen', node.id)">全屏</button>
-                </div>
-              </div>
-              <div class="canvas-node-body">
-                <p v-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && !isVisualGalleryDetail(node) && !isPreviewCodeDetail(node) && canvasNodeSummary(node)">{{ canvasNodeSummary(node) }}</p>
-                <div v-if="isNodeActuallyLoading(node) && !isVisualGalleryDetail(node)" class="canvas-node-loading">
-                  <span class="loading-spinner-large"></span>
-                  <div class="canvas-node-loading-copy">
-                    <b>{{ cleanNodeDisplayCopy(node.content?.[0]) || '正在生成节点数据...' }}</b>
-                    <small
-                      v-for="item in loadingNodeContent(node).slice(1)"
-                      :key="`${node.id}-loading-${item}`"
-                    >
-                      {{ item }}
-                    </small>
+              <div class="canvas-node-hitbox" @click="$emit('focus-node', node.id)">
+                <div class="canvas-node-head">
+                  <div>
+                    <h3>{{ node.title }}</h3>
+                  </div>
+                  <div class="canvas-node-actions">
+                    <button type="button" data-canvas-action="open-agent" :data-node-id="node.id">Agent</button>
+                    <button type="button" data-canvas-action="open-detail" :data-node-id="node.id">全屏</button>
                   </div>
                 </div>
-                <div v-if="!isNodeActuallyLoading(node) && hasPageLayoutArtifact(node)" class="canvas-node-wireframe-preview">
-                  <pre>{{ pageLayoutArtifact(node).asciiWireframe }}</pre>
-                </div>
-                <section v-else-if="isVisualGalleryDetail(node)" class="visual-canvas-card-preview">
-                  <div v-if="visualPreviewImage(node)" class="visual-canvas-card-image">
-                    <img :src="visualPreviewImage(node)" :alt="`${node.title} 高保真图`" @load="recordVisualImageNaturalRatio(node, $event)" />
-                    <span v-if="visualImageAspectRatioLabel(node)" class="visual-image-ratio-badge">{{ visualImageAspectRatioLabel(node) }}</span>
-                    <div v-if="isNodeActuallyLoading(node)" class="visual-image-generating-overlay">
-                      <span class="loading-spinner-large"></span>
-                      <strong>生成中</strong>
-                    </div>
-                    <div class="visual-image-tools" aria-label="图片操作">
-                      <BaseIconButton label="下载至本地" type="button" title="下载至本地" aria-label="下载至本地" @click.stop="downloadVisualImage(node)">
-                        <Download class="ui-icon" aria-hidden="true" :stroke-width="2" />
-                      </BaseIconButton>
-                      <BaseIconButton label="放大预览" type="button" title="放大预览" aria-label="放大预览" @click.stop="openVisualImagePreview(node)">
-                        <Maximize2 class="ui-icon" aria-hidden="true" :stroke-width="2" />
-                      </BaseIconButton>
-                    </div>
-                  </div>
-                  <div v-else-if="isNodeActuallyLoading(node)" class="visual-canvas-card-placeholder is-generating visual-canvas-card-generating-image-placeholder">
+                <div class="canvas-node-body">
+                  <p v-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && !isVisualGalleryDetail(node) && !isPreviewCodeDetail(node) && canvasNodeSummary(node)">{{ canvasNodeSummary(node) }}</p>
+                  <div v-if="isNodeActuallyLoading(node) && !isVisualGalleryDetail(node)" class="canvas-node-loading">
                     <span class="loading-spinner-large"></span>
-                    <strong>生图中</strong>
-                    <span>{{ visualPreview(node).imagePrompt || `为「${node.title || '当前页面'}」生成高保真 UI 视觉稿。` }}</span>
-                  </div>
-                  <div v-else-if="visualPreviewNeedsConfiguration(node)" class="visual-canvas-card-placeholder config-required">
-                    <strong>待配置图片模型</strong>
-                    <span>{{ visualPreview(node).configurationMessage || '配置图片生成模型后可生成高保真图。' }}</span>
-                  </div>
-                  <div v-else-if="visualPreviewGenerationFailed(node)" class="visual-canvas-card-placeholder generation-failed">
-                    <strong>高保真图生成失败</strong>
-                    <span>{{ visualPreview(node).failureMessage || node.artifact?.error || '可点击重新生成高保真图。' }}</span>
-                  </div>
-                  <div v-else class="visual-canvas-card-placeholder">
-                    <strong>待生成高保真图</strong>
-                    <span>{{ visualPreview(node).imagePrompt }}</span>
-                  </div>
-                </section>
-                <section v-else-if="!isNodeActuallyLoading(node) && isPreviewCodeDetail(node)" class="preview-code-card-preview">
-                  <div class="preview-code-card-frame">
-                    <iframe
-                      v-if="previewCodeSrcdoc(node)"
-                      :srcdoc="previewCodeSrcdoc(node)"
-                      title="HTML 画布渲染预览"
-                      sandbox="allow-forms allow-scripts"
-                    ></iframe>
-                    <div v-else class="preview-code-card-placeholder">
-                      <strong>待生成 HTML</strong>
-                      <span>{{ codePreview(node).previewSummary || '生成后在这里展示页面效果。' }}</span>
+                    <div class="canvas-node-loading-copy">
+                      <b>{{ cleanNodeDisplayCopy(node.content?.[0]) || '正在生成节点数据...' }}</b>
+                      <small
+                        v-for="item in loadingNodeContent(node).slice(1)"
+                        :key="`${node.id}-loading-${item}`"
+                      >
+                        {{ item }}
+                      </small>
                     </div>
                   </div>
-                </section>
-                <div v-else-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && compactNodeContent(node).length" class="canvas-node-content">
-                  <span v-for="item in compactNodeContent(node)" :key="`${node.id}-preview-${item}`">{{ item }}</span>
+                  <div v-if="!isNodeActuallyLoading(node) && hasPageLayoutArtifact(node)" class="canvas-node-wireframe-preview">
+                    <pre>{{ pageLayoutArtifact(node).asciiWireframe }}</pre>
+                  </div>
+                  <section v-else-if="isVisualGalleryDetail(node)" class="visual-canvas-card-preview">
+                    <div v-if="visualPreviewImage(node)" class="visual-canvas-card-image">
+                      <img :src="visualPreviewImage(node)" :alt="`${node.title} 高保真图`" @load="recordVisualImageNaturalRatio(node, $event)" />
+                      <span v-if="visualImageAspectRatioLabel(node)" class="visual-image-ratio-badge">{{ visualImageAspectRatioLabel(node) }}</span>
+                      <div v-if="isNodeActuallyLoading(node)" class="visual-image-generating-overlay">
+                        <span class="loading-spinner-large"></span>
+                        <strong>生成中</strong>
+                      </div>
+                      <div class="visual-image-tools" aria-label="图片操作">
+                        <BaseIconButton label="下载至本地" type="button" title="下载至本地" aria-label="下载至本地" @click.stop="downloadVisualImage(node)">
+                          <Download class="ui-icon" aria-hidden="true" :stroke-width="2" />
+                        </BaseIconButton>
+                        <BaseIconButton label="放大预览" type="button" title="放大预览" aria-label="放大预览" @click.stop="openVisualImagePreview(node)">
+                          <Maximize2 class="ui-icon" aria-hidden="true" :stroke-width="2" />
+                        </BaseIconButton>
+                      </div>
+                    </div>
+                    <div v-else-if="isNodeActuallyLoading(node)" class="visual-canvas-card-placeholder is-generating visual-canvas-card-generating-image-placeholder">
+                      <span class="loading-spinner-large"></span>
+                      <strong>生图中</strong>
+                      <span>{{ visualPreview(node).imagePrompt || `为「${node.title || '当前页面'}」生成高保真 UI 视觉稿。` }}</span>
+                    </div>
+                    <div v-else-if="visualPreviewNeedsConfiguration(node)" class="visual-canvas-card-placeholder config-required">
+                      <strong>待配置图片模型</strong>
+                      <span>{{ visualPreview(node).configurationMessage || '配置图片生成模型后可生成高保真图。' }}</span>
+                    </div>
+                    <div v-else-if="visualPreviewGenerationFailed(node)" class="visual-canvas-card-placeholder generation-failed">
+                      <strong>高保真图生成失败</strong>
+                      <span>{{ visualPreview(node).failureMessage || node.artifact?.error || '可点击重新生成高保真图。' }}</span>
+                    </div>
+                    <div v-else class="visual-canvas-card-placeholder">
+                      <strong>待生成高保真图</strong>
+                      <span>{{ visualPreview(node).imagePrompt }}</span>
+                    </div>
+                  </section>
+                  <section v-else-if="!isNodeActuallyLoading(node) && isPreviewCodeDetail(node)" class="preview-code-card-preview">
+                    <div class="preview-code-card-frame">
+                      <iframe
+                        v-if="previewCodeSrcdoc(node)"
+                        :srcdoc="previewCodeSrcdoc(node)"
+                        title="HTML 画布渲染预览"
+                        sandbox="allow-forms allow-scripts"
+                      ></iframe>
+                      <div v-else class="preview-code-card-placeholder">
+                        <strong>待生成 HTML</strong>
+                        <span>{{ codePreview(node).previewSummary || '生成后在这里展示页面效果。' }}</span>
+                      </div>
+                    </div>
+                  </section>
+                  <div v-else-if="!isNodeActuallyLoading(node) && isRequirementPipelineCanvasNode(node) && requirementCanvasPreviewItems(node).length" class="requirement-canvas-card-preview">
+                    <span v-for="item in requirementCanvasPreviewItems(node)" :key="`${node.id}-requirement-preview-${item}`">{{ item }}</span>
+                  </div>
+                  <div v-else-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && compactNodeContent(node).length" class="canvas-node-content">
+                    <span v-for="item in compactNodeContent(node)" :key="`${node.id}-preview-${item}`">{{ item }}</span>
+                  </div>
                 </div>
-              </div>
-              <div class="canvas-node-footer">
-                <BaseButton
-                  v-for="action in visibleNodeQuickActions(node)"
-                  :key="action"
-                  type="button"
-                  :disabled="isNodeQuickActionDisabled(node, action)"
-                  @click.stop="runNodeQuickAction(node, action)"
-                >
-                  {{ visibleNodeQuickActionLabel(node, action) }}
-                </BaseButton>
+                <div class="canvas-node-footer">
+                  <BaseButton
+                    v-for="action in visibleNodeQuickActions(node)"
+                    :key="action"
+                    type="button"
+                    :disabled="isNodeQuickActionDisabled(node, action)"
+                    @click.stop="runNodeQuickAction(node, action)"
+                  >
+                    {{ visibleNodeQuickActionLabel(node, action) }}
+                  </BaseButton>
+                </div>
               </div>
             </article>
           </div>
@@ -297,12 +301,12 @@
               <p>{{ loadingNodeDetailSummary(fullscreenNode) }}</p>
             </div>
           </article>
-          <article v-if="showModelReturnSummary(fullscreenNode) && !isNodeActuallyLoading(fullscreenNode) && !shouldUseRequirementReportDetail(fullscreenNode) && !shouldUseRequirementPipelineDetail(fullscreenNode)" class="canvas-model-return-summary">
+          <article v-if="showModelReturnSummary(fullscreenNode) && !isNodeActuallyLoading(fullscreenNode) && !isStageSpecificDetail(fullscreenNode) && !shouldUseRequirementReportDetail(fullscreenNode) && !shouldUseRequirementPipelineDetail(fullscreenNode)" class="canvas-model-return-summary">
             <header>
               <strong>{{ modelReturnSummaryTitle }}</strong>
               <small>{{ modelReturnSummaryHint }}</small>
             </header>
-            <p v-if="aiSummary.summary">{{ aiSummary.summary }}</p>
+            <p v-if="aiSummary?.summary">{{ aiSummary.summary }}</p>
             <div class="canvas-model-return-grid">
               <section v-for="section in modelReturnSummarySections" :key="section.title">
                 <b>{{ section.title }}</b>
@@ -310,7 +314,7 @@
               </section>
             </div>
           </article>
-          <article v-if="showNodeOwnContentSummary(fullscreenNode) && !isNodeActuallyLoading(fullscreenNode) && !hasPageLayoutArtifact(fullscreenNode) && !shouldUseRequirementReportDetail(fullscreenNode) && !shouldUseRequirementPipelineDetail(fullscreenNode)" class="canvas-node-own-summary">
+          <article v-if="showNodeOwnContentSummary(fullscreenNode) && !isNodeActuallyLoading(fullscreenNode) && !isStageSpecificDetail(fullscreenNode) && !hasPageLayoutArtifact(fullscreenNode) && !shouldUseRequirementReportDetail(fullscreenNode) && !shouldUseRequirementPipelineDetail(fullscreenNode)" class="canvas-node-own-summary">
             <header>
               <strong>模型产出内容</strong>
               <small>只展示大模型针对「{{ fullscreenNode.title }}」生成的结果。</small>
@@ -516,8 +520,11 @@
                         <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-${row.key}-${cell}`">{{ cell }}</span>
                       </article>
                     </div>
-                    <div v-else-if="requirementBlockType(block) === 'risk-matrix'" class="requirement-risk-matrix">
-                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-risk-${row.key}`" :class="row.tone">
+                    <div v-else-if="requirementBlockType(block) === 'risk-matrix'" class="requirement-risk-matrix requirement-detail-table">
+                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head" :style="requirementBlockTableStyle(block, fullscreenNode)">
+                        <b v-for="header in requirementBlockHeaders(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-risk-header-${header}`">{{ header }}</b>
+                      </article>
+                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-risk-${row.key}`" :class="row.tone" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-${row.key}-${cell}`">{{ cell }}</span>
                       </article>
                     </div>
@@ -566,30 +573,26 @@
                       <pre>{{ requirementDocumentBlockPlaintext(block, fullscreenNode) }}</pre>
                     </div>
                     <div v-else-if="requirementBlockType(block) === 'checklist'" class="requirement-checklist-block requirement-detail-table">
-                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head">
+                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <b v-for="header in requirementBlockHeaders(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-checklist-header-${header}`">{{ header }}</b>
                       </article>
-                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-checklist-${row.key}`">
+                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-checklist-${row.key}`" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-${row.key}-${cell}`">{{ cell }}</span>
                       </article>
                     </div>
                     <div v-else-if="requirementBlockType(block) === 'metric-table'" class="requirement-metric-table-block requirement-detail-table">
-                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head">
+                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <b v-for="header in requirementBlockHeaders(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-metric-header-${header}`">{{ header }}</b>
                       </article>
-                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-metric-${row.key}`">
+                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-metric-${row.key}`" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-${row.key}-${cell}`">{{ cell }}</span>
                       </article>
                     </div>
                     <div v-else-if="isRequirementDocumentTableBlock(block)" class="requirement-document-table-block requirement-detail-table">
-                      <div class="requirement-document-block-label">
-                        <span>表格</span>
-                        <i>复制</i>
-                      </div>
-                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head">
+                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <b v-for="header in requirementBlockHeaders(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-document-header-${header}`">{{ header }}</b>
                       </article>
-                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-document-row-${row.key}`">
+                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-document-row-${row.key}`" :style="requirementBlockTableStyle(block, fullscreenNode)">
                         <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-document-${row.key}-${cell}`">{{ cell }}</span>
                       </article>
                     </div>
@@ -966,6 +969,12 @@
                     </header>
                     <div class="page-framework-body">
                       <p>{{ advancedUxPagePosition(fullscreenNode) }}</p>
+                      <dl v-if="advancedUxPageMetaRows(fullscreenNode).length" class="advanced-ux-page-meta">
+                        <template v-for="item in advancedUxPageMetaRows(fullscreenNode)" :key="`${fullscreenNode.id}-page-meta-${item.label}`">
+                          <dt>{{ item.label }}</dt>
+                          <dd>{{ item.value }}</dd>
+                        </template>
+                      </dl>
                     </div>
                   </article>
                   <article class="page-framework-section structure">
@@ -978,11 +987,15 @@
                         <b>区域</b>
                         <b>内容</b>
                         <b>说明</b>
+                        <b>状态说明</b>
+                        <b>组件引用</b>
                       </article>
                       <article v-for="row in advancedUxPageFrameworkRows(fullscreenNode)" :key="`${fullscreenNode.id}-frame-row-${row.id}`">
                         <span>{{ row.area }}</span>
                         <span>{{ row.content }}</span>
                         <span>{{ row.description }}</span>
+                        <span>{{ row.stateDescription }}</span>
+                        <span>{{ row.componentReference }}</span>
                       </article>
                     </div>
                   </article>
@@ -1059,13 +1072,17 @@
                     <h4>交互规则表格</h4>
                     <div class="advanced-ux-page-table interaction">
                       <article class="head">
+                        <b>编号</b>
                         <b>用户操作</b>
                         <b>系统反馈</b>
+                        <b>关联状态/弹窗</b>
                         <b>备注</b>
                       </article>
                       <article v-for="row in advancedUxInteractionRuleRows(fullscreenNode)" :key="`${fullscreenNode.id}-rule-row-${row.id}`">
+                        <span>{{ row.id }}</span>
                         <span>{{ row.userAction }}</span>
                         <span>{{ row.systemFeedback }}</span>
+                        <span>{{ row.relatedStateOrModal }}</span>
                         <span>{{ row.remark }}</span>
                       </article>
                     </div>
@@ -1074,11 +1091,13 @@
                     <h4>异常状态表格</h4>
                     <div class="advanced-ux-page-table state">
                       <article class="head">
+                        <b>编号</b>
                         <b>状态</b>
                         <b>表现</b>
                         <b>处理方式</b>
                       </article>
                       <article v-for="row in advancedUxExceptionStateRows(fullscreenNode)" :key="`${fullscreenNode.id}-state-row-${row.id}`">
+                        <span>{{ row.id }}</span>
                         <span>{{ row.state }}</span>
                         <span>{{ row.display }}</span>
                         <span>{{ row.handling }}</span>
@@ -1592,7 +1611,7 @@ const props = defineProps({
   zoom: { type: Number, default: 1 }
 })
 
-const emit = defineEmits(['back', 'zoom', 'save', 'convert-requirement', 'transfer-other-skill', 'persist-knowledge', 'open-knowledge', 'update-stage', 'update-slice', 'regenerate-stage', 'focus-node', 'open-agent', 'fullscreen', 'close-fullscreen', 'edit-node', 'quick-action', 'rollback-version'])
+const emit = defineEmits(['back', 'zoom', 'save', 'convert-requirement', 'transfer-other-skill', 'persist-knowledge', 'open-knowledge', 'update-stage', 'update-slice', 'regenerate-stage', 'focus-node', 'open-agent', 'close-fullscreen', 'edit-node', 'quick-action', 'rollback-version'])
 
 const viewportRef = ref(null)
 const versionMenuRef = ref(null)
@@ -2401,9 +2420,19 @@ function isInteractionLofiPageNode(node = {}) {
 
 function visibleNodeQuickActions(node = {}) {
   if (isInteractionLofiPageNode(node)) return [...INTERACTION_LOFI_PAGE_TOOL_ACTIONS]
-  return (Array.isArray(node.quickActions) ? node.quickActions : [])
+  const actions = (Array.isArray(node.quickActions) ? node.quickActions : [])
     .map((action) => String(action || '').trim())
     .filter((action) => action && !isCanvasConfirmAction(action))
+  if (isRequirementPipelineCanvasNode(node)) {
+    const recommendedActions = requirementCanvasRecommendedActions(node)
+    return actions.length ? actions.slice(0, 3) : recommendedActions
+  }
+  if (isVisualGalleryDetail(node) && generationActions(node).length) {
+    const hasGenerationAction = actions.some((action) => visualQuickGenerationAction(node, action))
+    const fallbackAction = generationActions(node)[0]?.label
+    return hasGenerationAction || !fallbackAction ? actions : [...actions, fallbackAction]
+  }
+  return actions
 }
 
 function visualQuickGenerationAction(node = {}, action = '') {
@@ -2654,12 +2683,57 @@ function advancedUxRequirementNodeMarkdown(node = {}) {
 }
 
 function shouldRenderAdvancedUxRequirementMarkdown(node = {}) {
-  return shouldUseRequirementPipelineDetail(node) && Boolean(advancedUxRequirementNodeMarkdown(node))
+  return shouldUseRequirementPipelineDetail(node) &&
+    Boolean(advancedUxRequirementNodeMarkdown(node)) &&
+    !hasStructuredRequirementDetailBlocks(node)
+}
+
+function hasStructuredRequirementDetailBlocks(node = {}) {
+  return requirementDetailBlocks(node).some((block) => requirementBlockType(block) !== 'markdown')
 }
 
 function requirementDetailBlocks(node = {}) {
   const blocks = requirementPipelineTab(node).detailBlocks
   return Array.isArray(blocks) ? blocks : []
+}
+
+function isRequirementPipelineCanvasNode(node = {}) {
+  return shouldUseRequirementPipelineDetail(node) && requirementDetailBlocks(node).length > 0
+}
+
+function requirementCanvasRecommendedActions(node = {}) {
+  if (!isRequirementPipelineCanvasNode(node)) return []
+  return ['补充细节', '列出风险', '进入交互低保']
+}
+
+function requirementCanvasBlockPreview(block = {}, node = {}) {
+  const title = String(block?.title || block?.sourceRef || '').trim()
+  const summary = cleanNodeDisplayCopy(block?.summary || '')
+  if (title && summary && !nodeTextDuplicatesTitle(summary, { title })) return `${title}：${summary}`
+  const rows = requirementBlockRows(block, node)
+    .map((row) => Array.isArray(row?.cells) ? row.cells : [])
+    .map((cells) => cells.map((cell) => cleanNodeDisplayCopy(cell)).filter(Boolean).slice(0, 2).join('｜'))
+    .filter(Boolean)
+    .slice(0, 2)
+  if (title && rows.length) return `${title}：${rows.join('；')}`
+  const items = requirementBlockItems(block, node)
+    .map((item) => cleanNodeDisplayCopy(item))
+    .filter(Boolean)
+    .slice(0, 2)
+  if (title && items.length) return `${title}：${items.join('；')}`
+  return title || summary
+}
+
+function requirementCanvasPreviewItems(node = {}) {
+  if (!isRequirementPipelineCanvasNode(node)) return []
+  const tab = requirementPipelineTab(node)
+  const tabSummary = cleanNodeDisplayCopy(tab.summary || node.summary || '')
+  const items = [
+    tabSummary && !nodeTextDuplicatesTitle(tabSummary, node) ? tabSummary : '',
+    ...requirementDetailBlocks(node).map((block) => requirementCanvasBlockPreview(block, node))
+  ]
+  return filterDuplicateNodeDisplayItems(items, node, [])
+    .slice(0, 4)
 }
 
 function requirementPipelineFailureMessages(node = {}) {
@@ -2896,7 +2970,15 @@ function requirementDocumentSections(node = {}) {
   const isAdvancedUxPipeline = isAdvancedUxRequirementPipeline(node)
   const activeTabId = requirementPipelineTabId(node)
   if (isAdvancedUxPipeline && blocks.length && blocks.every((block) => !block.sourceRef)) {
-    const definition = requirementDocumentSectionDefinitions(node).find((item) => item.id === activeTabId) || requirementDocumentSectionDefinitions(node)[0]
+    const activeTab = requirementPipelineTab(node)
+    const activeTabIndex = Math.max(0, requirementPipelineTabs(node).findIndex((tab) => tab.id === activeTabId))
+    const definition = {
+      id: activeTabId || activeTab.id || 'advanced-ux-section',
+      number: activeTabIndex + 1,
+      indexLabel: String(activeTabIndex + 1).padStart(2, '0'),
+      title: activeTab.title || node.title || '高级 UX 分析',
+      summary: activeTab.summary || node.summary || ''
+    }
     return [{
       ...definition,
       blocks
@@ -2938,7 +3020,7 @@ function requirementDocumentBlockHeading(section = {}, block = {}, blockIndex = 
 }
 
 function isRequirementDocumentTableBlock(block = {}) {
-  if (['table', 'priority-table', 'matrix', 'risk-matrix', 'relation-table', 'entity-table'].includes(requirementBlockType(block))) return true
+  if (['table', 'priority-table', 'matrix', 'risk-matrix', 'relation-table', 'entity-table', 'question-list'].includes(requirementBlockType(block))) return true
   return [
     'functionModuleMatrix',
     'pageCoverageMatrix',
@@ -2961,7 +3043,7 @@ function isRequirementDocumentTableBlock(block = {}) {
 }
 
 function isRequirementStructuredDetailBlock(block = {}) {
-  return ['summary', 'list', 'question-list', 'acceptance-basis', 'opportunity-matrix'].includes(requirementBlockType(block)) ||
+  return ['summary', 'list', 'acceptance-basis', 'opportunity-matrix'].includes(requirementBlockType(block)) ||
     ['productDefinition', 'userScenarios', 'evidenceAndAssumptions', 'gapConfirmation', 'competitiveAnalysis', 'downstreamHints'].includes(block?.sourceRef)
 }
 
@@ -3097,6 +3179,24 @@ function requirementBlockHeaders(block = {}, node = {}) {
     default:
       return []
   }
+}
+
+function requirementBlockColumnCount(block = {}, node = {}) {
+  const headerCount = requirementBlockHeaders(block, node).length
+  const rowCount = requirementBlockRows(block, node)
+    .reduce((count, row) => Math.max(count, Array.isArray(row?.cells) ? row.cells.length : 0), 0)
+  return Math.max(headerCount, rowCount, 1)
+}
+
+function requirementBlockTableStyle(block = {}, node = {}) {
+  const headers = requirementBlockHeaders(block, node)
+  const columnCount = requirementBlockColumnCount(block, node)
+  const columns = Array.from({ length: columnCount }, (_, index) => {
+    const header = String(headers[index] || '').trim()
+    if (/^#|编号|层级|优先级|评分|置信度$/.test(header)) return 'minmax(72px, .55fr)'
+    return 'minmax(150px, 1fr)'
+  }).join(' ')
+  return { '--requirement-table-columns': columns }
 }
 
 function rowsFromTextItems(items = [], prefix = 'item') {
@@ -4648,7 +4748,7 @@ function expandAllStageDetailSections(node = {}) {
 }
 
 function isInteractionPageDetail(node = {}) {
-  return node?.detailLayout === 'interaction-page-split'
+  return isInteractionLofiPageNode(node)
 }
 
 function isVisualGalleryDetail(node = {}) {
@@ -4828,6 +4928,23 @@ function advancedUxPagePosition(node = {}) {
   ) || '页面定位待模型补充。'
 }
 
+function advancedUxPageMetaRows(node = {}) {
+  const meta = pageLayoutArtifact(node).pageMeta
+  if (!meta || typeof meta !== 'object') return []
+  return [
+    ['对应步骤', meta.correspondingSteps],
+    ['分析状态', meta.analyzed === true ? '已分析' : meta.analyzed === false ? '' : meta.analyzed],
+    ['角色权限', meta.roleAccess],
+    ['入口来源', meta.entrySource],
+    ['数据来源', meta.dataSource],
+    ['权限规则', meta.permissionRule],
+    ['路由路径', meta.routePath]
+  ].map(([label, value]) => ({
+    label,
+    value: frameworkText(value)
+  })).filter((item) => item.value)
+}
+
 function advancedUxPageFrameworkRows(node = {}) {
   const artifact = pageLayoutArtifact(node)
   const layout = artifact.layout && typeof artifact.layout === 'object' ? artifact.layout : {}
@@ -4840,19 +4957,25 @@ function advancedUxPageFrameworkRows(node = {}) {
     const area = frameworkText(row?.['区域'] || row?.area || row?.region || row?.title || row?.name || row?.label)
     const content = frameworkText(row?.['内容'] || row?.content || row?.items || row?.children || row?.summary)
     const description = frameworkText(row?.['说明'] || row?.description || row?.note || row?.detail)
-    if (!area && !content && !description) return null
+    const stateDescription = frameworkText(row?.stateDescription || row?.state_description || row?.['状态说明'])
+    const componentReference = frameworkText(row?.componentReference || row?.component_reference || row?.['组件引用'])
+    if (!area && !content && !description && !stateDescription && !componentReference) return null
     return {
       id: row?.id || `${index + 1}`,
       area,
       content,
-      description
+      description,
+      stateDescription,
+      componentReference
     }
   }).filter(Boolean)
   return normalized.length ? normalized : [{
     id: 'empty',
     area: '暂无',
     content: '页面框架表格待模型补充',
-    description: ''
+    description: '',
+    stateDescription: '',
+    componentReference: ''
   }]
 }
 
@@ -4861,12 +4984,14 @@ function advancedUxInteractionRuleRows(node = {}) {
     id: row.id || row.annotationId || `${index + 1}`,
     userAction: frameworkText(row.userAction || row.target || row.gesture),
     systemFeedback: frameworkText(row.systemFeedback || row.feedback || row.result),
+    relatedStateOrModal: frameworkText(row.relatedStateOrModal || row.relatedState || row.relatedModal),
     remark: frameworkText(row.remark || row.notes || row.operation || row.statePromptCopy)
-  })).filter((row) => row.userAction || row.systemFeedback || row.remark)
+  })).filter((row) => row.userAction || row.systemFeedback || row.relatedStateOrModal || row.remark)
   return rows.length ? rows : [{
     id: 'empty',
     userAction: '暂无',
     systemFeedback: '交互规则表格待模型补充',
+    relatedStateOrModal: '',
     remark: ''
   }]
 }
@@ -5371,6 +5496,11 @@ function normalizeInteractionSpecRow(row = {}) {
     feedback: String(row.feedback || '').trim(),
     statePromptCopy: String(row.statePromptCopy || row.promptCopy || row.toastCopy || row.messageCopy || '').trim(),
     result: String(row.result || '').trim(),
+    userAction: String(row.userAction || '').trim(),
+    systemFeedback: String(row.systemFeedback || '').trim(),
+    remark: String(row.remark || '').trim(),
+    notes: String(row.notes || '').trim(),
+    relatedStateOrModal: String(row.relatedStateOrModal || row.relatedState || row.relatedModal || '').trim(),
     motion: String(row.motion || row.animation || row.motionNote || '').trim(),
     states,
     testPoints
@@ -5387,11 +5517,13 @@ function interactionSpecRows(node = {}) {
 function normalizeInteractionStateRow(row = {}) {
   if (!row || typeof row !== 'object') return null
   return {
+    id: String(row.id || '').trim(),
     state: String(row.state || row.name || '').trim(),
     trigger: String(row.trigger || '').trim(),
     display: String(row.display || row.ui || '').trim(),
     promptCopy: String(row.promptCopy || row.copy || row.message || '').trim(),
-    recovery: String(row.recovery || row.recover || '').trim()
+    recovery: String(row.recovery || row.recover || '').trim(),
+    handling: String(row.handling || row.recovery || row.recover || '').trim()
   }
 }
 
@@ -6348,6 +6480,18 @@ function handleCanvasWheel(event) {
   const zoomDelta = Math.max(-0.18, Math.min(0.18, -rawDelta / 500))
   if (!zoomDelta) return
   emit('zoom', zoomDelta)
+}
+
+function handleCanvasActionClick(event) {
+  const actionTarget = event.target?.closest?.('[data-canvas-action][data-node-id]')
+  if (!actionTarget || !viewportRef.value?.contains(actionTarget)) return
+  const action = actionTarget.dataset?.canvasAction || ''
+  const nodeId = actionTarget.dataset?.nodeId || ''
+  if (!nodeId) return
+  const node = displayNodes.value.find((item) => item?.id === nodeId) || { id: nodeId }
+  event.stopPropagation()
+  if (action === 'open-agent') emit('open-agent', nodeId)
+  if (action === 'open-detail') emit('open-agent', { action: 'open-detail', nodeId, node })
 }
 
 function canOpenStage(stageId = '') {

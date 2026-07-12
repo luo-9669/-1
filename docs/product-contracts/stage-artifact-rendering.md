@@ -74,7 +74,7 @@ The workflow canvas uses a stage artifact rendering model. Backend/model artifac
 - `interaction-lofi` stage cards render `pageLayoutArtifact.asciiWireframe`.
 - Fullscreen detail renders the same `pageLayoutArtifact`.
 - Slice filtering keeps backend artifact nodes and falls back to page-derived nodes only when the active slice has no artifact nodes.
-- Requirement-dissection tests cover the ordinary nine-chapter pipeline, the advanced UX seven-node variant, sourceRef resolution, page frame contracts, and guidance single-display behavior.
+- Requirement-dissection tests cover the ordinary nine-chapter pipeline, the advanced UX ten-node variant, sourceRef resolution, page frame contracts, and guidance single-display behavior.
 - `ui-visual` stage nodes render pending/configuration/generated visual states from `visualPreview` and `artifact`.
 - `generationActions` route artifact generation and patch the result back into `totalDesignFlow.stageCanvases`.
 - Project UI visual generation carries target ratio and project visual reference context into the image-provider prompt/context, while generated image cards show compact ratio metadata.

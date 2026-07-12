@@ -1313,7 +1313,8 @@ export async function addMaterial(store, payload = {}) {
 }
 
 export function getMaterial(store, id = '') {
-  return store.materials.find((item) => item.id === id) || null
+  const material = store.materials.find((item) => item.id === id) || null
+  return material ? createWorkspaceMaterial(material) : null
 }
 
 export async function addParseJob(store, payload = {}) {
@@ -1559,6 +1560,7 @@ export function listMaterials(store, payload = {}) {
   return store.materials
     .filter((item) => !projectId || item.projectId === projectId)
     .filter((item) => !type || item.type === type)
+    .map((item) => createWorkspaceMaterial(item))
     .slice()
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
 }

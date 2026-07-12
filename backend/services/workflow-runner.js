@@ -2144,22 +2144,25 @@ async function buildCanvasNodeArtifact(node = {}, payload = {}, run = {}, option
 async function patchGeneratedArtifactOnNode(node = {}, payload = {}, run = {}, options = {}) {
   const artifact = await buildCanvasNodeArtifact(node, payload, run, options)
   const actionId = payload.generationAction?.id || payload.generationAction?.label || ''
+  const nextArtifactStatus = artifact.imageStatus === 'configuration-required'
+    ? 'pending'
+    : artifact.imageStatus === 'failed'
+      ? 'failed'
+      : 'generated'
+  const nextActionStatus = artifact.imageStatus === 'configuration-required'
+    ? 'configuration-required'
+    : nextArtifactStatus
   const nextActions = Array.isArray(node.generationActions)
     ? node.generationActions.map((action) => {
         const currentId = action?.id || action?.label || action
         if (actionId && currentId !== actionId) return action
         return {
           ...(typeof action === 'object' ? action : { label: String(action || '') }),
-          status: 'generated',
+          status: nextActionStatus,
           generatedAt: artifact.generatedAt
         }
       })
     : node.generationActions
-  const nextArtifactStatus = artifact.imageStatus === 'configuration-required'
-    ? 'pending'
-    : artifact.imageStatus === 'failed'
-      ? 'failed'
-      : 'generated'
   return {
     ...node,
     artifactStatus: nextArtifactStatus,

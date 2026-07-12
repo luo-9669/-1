@@ -31,6 +31,32 @@ test('workspace route exports markdown as a direct PDF download', async () => {
   assert.match(result.body.toString('utf8'), /^%PDF/)
 })
 
+test('workspace storage status exposes deploy diagnostics without secrets', async () => {
+  const previousUrl = process.env.COZE_SUPABASE_URL
+  const previousAnonKey = process.env.COZE_SUPABASE_ANON_KEY
+  process.env.COZE_SUPABASE_URL = 'https://example.supabase.co'
+  process.env.COZE_SUPABASE_ANON_KEY = 'secret-anon-key'
+  try {
+    const store = createWorkspaceStore({ projects: [] }, { filePath: '/tmp/workspace.local.json' })
+    const routes = workspaceRoutes(store)
+    const result = await routes['GET /api/workspace/storage-status']({})
+
+    assert.equal(result.ok, true)
+    assert.equal(result.database.available, true)
+    assert.equal(result.database.env.COZE_SUPABASE_URL, true)
+    assert.equal(result.database.env.COZE_SUPABASE_ANON_KEY, true)
+    assert.equal(result.database.supabaseHost, 'example.supabase.co')
+    assert.equal(result.file.enabled, true)
+    assert.equal(result.file.path, '/tmp/workspace.local.json')
+    assert.equal(JSON.stringify(result).includes('secret-anon-key'), false)
+  } finally {
+    if (previousUrl === undefined) delete process.env.COZE_SUPABASE_URL
+    else process.env.COZE_SUPABASE_URL = previousUrl
+    if (previousAnonKey === undefined) delete process.env.COZE_SUPABASE_ANON_KEY
+    else process.env.COZE_SUPABASE_ANON_KEY = previousAnonKey
+  }
+})
+
 test('workspace model settings do not keep codex exec surface after switching to openai-compatible', async () => {
   const store = createWorkspaceStore({ settings: [] })
   await saveModelSettings(store, {
@@ -371,7 +397,7 @@ test('workspace route keeps advanced UX markdown generation alive while backend 
   assert.equal(store.workflowRuns[0].status, 'analyzing')
 })
 
-test('workspace route hydrates historical failed advanced UX runs into seven failed canvas nodes', async () => {
+test('workspace route hydrates historical failed advanced UX runs into ten failed canvas nodes', async () => {
   const analysis = analyzeRequirementDocuments({
     skillId: 'advanced-ux-requirement-analysis',
     requestedSkillId: 'advanced-ux-requirement-analysis',
@@ -434,13 +460,13 @@ test('workspace route hydrates historical failed advanced UX runs into seven fai
 
   assert.equal(result.run.documentAnalysis.totalDesignFlow.advancedUxReport.status, 'failed')
   assert.equal(result.run.documentAnalysis.totalDesignFlow.advancedUxReport.importError, failureReason)
-  assert.equal(nodes.length, 7)
+  assert.equal(nodes.length, 10)
   assert.ok(nodes.every((node) => node.artifactStatus === 'failed'))
   assert.ok(nodes.every((node) => node.summary === '未生成可导入内容'))
   assert.ok(nodes.every((node) => node.detailSections?.some((section) =>
     section.title === '失败原因' && section.items?.includes(failureReason)
   )))
-  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 7)
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['requirement-dissection'].nodes.length, 10)
 })
 
 test('workspace route sanitizes internal runtime warnings in historical advanced UX failures', async () => {
@@ -556,7 +582,7 @@ test('workspace route sanitizes internal runtime warnings in historical advanced
 
   assert.equal(report.importError, '模型调用未生成可导入的高级 UX Markdown。请重新生成。')
   assert.equal(result.run.documentAnalysis.advancedUxReport.importError, report.importError)
-  assert.equal(nodes.length, 7)
+  assert.equal(nodes.length, 10)
   assert.ok(nodes.every((node) => node.detailSections?.some((section) =>
     section.title === '失败原因' && section.items?.includes(report.importError)
   )))
@@ -647,6 +673,153 @@ test('workspace route suppresses advanced UX interaction fallback nodes until pa
   assert.notEqual(canvas.nodes[0].title, '文档分析结果')
   assert.equal(totalFlowResult.stageRuntime['interaction-lofi'].state, 'generating')
   assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi'].canvasType, 'advanced-ux-stage-generating')
+})
+
+test('workspace route imports existing advanced UX page interaction markdown into interaction lofi canvas', async () => {
+  const pageInteractionMarkdown = [
+    '# 线索跟进Web工具-页面交互框架与说明',
+    '',
+    '## 1. 文档概述',
+    '| 核心假设 | 依据 | 风险 | 验证方式 | 置信度 |',
+    '|---|---|---|---|---|',
+    '| 销售需要从线索池进入跟进 | 用户需求 | 入口不清晰 | 原型评审 | 中 |',
+    '',
+    '## 2. 页面总览',
+    '| 编号 | 页面名称 | 类型 | 所属模块 | 入口来源 | 核心职责 | 对应步骤 | 角色权限 | 数据来源 | 权限规则 | 路由路径 | analyzed |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
+    '| P01 | 线索列表页 | 核心页面 | 线索管理 | 首页导航 | 浏览与筛选线索 | S1-S2 | 销售/主管 | 线索接口 | 仅看授权线索 | /leads | true |',
+    '',
+    '## 3. 页面流转总览',
+    '| 源页面 | 源页面名称 | 目标页面 | 目标页面名称 | 触发操作 | 前置条件 | 流转类型 | 触发角色 | 跳转方式 | 备注 |',
+    '|---|---|---|---|---|---|---|---|---|---|',
+    '| P01 | 线索列表页 | P01 | 线索列表页 | 点击筛选 | 已登录 | 主流程 | 销售 | 页内刷新 | 更新列表 |',
+    '| P01 | 线索列表页 | P01 | 线索列表页 | 接口失败重试 | 网络异常 | 异常流 | 销售 | 留在当前页 | 保留筛选条件 |',
+    '',
+    '```text',
+    'P01 线索列表页',
+    '├─ 点击筛选 -> P01 列表刷新',
+    '└─ 接口失败 -> P01 错误态 -> 重试',
+    '```',
+    '',
+    '## 8. 逐页交互说明',
+    '### P01 线索列表页',
+    '#### 页面定位',
+    '销售查看、筛选并进入线索跟进。',
+    '',
+    '#### 页面框架表格',
+    '| 区域编号 | 区域名称 | 区域类型 | 位置 | 布局 | 内容摘要 | 关键元素 | 交互 | 响应式 | 优先级 | 状态变体 | 状态说明 | 组件引用 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| A1 | 顶部筛选区 | filter | 顶部固定 | 横向 | 关键词和状态筛选 | 搜索框、状态下拉 | 输入/选择后筛选 | 移动端折叠 | P0 | 默认/加载 | 固定不随列表滚动 | FilterBar |',
+    '| A2 | 线索列表区 | list | 主体滚动 | 列表 | 展示线索卡片 | 卡片、跟进按钮 | 点击进入跟进 | 移动端单列 | P0 | 加载/空/错误 | 主体可滚动 | LeadList |',
+    '',
+    '#### 文本布局图',
+    '```text',
+    '┌────────────────────┐',
+    '│ A1 顶部筛选区       │',
+    '├────────────────────┤',
+    '│ A2 线索列表区       │',
+    '│  线索卡片 / 跟进按钮 │',
+    '└────────────────────┘',
+    '```',
+    '',
+    '#### 交互规则表格',
+    '| 编号 | 用户操作 | 系统反馈 | 关联状态/弹窗 | 备注 |',
+    '|---|---|---|---|---|',
+    '| IR1 | 输入关键词 | 列表按关键词刷新 | ST2 | 防抖请求 |',
+    '| IR2 | 选择状态 | 列表按状态过滤 | ST2 | 保留关键词 |',
+    '| IR3 | 点击跟进 | 打开跟进详情 | P02 | 权限不足时提示 |',
+    '| IR4 | 下拉刷新 | 重新拉取线索 | ST1 | 展示刷新状态 |',
+    '| IR5 | 点击重试 | 重新请求列表 | ST3 | 错误态可见 |',
+    '',
+    '#### 异常状态表格',
+    '| 编号 | 状态 | 表现 | 处理方式 |',
+    '|---|---|---|---|',
+    '| E1 | 加载中 | 骨架屏 | 等待接口返回 |',
+    '| E2 | 空状态 | 展示无结果 | 提供重置筛选 |',
+    '| E3 | 错误态 | 错误提示 | 提供重试 |',
+    '| E4 | 无权限 | 权限提示 | 联系管理员 |',
+    '| E5 | 业务异常 | 线索被回收 | 刷新列表 |',
+    '',
+    '## 10. 交互规则表（自有产品）',
+    '| 规则编号 | 页面编号 | 区域编号 | 触发元素 | 触发动作 | 前置条件 | 交互行为 | 成功反馈 | 失败反馈 | 边界情况 | 关联接口 |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
+    '| IR001 | P01 | A1 | 搜索框 | 输入 | 已登录 | 防抖查询线索 | 列表刷新 | 展示错误态 | 空输入恢复全量 | GET /leads |',
+    '| IR002 | P01 | A2 | 跟进按钮 | 点击 | 有权限 | 打开跟进详情 | 进入详情 | 权限不足提示 | 线索已回收时刷新 | GET /leads/:id |'
+  ].join('\n')
+  const run = createWorkspaceWorkflowRun({
+    id: 'run-advanced-ux-existing-page-doc-import',
+    workflowId: 'advanced-ux-requirement-analysis',
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    status: 'analyzed',
+    input: '做一个给企业销售团队使用的线索跟进 Web 工具',
+    documentAnalysis: {
+      status: 'analyzed',
+      input: '做一个给企业销售团队使用的线索跟进 Web 工具',
+      advancedUxReport: {
+        status: 'imported',
+        fileName: '高级UX需求分析.md',
+        markdown: '# 高级 UX 需求分析\n\n## 原始需求分析\n已生成。',
+        pageInteractionDocument: {
+          status: 'generated',
+          artifactType: 'page-interaction-markdown',
+          fileName: '线索跟进Web工具-页面交互框架与说明.md',
+          markdown: pageInteractionMarkdown
+        }
+      },
+      totalDesignFlow: {
+        currentStage: 'interaction-lofi',
+        stages: [
+          { id: 'requirement-dissection', name: '需求分析' },
+          { id: 'interaction-lofi', name: '交互低保' }
+        ],
+        advancedUxReport: {
+          status: 'imported',
+          fileName: '高级UX需求分析.md',
+          markdown: '# 高级 UX 需求分析\n\n## 原始需求分析\n已生成。',
+          pageInteractionDocument: {
+            status: 'generated',
+            artifactType: 'page-interaction-markdown',
+            fileName: '线索跟进Web工具-页面交互框架与说明.md',
+            markdown: pageInteractionMarkdown
+          }
+        },
+        stageCanvases: {
+          'interaction-lofi': {
+            title: '交互低保',
+            nodes: [{
+              id: 'legacy-doc-analysis',
+              stageId: 'interaction-lofi',
+              title: '文档分析结果',
+              summary: '旧占位',
+              contentStatus: 'model-pending',
+              contentSource: 'model-pending'
+            }],
+            edges: [],
+            orderedTabs: [{ key: 'legacy-doc-analysis', label: '文档分析结果' }]
+          }
+        }
+      }
+    }
+  })
+  const store = createWorkspaceStore({ workflowRuns: [run], projects: [], materials: [] })
+  const routes = workspaceRoutes(store)
+
+  const result = await routes['GET /api/workspace/workflow-runs/:id']({ id: run.id })
+  const canvas = result.run.documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi']
+  const node = canvas.nodes[0]
+
+  assert.equal(canvas.canvasType, 'interaction-lofi-page-canvas')
+  assert.equal(node.title, '线索列表页')
+  assert.equal(node.pageLayoutArtifact.pageMeta.correspondingSteps, 'S1-S2')
+  assert.equal(node.pageLayoutArtifact.pageMeta.analyzed, true)
+  assert.equal(node.pageLayoutArtifact.pageMeta.roleAccess, '销售/主管')
+  assert.match(node.pageLayoutArtifact.asciiWireframe, /A1 顶部筛选区/)
+  assert.ok(node.pageLayoutArtifact.layout.regions.some((region) => region['区域'] === 'A1 顶部筛选区'))
+  assert.ok(node.pageLayoutArtifact.layout.regions.some((region) => region.stateDescription === '固定不随列表滚动' && region.componentReference === 'FilterBar'))
+  assert.ok(node.interactionSpecArtifact.interactionRows.some((row) => row.id === 'IR1' && row.target === '输入关键词' && row.relatedStateOrModal === 'ST2'))
+  assert.ok(node.interactionSpecArtifact.stateMatrix.some((state) => state.id === 'E1' && state.state === '加载中'))
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi'].canvasType, 'interaction-lofi-page-canvas')
 })
 
 test('workspace route preserves advanced UX failed interaction canvas when page document gate fails', async () => {
@@ -740,6 +913,224 @@ test('workspace route preserves advanced UX failed interaction canvas when page 
   assert.equal(totalFlowResult.advancedUxReport.pageInteractionDocument.status, 'failed')
   assert.equal(totalFlowResult.stageRuntime['interaction-lofi'].state, 'failed')
   assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi'].canvasType, 'advanced-ux-stage-failed')
+})
+
+test('workspace route rehydrates failed advanced UX UI visual placeholder from interaction pages', async () => {
+  const stages = [
+    { id: 'requirement-dissection', name: '需求分析' },
+    { id: 'interaction-lofi', name: '交互低保' },
+    { id: 'ui-visual', name: 'UI视觉' }
+  ]
+  const run = createWorkspaceWorkflowRun({
+    id: 'run-advanced-ux-failed-ui-visual',
+    projectId: 'project-video',
+    title: 'AI 视频爆款复刻',
+    workflowId: 'advanced-ux-requirement-analysis',
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    input: '做一个AI生成视频拥有爆款复刻功能的web工具',
+    status: 'analyzed',
+    documentAnalysis: {
+      status: 'analyzed',
+      input: '做一个AI生成视频拥有爆款复刻功能的web工具',
+      advancedUxReport: {
+        status: 'imported',
+        fileName: '高级UX需求分析.md',
+        markdown: '# 高级 UX 需求分析',
+        pageInteractionDocument: {
+          status: 'generated',
+          fileName: 'AI视频爆款复刻Web工具-页面交互框架与说明.md',
+          markdown: '# 页面交互框架与说明'
+        }
+      },
+      totalDesignFlow: {
+        currentStage: 'ui-visual',
+        contentStatus: 'waiting-model',
+        contentStatusLabel: '模型增强中',
+        stages,
+        advancedUxReport: {
+          status: 'imported',
+          fileName: '高级UX需求分析.md',
+          markdown: '# 高级 UX 需求分析',
+          pageInteractionDocument: {
+            status: 'generated',
+            fileName: 'AI视频爆款复刻Web工具-页面交互框架与说明.md',
+            markdown: '# 页面交互框架与说明'
+          }
+        },
+        stageStatuses: {
+          'requirement-dissection': { status: 'completed' },
+          'interaction-lofi': { status: 'completed' },
+          'ui-visual': { status: 'failed' }
+        },
+        stageConfirmations: {
+          'requirement-dissection': { stageId: 'requirement-dissection', nextStageId: 'interaction-lofi' },
+          'interaction-lofi': { stageId: 'interaction-lofi', nextStageId: 'ui-visual' }
+        },
+        stageCanvases: {
+          'interaction-lofi': {
+            nodes: [{
+              id: 'advanced-ux-page-p01',
+              stageId: 'interaction-lofi',
+              title: '复刻首页',
+              artifactStatus: 'generated',
+              pageLayoutArtifact: {
+                asciiWireframe: 'A1 顶部导航区 | A2 导入主操作区',
+                version: 'advanced-ux-page-interaction/v1'
+              },
+              interactionSpecArtifact: {
+                version: 'advanced-ux-page-interaction/v1',
+                interactionRows: [{ target: '点击开始解析' }]
+              }
+            }, {
+              id: 'advanced-ux-page-p02',
+              stageId: 'interaction-lofi',
+              title: '任务进度页',
+              artifactStatus: 'generated',
+              pageLayoutArtifact: {
+                asciiWireframe: 'A1 顶部状态区 | A2 任务进度条',
+                version: 'advanced-ux-page-interaction/v1'
+              },
+              interactionSpecArtifact: {
+                version: 'advanced-ux-page-interaction/v1',
+                interactionRows: [{ target: '查看任务详情' }]
+              }
+            }],
+            edges: [],
+            orderedTabs: []
+          },
+          'ui-visual': {
+            title: 'UI视觉',
+            summary: 'UI视觉生成失败',
+            canvasType: 'advanced-ux-stage-failed',
+            layoutRule: 'single-failed',
+            status: 'failed',
+            nodes: [{
+              id: 'advanced-ux-ui-visual-failed',
+              stageId: 'ui-visual',
+              title: 'UI视觉',
+              summary: 'UI视觉生成失败',
+              loading: false,
+              artifactStatus: 'failed',
+              status: 'failed'
+            }],
+            edges: [],
+            orderedTabs: [{ key: 'advanced-ux-ui-visual-failed', label: 'UI视觉' }]
+          }
+        }
+      }
+    }
+  })
+  const store = createWorkspaceStore({
+    projects: [{ id: 'project-video', name: 'AI 视频项目' }],
+    workflowRuns: [run],
+    materials: []
+  })
+  const routes = workspaceRoutes(store)
+
+  const result = await routes['GET /api/workspace/workflow-runs/:id']({ id: 'run-advanced-ux-failed-ui-visual' })
+  const totalFlow = result.run.documentAnalysis.totalDesignFlow
+  const canvas = totalFlow.stageCanvases['ui-visual']
+
+  assert.equal(totalFlow.stageRuntime['ui-visual'].state, 'available')
+  assert.notEqual(totalFlow.contentStatus, 'failed')
+  assert.equal(canvas.canvasType, 'ui-visual-page-canvas')
+  assert.equal(canvas.status, 'pending')
+  assert.equal(canvas.nodes.length, 2)
+  assert.deepEqual(canvas.nodes.map((node) => node.title), ['复刻首页 UI视觉', '任务进度页 UI视觉'])
+  assert.deepEqual(canvas.orderedTabs.map((tab) => tab.label), ['复刻首页 UI视觉', '任务进度页 UI视觉'])
+  assert.ok(canvas.nodes.every((node) => node.artifactStatus !== 'failed'))
+  assert.ok(canvas.nodes.every((node) => node.visualPreview?.sourceStageId === undefined || node.sourceStageId === 'interaction-lofi'))
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['ui-visual'].nodes.length, 2)
+})
+
+test('workspace route normalizes failed UI visual image artifacts that were persisted as generated', async () => {
+  const run = createWorkspaceWorkflowRun({
+    id: 'run-ui-visual-failed-image-generated-shell',
+    workflowId: 'total-design-flow',
+    workflowName: '高级 UX 需求分析',
+    assetType: '高级 UX 需求分析',
+    status: 'analyzed',
+    documentAnalysis: {
+      status: 'analyzed',
+      totalDesignFlow: {
+        mode: 'total-design-flow',
+        type: 'total-design-flow',
+        skillId: 'total-design-flow',
+        currentStage: 'ui-visual',
+        stages: [
+          { id: 'requirement-dissection', name: '需求分析' },
+          { id: 'interaction-lofi', name: '交互低保' },
+          { id: 'ui-visual', name: 'UI视觉' }
+        ],
+        stageStatuses: {
+          'requirement-dissection': { status: 'completed' },
+          'interaction-lofi': { status: 'completed' },
+          'ui-visual': { status: 'completed' }
+        },
+        stageConfirmations: {
+          'requirement-dissection': { stageId: 'requirement-dissection', nextStageId: 'interaction-lofi' },
+          'interaction-lofi': { stageId: 'interaction-lofi', nextStageId: 'ui-visual' }
+        },
+        stageCanvases: {
+          'interaction-lofi': {
+            canvasType: 'interaction-lofi-page-canvas',
+            nodes: [{
+              id: 'advanced-ux-page-p01',
+              stageId: 'interaction-lofi',
+              title: '复刻首页',
+              artifactStatus: 'generated',
+              pageLayoutArtifact: {
+                version: 'advanced-ux-page-interaction/v1',
+                asciiWireframe: 'A1 顶部导航区 | A2 导入主操作区'
+              },
+              interactionSpecArtifact: {
+                version: 'advanced-ux-page-interaction/v1',
+                interactionRows: [{ target: '点击开始解析' }]
+              }
+            }],
+            edges: [],
+            orderedTabs: [{ key: 'advanced-ux-page-p01', label: '复刻首页' }]
+          },
+          'ui-visual': {
+            canvasType: 'ui-visual-page-canvas',
+            nodes: [{
+              id: 'ui-failed-p1',
+              stageId: 'ui-visual',
+              sourceNodeId: 'advanced-ux-page-p01',
+              sourcePageId: 'advanced-ux-page-p01',
+              title: '复刻首页 UI视觉',
+              artifactStatus: 'generated',
+              targetGenerator: 'gpt-image-2',
+              generationActions: [{ id: 'generate-visual', label: '生成高保真图', targetGenerator: 'gpt-image-2', status: 'generated' }],
+              visualPreview: {
+                imageStatus: 'failed',
+                configurationMessage: 'unable to get local issuer certificate'
+              },
+              artifact: {
+                kind: 'visual',
+                imageStatus: 'failed',
+                configurationMessage: 'unable to get local issuer certificate'
+              },
+              contentStatusLabel: '已生成'
+            }],
+            edges: [],
+            orderedTabs: [{ key: 'ui-failed-p1', label: '复刻首页 UI视觉' }]
+          }
+        }
+      }
+    }
+  })
+  const store = createWorkspaceStore({ workflowRuns: [run] })
+  const routes = workspaceRoutes(store)
+
+  const result = await routes['GET /api/workspace/workflow-runs/:id']({ id: 'run-ui-visual-failed-image-generated-shell' })
+  const node = result.run.documentAnalysis.totalDesignFlow.stageCanvases['ui-visual'].nodes[0]
+
+  assert.equal(node.artifactStatus, 'failed')
+  assert.equal(node.generationActions[0].status, 'failed')
+  assert.equal(node.contentStatusLabel, '生成失败')
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['ui-visual'].nodes[0].artifactStatus, 'failed')
 })
 
 test('workspace route preserves empty project id for non-project workflow runs', async () => {
@@ -2268,6 +2659,45 @@ test('workspace route imports project package analysis into knowledge materials'
   assert.equal(savedMaterials.length, result.materials.length)
   assert.equal(jobs[0].action, 'project-package-import')
   assert.equal(jobs[0].materialCount, result.materials.length)
+})
+
+test('workspace route restores material display content from chunks', async () => {
+  const store = createWorkspaceStore({
+    projects: [{ id: 'project-knowledge', name: '知识项目' }],
+    materials: [{
+      id: 'material-chunk-only',
+      projectId: 'project-knowledge',
+      type: 'knowledge',
+      category: 'markdown-blueprint',
+      title: '知识条目 Markdown 汇总',
+      content: '',
+      notes: '只在 chunks 中保存正文',
+      chunks: [{
+        id: 'material-chunk-only-full',
+        heading: '知识正文',
+        text: '# 知识正文\n\n这里是从 chunks 恢复的完整 Markdown。'
+      }]
+    }]
+  })
+  const routes = workspaceRoutes(store)
+
+  const listResult = await routes['GET /api/workspace/materials']({
+    projectId: 'project-knowledge',
+    type: 'knowledge'
+  })
+  const detailResult = await routes['GET /api/workspace/materials/:id']({ id: 'material-chunk-only' })
+  const updatedResult = await routes['PATCH /api/workspace/materials/:id']({
+    id: 'material-chunk-only',
+    title: '知识条目 Markdown 汇总',
+    type: 'knowledge',
+    projectId: 'project-knowledge',
+    content: ''
+  })
+
+  assert.match(listResult.materials[0].content, /# 知识正文/)
+  assert.match(detailResult.material.content, /从 chunks 恢复的完整 Markdown/)
+  assert.match(updatedResult.material.content, /从 chunks 恢复的完整 Markdown/)
+  assert.match(store.materials[0].content, /从 chunks 恢复的完整 Markdown/)
 })
 
 test('workspace route starts and stops a project runtime preview', async () => {

@@ -59,6 +59,86 @@ test('workflow agent recommendation chips only stay on the latest actionable ass
   )
 })
 
+test('workflow agent hides old recommendations after the next turn starts', () => {
+  assert.match(
+    drawerVue,
+    /const latestRecommendationMessageKey = computed\(\(\) =>[\s\S]*if \(messageRole\(message\) !== 'assistant'\) return ''[\s\S]*if \(isMessageBusy\(message\) \|\| isMessageFailed\(message\)\) return ''[\s\S]*if \(shouldSuppressMessageRecommendations\(message\)\) return ''[\s\S]*return messageKey\(message, index\)/,
+    'once a user reply, busy reply, failed reply, or suppressed stage-confirmation reply starts the next turn, older assistant recommendation chips should not reappear'
+  )
+})
+
+test('workflow stage confirmation messages do not show detached action icons', () => {
+  assert.match(
+    drawerVue,
+    /function shouldSuppressMessageActions\(message = \{\}\)[\s\S]*stage-confirm-next[\s\S]*advanced-ux-stage-confirm-next/,
+    'system stage-confirmation replies should suppress copy/retry/edit action icons'
+  )
+
+  assert.match(
+    drawerVue,
+    /function hasMessageActions\(message\)[\s\S]*if \(shouldSuppressMessageActions\(message\)\) return false[\s\S]*canCopyMessage\(message\)/,
+    'message action visibility should check the stage-confirmation suppressor before ordinary actions'
+  )
+})
+
+test('workflow stage confirmation text fallback suppresses actions and recommendations', () => {
+  assert.match(
+    drawerVue,
+    /function isStageConfirmationSystemMessage\(message = \{\}\)[\s\S]*已确认[\s\S]*正在生成/s,
+    'historical stage-confirmation replies without action metadata should still be recognized by their system text'
+  )
+
+  assert.match(
+    drawerVue,
+    /function shouldSuppressMessageRecommendations\(message = \{\}\)[\s\S]*return isStageConfirmationSystemMessage\(message\)/,
+    'stage-confirmation fallback should also prevent stale recommendations'
+  )
+
+  assert.match(
+    drawerVue,
+    /function shouldSuppressMessageActions\(message = \{\}\)[\s\S]*return isStageConfirmationSystemMessage\(message\)/,
+    'stage-confirmation fallback should hide copy and retry icons'
+  )
+})
+
+test('workflow agent recommendations exclude passive pending-generation labels', () => {
+  const replies = buildWorkflowAgentQuickReplies({
+    skillId: 'advanced-ux-requirement-analysis',
+    currentStepId: 'interaction-lofi',
+    steps: [{ id: 'interaction-lofi', title: '交互低保' }]
+  }, {
+    scopeId: 'interaction-lofi',
+    activeNode: {
+      id: 'advanced-ux-interaction-lofi-generating',
+      stageId: 'interaction-lofi',
+      title: '交互低保',
+      quickActions: ['等待生成', '生成完成后查看', '重生成本页']
+    }
+  })
+
+  assert.equal(replies.includes('等待生成'), false)
+  assert.equal(replies.includes('生成完成后查看'), false)
+  assert.deepEqual(replies, ['重生成本页'])
+
+  const session = buildWorkflowAgentSession({
+    skillId: 'advanced-ux-requirement-analysis',
+    currentStepId: 'interaction-lofi',
+    steps: [{ id: 'interaction-lofi', title: '交互低保' }],
+    agentQuickReplies: {
+      'interaction-lofi': ['等待生成']
+    }
+  }, {
+    scopeId: 'interaction-lofi',
+    activeNode: {
+      id: 'advanced-ux-interaction-lofi-generating',
+      stageId: 'interaction-lofi',
+      title: '交互低保'
+    }
+  })
+
+  assert.deepEqual(session.quickReplies, [])
+})
+
 test('advanced UX agent keeps one visible conversation when opening downstream stages', () => {
   const session = buildWorkflowAgentSession({
     id: 'run-advanced-ux',
@@ -202,6 +282,76 @@ test('advanced UX downstream agent timeline merges generated file cards without 
   assert.match(session.messages[1].content, /页面交互文档已生成/)
   assert.match(session.messages[1].content, /AI爆款视频复刻工具-页面交互框架与说明\.md/)
   assert.ok(session.messages.every((message) => message.meta?.action !== 'stage-context-bridge'))
+})
+
+test('advanced UX stage confirmations synthesize visible user advance bubbles for restored history', () => {
+  const session = buildWorkflowAgentSession({
+    id: 'run-advanced-ux-confirm-history',
+    workflowId: 'advanced-ux-requirement-analysis',
+    skillId: 'advanced-ux-requirement-analysis',
+    documentAnalysis: {
+      advancedUxReport: {
+        fileName: '高级UX需求分析.md',
+        markdown: '# 高级 UX 需求分析',
+        pageInteractionDocument: {
+          fileName: 'AI爆款视频复刻工具-页面交互框架与说明.md',
+          markdown: '# AI爆款视频复刻工具-页面交互框架与说明'
+        }
+      }
+    },
+    agentSessions: {
+      'interaction-lofi': [
+        {
+          id: 'legacy-user-confirm-ui',
+          role: 'user',
+          content: '请确认「交互低保」阶段结果，并基于当前阶段产出进入下一阶段「UI视觉」。',
+          createdAt: '2026-07-12T06:47:21.461Z',
+          meta: {
+            action: 'stage-confirm-next',
+            clientMessageId: 'confirm-ui-1',
+            stageId: 'interaction-lofi',
+            nextStageId: 'ui-visual'
+          }
+        },
+        {
+          id: 'legacy-confirm-ui',
+          role: 'assistant',
+          content: '已确认「交互低保」，正在生成「UI视觉」。',
+          createdAt: '2026-07-12T06:47:21.462Z',
+          meta: {
+            action: 'advanced-ux-stage-confirm-next',
+            clientMessageId: 'confirm-ui-1',
+            stageId: 'interaction-lofi',
+            nextStageId: 'ui-visual',
+            status: 'success'
+          }
+        }
+      ]
+    }
+  }, {
+    scopeId: 'ui-visual',
+    activeNode: {
+      id: 'ui-advanced-ux-page-p01',
+      stageId: 'ui-visual',
+      title: '复刻首页 UI视觉'
+    },
+    model: 'gpt-5.5'
+  })
+
+  const userAdvance = session.messages.find((message) =>
+    message.role === 'user' &&
+    message.content === '进入下一阶段' &&
+    message.meta?.clientMessageId === 'confirm-ui-1'
+  )
+  const assistantConfirm = session.messages.find((message) =>
+    message.role === 'assistant' &&
+    message.meta?.action === 'advanced-ux-stage-confirm-next' &&
+    message.meta?.clientMessageId === 'confirm-ui-1'
+  )
+
+  assert.ok(userAdvance, 'restored advanced UX confirmation should have a visible user bubble')
+  assert.ok(assistantConfirm, 'the original confirmation assistant message should remain visible')
+  assert.ok(session.messages.indexOf(userAdvance) < session.messages.indexOf(assistantConfirm))
 })
 
 test('advanced UX downstream agent timeline ignores stale node-scoped generating chats', () => {
@@ -1468,6 +1618,9 @@ test('UI visual quick action routes generate visual through the artifact generat
   const cardStart = canvasVue.indexOf('<article\n              v-for="node in displayNodes"')
   const cardEnd = canvasVue.indexOf('<div v-if="shouldRenderCanvasBoard" class="workflow-canvas-zoom-controls"', cardStart)
   const cardSource = canvasVue.slice(cardStart, cardEnd)
+  const visibleActionsStart = canvasVue.indexOf('function visibleNodeQuickActions')
+  const visibleActionsEnd = canvasVue.indexOf('function visualQuickGenerationAction', visibleActionsStart)
+  const visibleActionsSource = canvasVue.slice(visibleActionsStart, visibleActionsEnd)
   const quickHelperStart = canvasVue.indexOf('function visualQuickGenerationAction')
   const quickHelperEnd = canvasVue.indexOf('function nodeDetailText', quickHelperStart)
   const quickHelperSource = canvasVue.slice(quickHelperStart, quickHelperEnd)
@@ -1476,6 +1629,12 @@ test('UI visual quick action routes generate visual through the artifact generat
     cardSource,
     /@click\.stop="runNodeQuickAction\(node, action\)"/,
     'card quick actions should be normalized before emitting to App'
+  )
+
+  assert.match(
+    visibleActionsSource,
+    /if \(isVisualGalleryDetail\(node\) && generationActions\(node\)\.length\)[\s\S]*generationActions\(node\)\[0\]\?\.label/,
+    'UI visual cards should expose backend-owned generationActions in the fixed footer even when quickActions are absent'
   )
 
   assert.match(
@@ -1491,7 +1650,7 @@ test('UI visual quick action routes generate visual through the artifact generat
   )
 })
 
-test('UI visual card quick actions show generation labels and keep controls close to preview', () => {
+test('UI visual card quick actions stay in a fixed footer while visual content scrolls inside the card', () => {
   const cardStart = canvasVue.indexOf('<article\n              v-for="node in displayNodes"')
   const cardEnd = canvasVue.indexOf('<div v-if="shouldRenderCanvasBoard" class="workflow-canvas-zoom-controls"', cardStart)
   const cardSource = canvasVue.slice(cardStart, cardEnd)
@@ -1513,14 +1672,14 @@ test('UI visual card quick actions show generation labels and keep controls clos
 
   assert.match(
     stylesSource,
-    /\.canvas-node-card\.visual-canvas-node[\s\S]*grid-template-rows:\s*auto auto auto;[\s\S]*align-content:\s*start;/,
-    'visual cards should not stretch the body row and leave a large gap before footer actions'
+    /\.canvas-node-card\.visual-canvas-node \.canvas-node-hitbox[\s\S]*grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;[\s\S]*overflow:\s*hidden;/,
+    'visual cards should keep the same header/body/footer rows as interaction lofi cards so footer actions stay visible'
   )
 
   assert.match(
     stylesSource,
-    /\.visual-canvas-card-preview[\s\S]*grid-template-rows:\s*auto;[\s\S]*overflow:\s*visible;/,
-    'visual preview should size to the natural image height instead of reserving or clipping a fixed-height row'
+    /\.canvas-node-card\.visual-canvas-node \.canvas-node-body[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/,
+    'visual card previews should scroll inside the body row instead of overflowing over the footer'
   )
 })
 
@@ -1862,6 +2021,26 @@ test('UI visual artifact generation appends image result into the same Agent con
     /cardProps\.artifact\?\.prompt\s*\?\s*h\('p'/,
     'generated visual image cards should not show the long prompt beneath the image by default'
   )
+})
+
+test('UI visual artifact generation keeps backend failure status instead of overwriting it as generated', () => {
+  const generationStart = appVue.indexOf('async function runWorkflowGenerationAction')
+  const generationEnd = appVue.indexOf('async function applyWorkflowAgentSupplement', generationStart)
+  const generationSource = appVue.slice(generationStart, generationEnd)
+
+  assert.match(
+    generationSource,
+    /const generatedNode = workflowAgentGeneratedArtifactNode\(data, nodeId\)[\s\S]*workflowGeneratedArtifactFailed\(generatedNode\)[\s\S]*throw new Error/,
+    'frontend should treat backend-owned failed visual artifacts as failed instead of continuing into generated success handling'
+  )
+
+  const generatedNodeIndex = generationSource.indexOf('const generatedNode = workflowAgentGeneratedArtifactNode(data, nodeId)')
+  const failedCheckIndex = generationSource.indexOf('workflowGeneratedArtifactFailed(generatedNode)')
+  const successPatchIndex = generationSource.indexOf("patchWorkflowCanvasNodeArtifactStatus(nodeId, {\n      artifactStatus: 'generated'")
+
+  assert.ok(generatedNodeIndex >= 0, 'frontend should resolve the generated node before patching success')
+  assert.ok(failedCheckIndex > generatedNodeIndex, 'frontend should check backend failure status on the generated node')
+  assert.ok(successPatchIndex > failedCheckIndex, 'frontend should only patch generated status after the failure check')
 })
 
 test('opening a generated UI visual node repairs empty Agent image artifact messages from the canvas node', () => {
@@ -3842,6 +4021,11 @@ test('workflow canvas fullscreen switches page wireframe and page-level interact
   const detailTemplate = canvasVue.slice(detailStart, detailEnd)
 
   assert.match(
+    canvasVue,
+    /function isInteractionPageDetail\(node = \{\}\)[\s\S]*return isInteractionLofiPageNode\(node\)/,
+    'interaction page fullscreen should use the same stage/page-artifact detection as the visible page cards'
+  )
+  assert.match(
     detailTemplate,
     /class="canvas-page-layout-mode-toggle"[\s\S]*框架图[\s\S]*低保原型[\s\S]*交互说明/,
     'interaction page fullscreen should expose framework, low-fi prototype, and interaction spec segmented switch'
@@ -4086,6 +4270,10 @@ test('workflow canvas resolves stage slice ids back to source slice ids for page
 })
 
 test('workflow fullscreen uses current stage canvas nodes before root canvas nodes', () => {
+  const lookupStart = appVue.indexOf('function canvasNodeById(nodeId)')
+  const lookupEnd = appVue.indexOf('function workflowStageCanvasNodeById', lookupStart)
+  const lookupSource = appVue.slice(lookupStart, lookupEnd)
+
   assert.match(
     appVue,
     /const workflowCurrentCanvasNodes = computed\(\(\) =>/,
@@ -4093,9 +4281,15 @@ test('workflow fullscreen uses current stage canvas nodes before root canvas nod
   )
 
   assert.match(
+    lookupSource,
+    /workflowStageCanvasNodeById\(nodeId\)[\s\S]*workflowCurrentCanvasNodes\.value\.find\(\(node\) => node\.id === nodeId\)[\s\S]*workflowCanvasNodes\.value\.find\(\(node\) => node\.id === nodeId\)/,
+    'canvas node lookup should prefer canonical stage canvas nodes before merged root canvas fallbacks so interaction details keep pageLayoutArtifact'
+  )
+
+  assert.match(
     appVue,
-    /workflowCurrentCanvasNodes\.value\.find\(\(node\) => node\.id === workflowFullscreenNodeId\.value\)/,
-    'fullscreen lookup should use the current stage node pool so interaction details keep pageLayoutArtifact'
+    /const fullscreenCanvasNode = computed\(\(\) =>\s*canvasNodeById\(workflowFullscreenNodeId\.value\) \|\|[\s\S]*workflowFullscreenNodeOverride\.value/,
+    'fullscreen lookup should use the shared canvas node resolver before falling back to a visible node snapshot'
   )
 
   assert.match(
@@ -4322,7 +4516,7 @@ test('requirement dissection fullscreen renders nine-chapter product-analysis bl
 
   assert.match(
     canvasVue,
-    /function visibleNodeQuickActions\(node = \{\}\)[\s\S]*return \(Array\.isArray\(node\.quickActions\) \? node\.quickActions : \[\]\)[\s\S]*filter\(\(action\) => action && !isCanvasConfirmAction\(action\)\)/,
+    /function visibleNodeQuickActions\(node = \{\}\)[\s\S]*const actions = \(Array\.isArray\(node\.quickActions\) \? node\.quickActions : \[\]\)[\s\S]*filter\(\(action\) => action && !isCanvasConfirmAction\(action\)\)[\s\S]*return actions/,
     'competitive reference next actions should be visible as node quick actions instead of only static text'
   )
 
@@ -4698,6 +4892,21 @@ test('requirement dissection fullscreen uses a document-style chapter layout fro
     'matrix and table structures should render as markdown-like table blocks'
   )
   assert.match(
+    overviewTemplate,
+    /requirementBlockType\(block\) === 'risk-matrix'[\s\S]*class="requirement-risk-matrix requirement-detail-table"[\s\S]*requirementBlockHeaders\(block, fullscreenNode\)[\s\S]*requirementBlockTableStyle\(block, fullscreenNode\)/,
+    'risk-matrix blocks imported from markdown should render as markdown-like tables with dynamic columns'
+  )
+  assert.match(
+    canvasVue,
+    /function isRequirementDocumentTableBlock\(block = \{\}\)[\s\S]*question-list/,
+    'question-list blocks with backend table rows should stay in markdown-like table form instead of card rows'
+  )
+  assert.match(
+    canvasVue,
+    /function requirementBlockTableStyle\(block = \{\}, node = \{\}\)[\s\S]*requirementBlockColumnCount\(block, node\)[\s\S]*--requirement-table-columns/,
+    'requirement tables should derive their grid columns from backend headers/rows instead of a fixed four-column layout'
+  )
+  assert.match(
     canvasVue,
     /const REQUIREMENT_DOCUMENT_SECTION_DEFINITIONS = \[[\s\S]*title: '需求理解'[\s\S]*sourceRefs: \['productDefinition', 'userScenarios', 'evidenceAndAssumptions', 'riskAssessment'\][\s\S]*title: '缺口确认'[\s\S]*sourceRefs: \['gapConfirmation', 'openQuestions'\][\s\S]*title: '用户旅程分析'[\s\S]*sourceRefs: \['personaScenarioMatrix', 'userJourneyMap'\][\s\S]*title: '功能与页面拆解'[\s\S]*sourceRefs: \['functionModuleMatrix', 'designRequirementMap', 'pageHierarchyTree', 'pageCoverageMatrix', 'pageFrameContracts'\][\s\S]*title: '业务规则与状态流'[\s\S]*sourceRefs: \['businessRuleMatrix', 'permissionMatrix', 'boundaryConditionMatrix', 'stateMachineMap'\][\s\S]*title: '流程与架构'[\s\S]*sourceRefs: \['navigationStructure', 'dataFlowGraph', 'featureJumpGraph', 'exceptionRecoveryMatrix'\][\s\S]*title: '设计机会'[\s\S]*sourceRefs: \['designOpportunityMatrix', 'competitiveAnalysis'\][\s\S]*title: '优先级与排期'[\s\S]*sourceRefs: \['priorityRoadmap', 'scopeBoundary'\][\s\S]*title: '验收标准'[\s\S]*sourceRefs: \['acceptanceBasis'\]/,
     'chapter definitions should follow the PDF-style product-analysis order without duplicating artifact fields'
@@ -4716,6 +4925,43 @@ test('requirement dissection fullscreen uses a document-style chapter layout fro
     stylesSource,
     /\.requirement-pipeline-document[\s\S]*\.requirement-pipeline-section h2[\s\S]*\.requirement-document-block h3[\s\S]*\.requirement-document-code-block[\s\S]*\.requirement-document-table-block/,
     'document chapters should have markdown-reader styling for headings, code blocks, and tables'
+  )
+  assert.match(
+    stylesSource,
+    /\.requirement-detail-table article[\s\S]*grid-template-columns:\s*var\(--requirement-table-columns/,
+    'markdown-like requirement tables should use per-block dynamic columns so titles and table cells align'
+  )
+})
+
+test('requirement dissection canvas cards show artifact previews and recommended actions', () => {
+  const cardStart = canvasVue.indexOf('<article\n              v-for="node in displayNodes"')
+  const cardEnd = canvasVue.indexOf('<div v-if="shouldRenderCanvasBoard" class="workflow-canvas-zoom-controls"', cardStart)
+  const cardTemplate = canvasVue.slice(cardStart, cardEnd)
+
+  assert.match(
+    cardTemplate,
+    /isRequirementPipelineCanvasNode\(node\)[\s\S]*class="requirement-canvas-card-preview"[\s\S]*requirementCanvasPreviewItems\(node\)/,
+    'requirement dissection canvas cards should render compact previews derived from backend artifact blocks'
+  )
+  assert.match(
+    canvasVue,
+    /function requirementCanvasPreviewItems\(node = \{\}\)[\s\S]*requirementPipelineTab\(node\)[\s\S]*requirementDetailBlocks\(node\)[\s\S]*requirementCanvasBlockPreview/,
+    'requirement canvas previews should derive from the active pipeline tab and canonical detailBlocks'
+  )
+  assert.match(
+    canvasVue,
+    /function requirementCanvasRecommendedActions\(node = \{\}\)[\s\S]*补充细节[\s\S]*列出风险[\s\S]*进入交互低保/,
+    'requirement canvas cards should expose recommended Agent capability entries when backend quickActions are absent'
+  )
+  assert.match(
+    canvasVue,
+    /function visibleNodeQuickActions\(node = \{\}\)[\s\S]*if \(isRequirementPipelineCanvasNode\(node\)\)[\s\S]*requirementCanvasRecommendedActions\(node\)/,
+    'requirement recommended actions should flow through the same quick-action pipeline as other canvas card actions'
+  )
+  assert.match(
+    stylesSource,
+    /\.requirement-canvas-card-preview[\s\S]*display:\s*grid;[\s\S]*\.requirement-canvas-card-preview span/,
+    'requirement canvas previews should have dedicated compact card styling'
   )
 })
 
@@ -4784,7 +5030,7 @@ test('advanced UX markdown report sections render as markdown instead of page la
   )
 })
 
-test('advanced UX fullscreen details render the same imported markdown section as the Agent file', () => {
+test('advanced UX fullscreen details use structured blocks before raw markdown fallback', () => {
   assert.match(
     canvasVue,
     /function advancedUxRequirementNodeMarkdown\(node = \{\}\)[\s\S]*node\?\.markdown[\s\S]*advancedUxMarkdownSections/,
@@ -4792,8 +5038,18 @@ test('advanced UX fullscreen details render the same imported markdown section a
   )
   assert.match(
     canvasVue,
+    /function hasStructuredRequirementDetailBlocks\(node = \{\}\)[\s\S]*requirementDetailBlocks\(node\)[\s\S]*requirementBlockType\(block\) !== 'markdown'/,
+    'Advanced UX fullscreen detail should detect backend-imported structured blocks'
+  )
+  assert.match(
+    canvasVue,
+    /function shouldRenderAdvancedUxRequirementMarkdown\(node = \{\}\)[\s\S]*!hasStructuredRequirementDetailBlocks\(node\)/,
+    'raw Advanced UX markdown should be a fallback only when no structured blocks exist'
+  )
+  assert.match(
+    canvasVue,
     /v-if="shouldRenderAdvancedUxRequirementMarkdown\(fullscreenNode\)"[\s\S]*requirement-advanced-ux-markdown-detail[\s\S]*advancedUxRequirementNodeMarkdown\(fullscreenNode\)/,
-    'Advanced UX fullscreen detail should render one markdown section consistent with the Agent markdown file'
+    'Advanced UX fullscreen detail may still render raw markdown for legacy unstructured imports'
   )
 })
 
@@ -5005,18 +5261,136 @@ test('workflow canvas card header actions use native buttons for reliable fullsc
   )
   assert.match(
     nodeHeadActions,
-    /<button type="button" @click\.stop="\$emit\('open-agent', node\.id\)">Agent<\/button>/,
-    'canvas card Agent action should use a native button so click.stop is handled on the real DOM button'
+    /<button type="button" data-canvas-action="open-agent" :data-node-id="node\.id">Agent<\/button>/,
+    'canvas card Agent action should use a native button with stable action metadata for delegated clicks'
   )
   assert.match(
     nodeHeadActions,
-    /<button type="button" @click\.stop="\$emit\('fullscreen', node\.id\)">全屏<\/button>/,
-    'canvas card fullscreen action should use a native button so the fullscreen event always reaches App'
+    /<button type="button" data-canvas-action="open-detail" :data-node-id="node\.id">全屏<\/button>/,
+    'canvas card fullscreen action should use a native button with stable action metadata for delegated clicks'
   )
   assert.doesNotMatch(
     nodeHeadActions,
     /<BaseButton/,
     'canvas card header actions should not rely on component event fallthrough for critical clicks'
+  )
+})
+
+test('workflow canvas card header actions use delegated capture clicks on the scaled surface', () => {
+  assert.match(
+    canvasVue,
+    /class="workflow-canvas-scrollarea"[\s\S]*@wheel="handleCanvasWheel"[\s\S]*@click\.capture="handleCanvasActionClick"/,
+    'canvas scrollarea should capture card action clicks before scaled-card focus handling can swallow them'
+  )
+  assert.match(
+    canvasVue,
+    /function handleCanvasActionClick\(event\)[\s\S]*closest\?\.\('\[data-canvas-action\]\[data-node-id\]'\)[\s\S]*const node = displayNodes\.value\.find\(\(item\) => item\?\.id === nodeId\)[\s\S]*event\.stopPropagation\(\)[\s\S]*emit\('open-agent', nodeId\)[\s\S]*emit\('open-agent', \{ action: 'open-detail', nodeId, node \}\)/,
+    'delegated canvas action handler should route Agent and fullscreen buttons through the proven open-agent emit boundary'
+  )
+  assert.match(
+    appVue,
+    /@open-agent="handleWorkflowCanvasNodeAction"/,
+    'App should route delegated canvas actions through one reliable component listener'
+  )
+  assert.match(
+    appVue,
+    /function handleWorkflowCanvasNodeAction\(payload = ''\)[\s\S]*payload\?\.action === 'open-detail'[\s\S]*openWorkflowCanvasFullscreen\(payload\.node \|\| payload\.nodeId\)[\s\S]*openWorkflowAgentForNode\(payload\)/,
+    'App should split delegated canvas action payloads between Agent and fullscreen behavior'
+  )
+  assert.match(
+    appVue,
+    /const workflowFullscreenNodeOverride = ref\(null\)[\s\S]*const fullscreenCanvasNode = computed\(\(\) =>\s*canvasNodeById\(workflowFullscreenNodeId\.value\) \|\|\s*\(workflowFullscreenNodeOverride\.value\?\.id === workflowFullscreenNodeId\.value \? workflowFullscreenNodeOverride\.value : null\)\s*\)/,
+    'fullscreen detail should keep a visible child-stage node snapshot when parent current-stage lookup cannot resolve it'
+  )
+})
+
+test('workflow fullscreen model summary rendering tolerates missing aiSummary', () => {
+  assert.doesNotMatch(
+    canvasVue,
+    /v-if="aiSummary\.summary"/,
+    'fullscreen detail should not crash when historical runs have a null aiSummary prop'
+  )
+  assert.match(
+    canvasVue,
+    /v-if="aiSummary\?\.summary"/,
+    'fullscreen detail should guard optional aiSummary before reading summary'
+  )
+})
+
+test('workflow canvas card clicks are routed through an inner hitbox on the scaled surface', () => {
+  const cardTemplateStart = canvasVue.indexOf('class="canvas-node-card"')
+  const articleStart = canvasVue.lastIndexOf('<article', cardTemplateStart)
+  const cardTemplateEnd = canvasVue.indexOf('</article>', cardTemplateStart)
+  const cardTemplate = canvasVue.slice(articleStart, cardTemplateEnd)
+
+  assert.match(
+    cardTemplate,
+    /<div\s+class="canvas-node-hitbox"[\s\S]*@click="\$emit\('focus-node', node\.id\)"/,
+    'canvas cards should route focus clicks through an inner hitbox instead of the absolute-positioned surface shell'
+  )
+  assert.doesNotMatch(
+    cardTemplate.slice(0, cardTemplate.indexOf('>') + 1),
+    /@click="\$emit\('focus-node', node\.id\)"/,
+    'the absolute-positioned card shell should not compete with child buttons for click hit testing'
+  )
+  assert.match(
+    stylesSource,
+    /\.canvas-node-card[\s\S]*pointer-events:\s*none;[\s\S]*\.canvas-node-hitbox[\s\S]*pointer-events:\s*auto;/,
+    'the scaled canvas card shell should ignore pointer events while the visible hitbox receives them'
+  )
+  assert.match(
+    stylesSource,
+    /\.canvas-node-card\.active \.canvas-node-hitbox[\s\S]*border-color:\s*#222529;/,
+    'active card visuals should move to the hitbox so the positioning shell stays transparent to pointer events'
+  )
+})
+
+test('workflow Agent opens from total-flow stage canvas even when top-level canvas is absent', () => {
+  const ensureStart = appVue.indexOf('function ensureActiveWorkflowRunForAgent()')
+  const ensureEnd = appVue.indexOf('function openWorkflowAgentForNode', ensureStart)
+  const ensureSource = appVue.slice(ensureStart, ensureEnd)
+
+  assert.doesNotMatch(
+    ensureSource,
+    /if \(!workflowAnalysisResult\.value\?\.canvas\) return null/,
+    'Agent opening should not fail only because total-flow analysis stores visible nodes in stageCanvases instead of a top-level canvas'
+  )
+  assert.match(
+    ensureSource,
+    /workflowCurrentCanvasNodes\.value/,
+    'Agent fallback run should derive steps from the same current-stage node pool rendered on the canvas'
+  )
+  assert.match(
+    ensureSource,
+    /workflowCanvas\.value/,
+    'Agent fallback run should keep a canvas snapshot even when the analysis has only total-flow stage canvases'
+  )
+})
+
+test('workflow canvas actions resolve visible nodes across stage canvases after local stage switching', () => {
+  const lookupStart = appVue.indexOf('function canvasNodeById(nodeId)')
+  const lookupEnd = appVue.indexOf('function canvasNodeCenter(nodeId)', lookupStart)
+  const lookupSource = appVue.slice(lookupStart, lookupEnd)
+
+  assert.match(
+    appVue,
+    /function workflowStageCanvasNodeById\(nodeId = ''\)[\s\S]*workflowStageTotalDesignFlow\.value\?\.stageCanvases[\s\S]*Object\.values\(stageCanvases\)[\s\S]*canvas\?\.nodes\.find\(\(node\) => node\?\.id === nodeId\)/,
+    'canvas node lookup should include all backend-owned stageCanvases so child-local stage switches can still open Agent/fullscreen for the visible node'
+  )
+  assert.match(
+    lookupSource,
+    /workflowStageCanvasNodeById\(nodeId\)/,
+    'canvasNodeById should fall through to stageCanvases after checking the current stage and root canvas nodes'
+  )
+  assert.match(
+    appVue,
+    /const workflowAgentNode = computed\(\(\) =>\s*canvasNodeById\(workflowAgentNodeId\.value\) \|\|\s*activeCanvasNode\.value\s*\)/,
+    'Agent detail should use the same cross-stage resolver as the card action that opened it'
+  )
+  assert.match(
+    appVue,
+    /const fullscreenCanvasNode = computed\(\(\) =>\s*canvasNodeById\(workflowFullscreenNodeId\.value\) \|\|\s*\(workflowFullscreenNodeOverride\.value\?\.id === workflowFullscreenNodeId\.value \? workflowFullscreenNodeOverride\.value : null\)\s*\)/,
+    'fullscreen detail should render the resolved cross-stage node or the visible child-stage node snapshot after the fullscreen action sets its id'
   )
 })
 
@@ -5027,12 +5401,12 @@ test('requirement dissection detail hides duplicate raw model fields when report
 
   assert.match(
     overviewTemplate,
-    /showModelReturnSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !shouldUseRequirementReportDetail\(fullscreenNode\)/,
+    /showModelReturnSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !isStageSpecificDetail\(fullscreenNode\) && !shouldUseRequirementReportDetail\(fullscreenNode\)/,
     'requirement report detail should hide the generic model-return summary when structured report exists'
   )
   assert.match(
     overviewTemplate,
-    /showNodeOwnContentSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !hasPageLayoutArtifact\(fullscreenNode\) && !shouldUseRequirementReportDetail\(fullscreenNode\)/,
+    /showNodeOwnContentSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !isStageSpecificDetail\(fullscreenNode\) && !hasPageLayoutArtifact\(fullscreenNode\) && !shouldUseRequirementReportDetail\(fullscreenNode\)/,
     'requirement report detail should hide duplicate node content chips'
   )
   assert.match(
@@ -5236,6 +5610,24 @@ test('workflow fullscreen detail uses one left-aligned layout shell across skill
   )
 })
 
+test('fullscreen requirement document headings align with table left edge', () => {
+  assert.match(
+    stylesSource,
+    /\.requirement-pipeline-section\s*>\s*header,\s*\.requirement-pipeline-block\s*>\s*header\s*\{[\s\S]*padding-left:\s*0;[\s\S]*margin-left:\s*0;/,
+    'requirement document chapter and block headings should use the same left edge as the table block'
+  )
+  assert.match(
+    stylesSource,
+    /\.requirement-document-block h3\s*\{[\s\S]*padding-left:\s*0;[\s\S]*margin-left:\s*0;/,
+    'requirement document subheadings should not inherit any title indentation'
+  )
+  assert.match(
+    stylesSource,
+    /\.requirement-pipeline-block\.layout-table \.requirement-detail-table[\s\S]*margin-left:\s*0;[\s\S]*justify-self:\s*stretch;/,
+    'requirement detail tables should remain on the same stretched left edge as their heading'
+  )
+})
+
 test('workflow canvas supports huge workspace and trackpad pinch zoom', () => {
   assert.match(
     canvasVue,
@@ -5330,7 +5722,7 @@ test('workflow canvas fullscreen model output defaults to three lines', () => {
 test('workflow canvas hides duplicate fullscreen summaries when page layout artifact is available', () => {
   assert.match(
     canvasVue,
-    /showNodeOwnContentSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !hasPageLayoutArtifact\(fullscreenNode\)/,
+    /showNodeOwnContentSummary\(fullscreenNode\) && !isNodeActuallyLoading\(fullscreenNode\) && !isStageSpecificDetail\(fullscreenNode\) && !hasPageLayoutArtifact\(fullscreenNode\)/,
     'page layout fullscreen should not show a duplicate model-output summary above the wireframe'
   )
   assert.match(
@@ -5457,7 +5849,7 @@ test('workflow fullscreen detail stays above embedded agent and topbar but below
 
   assert.match(
     appVue,
-    /function openWorkflowCanvasFullscreen\(nodeId = '', options = \{\}\) \{\s*const targetNodeId = workflowCanvasResolvableNodeId\(nodeId\)\s*if \(!targetNodeId\) return[\s\S]{0,120}setWorkflowAgentDisplayMode\('hidden'\)\s*workflowFullscreenNodeId\.value = targetNodeId/,
+    /function openWorkflowCanvasFullscreen\(nodeId = '', options = \{\}\) \{[\s\S]*const targetNodeId = resolvedNode\?\.id \|\| candidateNode\?\.id \|\| workflowCanvasResolvableNodeId\(candidateNodeId\)[\s\S]*if \(!targetNodeId\) return[\s\S]{0,220}setWorkflowAgentDisplayMode\('hidden'\)[\s\S]*workflowFullscreenNodeId\.value = targetNodeId/,
     'opening a canvas fullscreen detail should close the side Agent before showing the fullscreen canvas'
   )
   assert.match(
@@ -6338,6 +6730,24 @@ test('advanced UX markdown report messages render as openable file cards', () =>
 
   assert.match(
     drawerVue,
+    /function markdownTableCellContent[\s\S]*sixHatMarkdownLabel/,
+    'markdown tables should decorate six-hat cells without changing backend business content'
+  )
+
+  assert.match(
+    drawerVue,
+    /sixHatMarkdownLabel[\s\S]*白帽[\s\S]*⚪[\s\S]*红帽[\s\S]*🔴[\s\S]*黑帽[\s\S]*⚫[\s\S]*黄帽[\s\S]*🟡[\s\S]*绿帽[\s\S]*🟢[\s\S]*蓝帽[\s\S]*🔵/,
+    'six-hat review tables should show the colored hat markers users expect in markdown previews'
+  )
+
+  assert.match(
+    stylesSource,
+    /\.agent-markdown-file-preview\s+\.agent-markdown-pre[\s\S]*border:\s*1px\s+solid[\s\S]*background:\s*#f8fafc/,
+    'Advanced UX markdown file preview should wrap flowcharts and wireframes in a visible preformatted document block'
+  )
+
+  assert.match(
+    drawerVue,
     /const heading = raw\.match\(\/\^\(#\{1,6\}\)\\s\+\(\.\+\)\$\/\)/,
     'the markdown parser should preserve H4 feature headings from the UX output specification'
   )
@@ -6387,8 +6797,14 @@ test('advanced UX next stage bypasses generic Agent summary and old page-layout 
 
   assert.match(
     appVue,
-    /function workflowStageAdvanceUserMessage\(content = ''\)[\s\S]*进入下一阶段[\s\S]*async function confirmAdvancedUxStageWithoutGenericAgentSummary[\s\S]*const stageAdvanceUserContent = workflowStageAdvanceUserMessage\(action\)[\s\S]*appendWorkflowAgentMessage\('user', stageAdvanceUserContent,[\s\S]*scopeId: confirmedNextStageId \|\| currentStageId/,
-    'clicking stage next should create a visible user-facing reply in the next-stage Agent scope that says 进入下一阶段'
+    /function appendWorkflowStageAdvanceUserMessage\([\s\S]*workflowStageAdvanceUserMessage\(content\)[\s\S]*appendWorkflowAgentMessage\('user', displayContent,[\s\S]*action:\s*'stage-confirm-next'/,
+    'clicking stage next should create a visible user-facing reply that says 进入下一阶段'
+  )
+
+  assert.match(
+    appVue,
+    /async function confirmAdvancedUxStageWithoutGenericAgentSummary[\s\S]*const stageAdvanceClientMessageId = appendWorkflowStageAdvanceUserMessage\(\{[\s\S]*scopeIds:\s*\[currentStageId,\s*confirmedNextStageId \|\| nextStageId\][\s\S]*\}\)[\s\S]*appendWorkflowAgentMessage\('assistant'/,
+    'Advanced UX next should write the user stage-advance message before the system confirmation and mirror it into the next-stage visible scope'
   )
 
   assert.match(
@@ -6401,6 +6817,51 @@ test('advanced UX next stage bypasses generic Agent summary and old page-layout 
     appVue,
     /function isWorkflowAgentWorkbenchStageId\(stageId = ''\)[\s\S]*\['requirement-dissection',\s*'interaction-lofi'\]/,
     'interaction-lofi must use the stage Agent scope so entering the next stage creates stage artifacts instead of a page-layout chat reply'
+  )
+})
+
+test('top-level stage next mirrors the user instruction into the next visible Agent scope', () => {
+  const summaryStart = appVue.indexOf('async function confirmWorkflowStageWithAgentSummary')
+  const summaryEnd = appVue.indexOf('function isWorkflowAgentCanvasAdviceQuickReply', summaryStart)
+  const summarySource = appVue.slice(summaryStart, summaryEnd)
+
+  assert.match(
+    summarySource,
+    /const stageAdvanceClientMessageId = appendWorkflowStageAdvanceUserMessage\(\{[\s\S]*content:\s*action[\s\S]*currentStageId[\s\S]*nextStageId[\s\S]*scopeIds:\s*confirmedNextStageId !== targetScopeId \? \[confirmedNextStageId\] : \[\][\s\S]*\}\)/,
+    'top-level next should mirror the user instruction into the newly visible next-stage Agent scope'
+  )
+
+  assert.match(
+    summarySource,
+    /await sendWorkflowAgentMessage\(workflowStageAdvanceUserMessage\(action\), \{[\s\S]*clientMessageId:\s*stageAdvanceClientMessageId/,
+    'the current-stage Agent summary request should reuse the same client message id as the visible mirrored user instruction'
+  )
+})
+
+test('Agent next-stage replies outside the stage workbench switch the canvas stage', () => {
+  const sendStart = appVue.indexOf('async function sendWorkflowAgentMessage')
+  const sendEnd = appVue.indexOf('function useWorkflowAgentQuickReply', sendStart)
+  const sendSource = appVue.slice(sendStart, sendEnd)
+  const quickStart = appVue.indexOf('function useWorkflowAgentQuickReply')
+  const quickEnd = appVue.indexOf('if (isWorkflowAgentCanvasAdviceQuickReply(content))', quickStart)
+  const quickSource = appVue.slice(quickStart, quickEnd)
+
+  assert.match(
+    appVue,
+    /function isWorkflowStageAdvanceInput\(content = ''\)[\s\S]*进入下一阶段/,
+    'stage-advance detection should include the visible Agent reply label 进入下一阶段'
+  )
+
+  assert.match(
+    sendSource,
+    /isWorkflowStageAdvanceInput\(content\)[\s\S]*workflowCanMoveToNextStage\.value[\s\S]*confirmWorkflowStageWithAgentSummary\(\{[\s\S]*stageId:\s*currentStageId[\s\S]*nextStageId:\s*nextStage\?\.id \|\| ''[\s\S]*mode:\s*'stage-agent-confirm-next'/,
+    'typed Agent stage-advance input outside the stage workbench should route through the same stage progression flow'
+  )
+
+  assert.match(
+    quickSource,
+    /isWorkflowStageAdvanceInput\(normalizedContent\)[\s\S]*workflowCanMoveToNextStage\.value[\s\S]*runWorkflowNodeQuickAction\(\{[\s\S]*stageId:\s*currentStageId[\s\S]*nextStageId:\s*nextStage\?\.id \|\| ''[\s\S]*mode:\s*'stage-agent-confirm-next'/,
+    'Agent quick reply stage-advance actions outside the stage workbench should switch the canvas stage immediately'
   )
 })
 
