@@ -1405,6 +1405,9 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         featureEvents: input.featureEvents || input.feature_events,
         sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
         monitorEvidence: input.monitorEvidence || input.monitor_evidence,
+        sourceRecordId: input.sourceRecordId || input.source_record_id || '',
+        sourceKind: input.sourceKind || input.source_kind || '',
+        sourceTitle: input.sourceTitle || input.source_title || '',
         createdAt: nowText,
         updatedAt: nowText
       })
@@ -1546,7 +1549,10 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             title: response.title || analysisRecordTitle(input),
             summary: response.summary,
             markdown: response.markdown,
-            durationMs: response.durationMs
+            durationMs: response.durationMs,
+            sourceRecordId: input.sourceRecordId || '',
+            sourceKind: input.sourceKind || '',
+            sourceTitle: input.sourceTitle || ''
           })
         } else if (response.markdown) {
           await upsertRecord(projectId, {
@@ -1568,6 +1574,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             durationMs: response.durationMs,
             sourceRecordId: input.sourceRecordId || '',
             sourceKind: input.sourceKind || '',
+            sourceTitle: input.sourceTitle || '',
             createdAt: new Date().toISOString()
           })
         }

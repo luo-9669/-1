@@ -1105,7 +1105,7 @@ test('requirement dissection uses the side agent while keeping a stable stage sc
 
   assert.match(
     appVue,
-    /const workflowUsesStageAgentScope = computed\(\(\) =>[\s\S]*isWorkflowAgentWorkbenchStageId\(workflowCurrentStageId\.value\)/,
+    /const workflowUsesStageAgentScope = computed\(\(\) =>[\s\S]*isWorkflowAgentStageSessionScopeId\(workflowCurrentStageId\.value\)/,
     'stage Agent session scope should be independent from the embedded display mode'
   )
 
@@ -1642,6 +1642,12 @@ test('UI visual canvas cards render image canvas without duplicate inline genera
     'UI visual cards should show an inline image canvas and generation states'
   )
 
+  assert.match(
+    canvasVue,
+    /function isVisualGalleryDetail\(node = \{\}\)[\s\S]*node\?\.detailLayout === 'visual-gallery'[\s\S]*node\?\.stageId === 'ui-visual'[\s\S]*String\(node\?\.id \|\| ''\)\.startsWith\('ui-'\)[\s\S]*node\?\.visualPreview[\s\S]*node\?\.visualBrief/,
+    'UI visual nodes, including failed historical nodes, should never fall back to generic summary cards'
+  )
+
   assert.doesNotMatch(
     cardSource,
     /class="visual-canvas-card-actions"[\s\S]*variant="primary"[\s\S]*runCanvasGenerationAction\(node, action\)/,
@@ -2141,6 +2147,52 @@ test('UI visual artifact generation appends image result into the same Agent con
   )
 })
 
+test('HTML stage generation uses workflow stage job polling without restored page asset creation', () => {
+  const apiSource = readFileSync(new URL('../frontend/src/services/api.js', import.meta.url), 'utf8')
+  const ensureStart = appVue.indexOf('async function ensureWorkflowHtmlStageGeneration')
+  const ensureEnd = appVue.indexOf('function workflowStageConfirmation', ensureStart)
+  const htmlStageSource = appVue.slice(ensureStart, ensureEnd)
+  const selectStart = appVue.indexOf('function selectWorkflowStage')
+  const selectEnd = appVue.indexOf('function canAdvanceToConfirmedNextStage', selectStart)
+  const selectSource = appVue.slice(selectStart, selectEnd)
+  const scheduleStart = appVue.indexOf('function scheduleWorkflowStageAutoGeneration')
+  const scheduleEnd = appVue.indexOf('function persistWorkflowActiveSlice', scheduleStart)
+  const scheduleSource = appVue.slice(scheduleStart, scheduleEnd)
+
+  assert.match(apiSource, /generateHtmlStageArtifacts\(config,\s*runId,\s*payload = \{\}/)
+  assert.match(apiSource, /\/api\/workspace\/workflow-runs\/\$\{encodeURIComponent\(runId\)\}\/stages\/html-output\/generate/)
+  assert.match(htmlStageSource, /api\.workflows\.generateHtmlStageArtifacts/)
+  assert.match(htmlStageSource, /timeoutMs:\s*workflowAgentRequestTimeoutMs\(\)/)
+  assert.match(htmlStageSource, /scheduleWorkflowHtmlStagePolling\(run\.id\)/)
+  assert.match(appVue, /workflowHtmlStagePollTimer[\s\S]*15000/)
+  assert.match(appVue, /api\.workspace\.getWorkflowRun\(state\.apiConfig,\s*runId\)/)
+  assert.match(appVue, /function isManualArtifactStageId\(stageId = ''\)[\s\S]*'ui-visual'[\s\S]*'html-output'[\s\S]*'vue-output'/)
+  assert.doesNotMatch(selectSource, /stageId === 'html-output'[\s\S]*ensureWorkflowHtmlStageGeneration\(\)/)
+  assert.match(scheduleSource, /if \(isManualArtifactStageId\(stageId\)\) return/)
+  assert.equal(
+    [...appVue.matchAll(/ensureWorkflowHtmlStageGeneration\(/g)].length,
+    1,
+    'HTML stage generation helper should not be invoked automatically by stage selection, scheduling, or run opening'
+  )
+  assert.doesNotMatch(htmlStageSource, /restoredPage|upsertRestoredPageFromBackend|selectedRestoredPageId/)
+})
+
+test('manual artifact stages open as empty canvases and do not auto-generate on stage selection', () => {
+  const renderedStart = appVue.indexOf('function workflowStageCanvasHasRenderedContent')
+  const renderedEnd = appVue.indexOf('function inferredWorkflowStageStatuses', renderedStart)
+  const renderedSource = appVue.slice(renderedStart, renderedEnd)
+  const shouldStart = appVue.indexOf('function shouldAutoGenerateWorkflowStage')
+  const shouldEnd = appVue.indexOf('function workflowHtmlNodeHasGeneratedCode', shouldStart)
+  const shouldSource = appVue.slice(shouldStart, shouldEnd)
+  const canSelectStart = appVue.indexOf('function canSelectWorkflowStage')
+  const canSelectEnd = appVue.indexOf('function canAutoGenerateWorkflowStage', canSelectStart)
+  const canSelectSource = appVue.slice(canSelectStart, canSelectEnd)
+
+  assert.match(renderedSource, /if \(isManualArtifactStageId\(stageId\)\) return true/)
+  assert.match(shouldSource, /if \(isManualArtifactStageId\(stageId\)\) return false/)
+  assert.match(canSelectSource, /workflowStageCanvasHasRenderedContent/)
+})
+
 test('UI visual artifact generation writes request and result messages to the visible Agent scope', () => {
   const generationStart = appVue.indexOf('async function runWorkflowGenerationAction')
   const generationEnd = appVue.indexOf('async function applyWorkflowAgentSupplement', generationStart)
@@ -2212,7 +2264,7 @@ test('opening a generated UI visual node repairs empty Agent image artifact mess
 
   assert.match(
     appVue,
-    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*const artifactScopeId = workflowGenerationAgentScopeId\(targetNodeId\)[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId\)[\s\S]*ensureWorkflowAgentVisualArtifactMessage\(targetNodeId, \{ scopeId: artifactScopeId \}\)[\s\S]*openWorkflowAgent\(\)/,
+    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*const artifactScopeId = workflowGenerationAgentScopeId\(targetNodeId\)[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId, \{ scopeId: artifactScopeId \}\)[\s\S]*ensureWorkflowAgentVisualArtifactMessage\(targetNodeId, \{ scopeId: artifactScopeId \}\)[\s\S]*openWorkflowAgent\(\)/,
     'node Agent entry should sync generated visual artifacts into the visible stage Agent session'
   )
 })
@@ -2284,6 +2336,24 @@ test('HTML and Vue artifact generation appends code result into the same Agent c
     'successful generation should append code artifacts through the existing Agent code-card renderer and keep image artifacts on the visual path'
   )
 
+  assert.match(
+    appVue,
+    /function isWorkflowAgentStageSessionScopeId\(stageId = ''\)[\s\S]*'html-output'[\s\S]*'vue-output'/,
+    'HTML/Vue stages should use one visible stage Agent session instead of hiding generation messages in node-scoped sessions'
+  )
+
+  assert.match(
+    appVue,
+    /function workflowGenerationAgentScopeId\(nodeId = ''\)[\s\S]*workflowUsesStageAgentScope\.value[\s\S]*workflowCurrentStageId\.value/,
+    'HTML/Vue generation requests should resolve to the visible stage Agent scope when that stage is active'
+  )
+
+  assert.match(
+    appVue,
+    /function ensureWorkflowAgentCodeArtifactMessage\(nodeId = '', options = \{\}\)[\s\S]*const scopeId = options\.scopeId \|\| node\.id[\s\S]*ensureWorkflowAgentSession\(scopeId\)[\s\S]*appendWorkflowGeneratedCodeAgentMessage\(node, \{\}, \{ scopeId \}\)/,
+    'opening an HTML/Vue node should repair generated code messages into the visible stage Agent scope'
+  )
+
   assert.doesNotMatch(
     generationSource,
     /workflowFullscreenNodeId\.value = nodeId/,
@@ -2297,16 +2367,46 @@ test('HTML and Vue artifact generation appends code result into the same Agent c
   )
 })
 
-test('opening a generated HTML or Vue node syncs its code artifact into the node-scoped Agent session', () => {
+test('Agent HTML and Vue recommendation chips enter the shared code generation conversation', () => {
+  const quickReplyStart = appVue.indexOf('function useWorkflowAgentQuickReply')
+  const quickReplyEnd = appVue.indexOf('function openWorkflowAgentHistory', quickReplyStart)
+  const quickReplySource = appVue.slice(quickReplyStart, quickReplyEnd)
+
   assert.match(
     appVue,
-    /function ensureWorkflowAgentCodeArtifactMessage\(nodeId = ''\)[\s\S]*const node = canvasNodeById\(nodeId\)[\s\S]*workflowCodeArtifactSource\(node\)[\s\S]*appendWorkflowGeneratedCodeAgentMessage\(node/,
-    'opening an existing generated code node should ensure the node-scoped Agent has its code artifact message'
+    /function workflowAgentCodeGenerationQuickAction\(content = '', sourceMessage = null\)[\s\S]*isWorkflowAgentCodeGenerationQuickReply\(normalizedContent\)[\s\S]*findWorkflowGenerationTargetNode/,
+    'Agent recommendation buttons such as 生成 HTML/Vue should resolve a backend-owned code target node'
   )
 
   assert.match(
     appVue,
-    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*const targetNodeId = workflowCanvasResolvableNodeId\(nodeId\)[\s\S]*workflowAgentNodeId\.value = targetNodeId[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId\)[\s\S]*openWorkflowAgent\(\)/,
+    /function findWorkflowGenerationTargetNode\(sourceNode = \{\}, targetStageId = ''\)[\s\S]*workflowStageNodesForId\(targetStageId\)[\s\S]*workflowGenerationNodeIdentityKeys/,
+    'code generation recommendations should map UI visual messages to the matching HTML/Vue stage node by page identity'
+  )
+
+  assert.match(
+    quickReplySource,
+    /const codeGenerationPayload = workflowAgentCodeGenerationQuickAction\(content, sourceMessage\)[\s\S]*runWorkflowGenerationAction\(codeGenerationPayload\)/,
+    'useWorkflowAgentQuickReply should route code recommendations into runWorkflowGenerationAction so user and pending messages appear'
+  )
+
+  assert.match(
+    quickReplySource,
+    /selectWorkflowStage\(codeGenerationPayload\.stageId\)/,
+    'clicking an HTML/Vue recommendation from another stage should switch to the target manual artifact stage before generation'
+  )
+})
+
+test('opening a generated HTML or Vue node syncs its code artifact into the visible Agent session', () => {
+  assert.match(
+    appVue,
+    /function ensureWorkflowAgentCodeArtifactMessage\(nodeId = '', options = \{\}\)[\s\S]*const node = canvasNodeById\(nodeId\)[\s\S]*workflowCodeArtifactSource\(node\)[\s\S]*appendWorkflowGeneratedCodeAgentMessage\(node, \{\}, \{ scopeId \}\)/,
+    'opening an existing generated code node should ensure the visible Agent scope has its code artifact message'
+  )
+
+  assert.match(
+    appVue,
+    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*const targetNodeId = workflowCanvasResolvableNodeId\(nodeId\)[\s\S]*workflowAgentNodeId\.value = targetNodeId[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId, \{ scopeId: artifactScopeId \}\)[\s\S]*openWorkflowAgent\(\)/,
     'Agent node entry should sync generated code before opening, without creating a stage-specific Agent implementation'
   )
 })
@@ -2323,6 +2423,16 @@ test('HTML and Vue output nodes start without fake placeholder source code', () 
     /根据交互低保与 UI 视觉生成 HTML 页面|根据交互低保与 UI 视觉生成 Vue 页面/,
     'placeholder code shells should not be used as initial backend-owned code artifacts'
   )
+})
+
+test('HTML and Vue pending cards expose generation actions from backend-owned generationActions', () => {
+  const actionStart = canvasVue.indexOf('function visibleNodeQuickActions')
+  const actionEnd = canvasVue.indexOf('function visualQuickGenerationAction', actionStart)
+  const actionSource = canvasVue.slice(actionStart, actionEnd)
+
+  assert.match(actionSource, /if \(isPreviewCodeDetail\(node\) && generationActions\(node\)\.length\)/)
+  assert.match(actionSource, /codeQuickGenerationAction\(node, action\)/)
+  assert.match(actionSource, /fallbackAction = generationActions\(node\)\[0\]\?\.label/)
 })
 
 test('Agent visual generation pending message shows an image placeholder artifact', () => {

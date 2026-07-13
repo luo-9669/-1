@@ -800,6 +800,13 @@ export const api = {
         timeoutMs: options.timeoutMs ?? 0
       })
     },
+    generateHtmlStageArtifacts(config, runId, payload = {}, options = {}) {
+      return request(config.apiBaseUrl, `/api/workspace/workflow-runs/${encodeURIComponent(runId)}/stages/html-output/generate`, {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, timeoutMs: options.timeoutMs ?? payload.timeoutMs ?? 0 }),
+        timeoutMs: options.timeoutMs ?? 0
+      })
+    },
     completeRun(config, runId, payload = {}) {
       return request(config.apiBaseUrl, `/api/workflows/runs/${runId}/complete`, {
         method: 'POST',

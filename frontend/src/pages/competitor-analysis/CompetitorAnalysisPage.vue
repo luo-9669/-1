@@ -182,10 +182,85 @@
               <h4>页面交互框架与说明</h4>
             </div>
             <section class="competitor-analysis-markdown">
-              <template v-for="(block, index) in markdownBlocksFor(selectedInteractionArtifacts.documentMarkdown)" :key="markdownBlockKey(block, index)">
+              <template v-for="(block, index) in enhancedMarkdownBlocksFor(selectedInteractionArtifacts.documentMarkdown)" :key="markdownBlockKey(block, index)">
                 <h1 v-if="block.type === 'heading' && block.level === 1">{{ block.text }}</h1>
                 <h2 v-else-if="block.type === 'heading' && block.level === 2">{{ block.text }}</h2>
                 <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
+                <section v-else-if="block.type === 'flow-table'" class="competitor-analysis-flow-timeline" aria-label="页面流转">
+                  <article v-for="(step, stepIndex) in flowRowsForBlock(block)" :key="`${step.id || 'flow'}-${stepIndex}`">
+                    <div class="competitor-analysis-flow-main">
+                      <span class="competitor-analysis-flow-id">{{ step.id || `S${stepIndex + 1}` }}</span>
+                      <strong>{{ step.from || '未标注起点' }}</strong>
+                      <span aria-hidden="true">→</span>
+                      <strong>{{ step.to || '未标注终点' }}</strong>
+                    </div>
+                    <dl>
+                      <div v-if="step.action">
+                        <dt>触发</dt>
+                        <dd>{{ step.action }}</dd>
+                      </div>
+                      <div v-if="step.condition">
+                        <dt>条件</dt>
+                        <dd>{{ step.condition }}</dd>
+                      </div>
+                      <div v-if="step.confidence">
+                        <dt>证据</dt>
+                        <dd>{{ step.confidence }}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                </section>
+                <section v-else-if="block.type === 'state-machine-table'" class="competitor-analysis-state-board" aria-label="状态机">
+                  <article v-for="(transition, transitionIndex) in stateRowsForBlock(block)" :key="`${transition.id || 'state'}-${transitionIndex}`">
+                    <div class="competitor-analysis-state-main">
+                      <strong>{{ transition.from || '未标注当前状态' }}</strong>
+                      <span aria-hidden="true">→</span>
+                      <strong>{{ transition.to || '未标注目标状态' }}</strong>
+                    </div>
+                    <p v-if="transition.condition">{{ transition.condition }}</p>
+                    <div class="competitor-analysis-state-tags">
+                      <span v-if="transition.id">{{ transition.id }}</span>
+                      <span v-if="transition.reversible">可逆：{{ transition.reversible }}</span>
+                      <span v-if="transition.evidence">证据：{{ transition.evidence }}</span>
+                    </div>
+                  </article>
+                </section>
+                <section v-else-if="block.type === 'page-overview-table'" class="competitor-analysis-page-card-grid" aria-label="页面框架">
+                  <article v-for="(page, pageIndex) in pageRowsForBlock(block)" :key="`${page.id || page.name || 'page'}-${pageIndex}`">
+                    <header>
+                      <span>{{ page.id || `P${pageIndex + 1}` }}</span>
+                      <strong>{{ page.name || '未命名页面' }}</strong>
+                    </header>
+                    <dl>
+                      <div v-if="page.type">
+                        <dt>类型</dt>
+                        <dd>{{ page.type }}</dd>
+                      </div>
+                      <div v-if="page.purpose">
+                        <dt>目的</dt>
+                        <dd>{{ page.purpose }}</dd>
+                      </div>
+                      <div v-if="page.mainArea">
+                        <dt>主要区域</dt>
+                        <dd>{{ page.mainArea }}</dd>
+                      </div>
+                      <div v-if="page.primaryAction">
+                        <dt>关键操作</dt>
+                        <dd>{{ page.primaryAction }}</dd>
+                      </div>
+                      <div v-if="page.evidence">
+                        <dt>证据</dt>
+                        <dd>{{ page.evidence }}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                </section>
+                <section v-else-if="block.type === 'architecture-map'" class="competitor-analysis-architecture-map" aria-label="信息架构">
+                  <article v-for="(item, itemIndex) in architectureItemsForBlock(block)" :key="`${item.title || 'architecture'}-${itemIndex}`">
+                    <strong>{{ item.title }}</strong>
+                    <p v-if="item.detail">{{ item.detail }}</p>
+                  </article>
+                </section>
                 <ul v-else-if="block.type === 'list' && !block.ordered">
                   <li v-for="item in block.items" :key="item">{{ item }}</li>
                 </ul>
@@ -262,10 +337,85 @@
           </article>
         </section>
         <section v-else-if="selectedDetailMarkdown" class="competitor-analysis-markdown">
-          <template v-for="(block, index) in markdownBlocksFor(selectedDetailMarkdown)" :key="markdownBlockKey(block, index)">
+          <template v-for="(block, index) in enhancedMarkdownBlocksFor(selectedDetailMarkdown)" :key="markdownBlockKey(block, index)">
             <h1 v-if="block.type === 'heading' && block.level === 1">{{ block.text }}</h1>
             <h2 v-else-if="block.type === 'heading' && block.level === 2">{{ block.text }}</h2>
             <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
+            <section v-else-if="block.type === 'flow-table'" class="competitor-analysis-flow-timeline" aria-label="页面流转">
+              <article v-for="(step, stepIndex) in flowRowsForBlock(block)" :key="`${step.id || 'flow'}-${stepIndex}`">
+                <div class="competitor-analysis-flow-main">
+                  <span class="competitor-analysis-flow-id">{{ step.id || `S${stepIndex + 1}` }}</span>
+                  <strong>{{ step.from || '未标注起点' }}</strong>
+                  <span aria-hidden="true">→</span>
+                  <strong>{{ step.to || '未标注终点' }}</strong>
+                </div>
+                <dl>
+                  <div v-if="step.action">
+                    <dt>触发</dt>
+                    <dd>{{ step.action }}</dd>
+                  </div>
+                  <div v-if="step.condition">
+                    <dt>条件</dt>
+                    <dd>{{ step.condition }}</dd>
+                  </div>
+                  <div v-if="step.confidence">
+                    <dt>证据</dt>
+                    <dd>{{ step.confidence }}</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+            <section v-else-if="block.type === 'state-machine-table'" class="competitor-analysis-state-board" aria-label="状态机">
+              <article v-for="(transition, transitionIndex) in stateRowsForBlock(block)" :key="`${transition.id || 'state'}-${transitionIndex}`">
+                <div class="competitor-analysis-state-main">
+                  <strong>{{ transition.from || '未标注当前状态' }}</strong>
+                  <span aria-hidden="true">→</span>
+                  <strong>{{ transition.to || '未标注目标状态' }}</strong>
+                </div>
+                <p v-if="transition.condition">{{ transition.condition }}</p>
+                <div class="competitor-analysis-state-tags">
+                  <span v-if="transition.id">{{ transition.id }}</span>
+                  <span v-if="transition.reversible">可逆：{{ transition.reversible }}</span>
+                  <span v-if="transition.evidence">证据：{{ transition.evidence }}</span>
+                </div>
+              </article>
+            </section>
+            <section v-else-if="block.type === 'page-overview-table'" class="competitor-analysis-page-card-grid" aria-label="页面框架">
+              <article v-for="(page, pageIndex) in pageRowsForBlock(block)" :key="`${page.id || page.name || 'page'}-${pageIndex}`">
+                <header>
+                  <span>{{ page.id || `P${pageIndex + 1}` }}</span>
+                  <strong>{{ page.name || '未命名页面' }}</strong>
+                </header>
+                <dl>
+                  <div v-if="page.type">
+                    <dt>类型</dt>
+                    <dd>{{ page.type }}</dd>
+                  </div>
+                  <div v-if="page.purpose">
+                    <dt>目的</dt>
+                    <dd>{{ page.purpose }}</dd>
+                  </div>
+                  <div v-if="page.mainArea">
+                    <dt>主要区域</dt>
+                    <dd>{{ page.mainArea }}</dd>
+                  </div>
+                  <div v-if="page.primaryAction">
+                    <dt>关键操作</dt>
+                    <dd>{{ page.primaryAction }}</dd>
+                  </div>
+                  <div v-if="page.evidence">
+                    <dt>证据</dt>
+                    <dd>{{ page.evidence }}</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+            <section v-else-if="block.type === 'architecture-map'" class="competitor-analysis-architecture-map" aria-label="信息架构">
+              <article v-for="(item, itemIndex) in architectureItemsForBlock(block)" :key="`${item.title || 'architecture'}-${itemIndex}`">
+                <strong>{{ item.title }}</strong>
+                <p v-if="item.detail">{{ item.detail }}</p>
+              </article>
+            </section>
             <ul v-else-if="block.type === 'list' && !block.ordered">
               <li v-for="item in block.items" :key="item">{{ item }}</li>
             </ul>
@@ -900,6 +1050,7 @@ function quickAnalyzeSelectedReport() {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   })
+  markRecordRunning(created.id)
   closeRecord()
   setActiveKind('gap')
   void runGapAnalysis(created, draft)
@@ -911,14 +1062,24 @@ async function runGapAnalysis(runningRecord = {}, draft = {}) {
   statusMessage.value = '正在生成机会点分析...'
   try {
     const createResult = await api.competitorAnalysis.createRecord(props.apiConfig, draft)
-    // 合并记录，保留sourceContent（createRecord不会返回它）
-    const recordToRun = createResult.ok
-      ? { ...runningRecord, ...createResult.data.record, sourceContent: draft.sourceContent, sourceRecordId: draft.sourceRecordId, sourceKind: draft.sourceKind, sourceTitle: draft.sourceTitle }
+    const createdRecord = createResult.ok
+      ? {
+        ...runningRecord,
+        ...createResult.data.record,
+        status: 'running',
+        statusLabel: '分析中',
+        summary: createResult.data.record?.summary || runningRecord.summary,
+        sourceContent: draft.sourceContent,
+        sourceRecordId: draft.sourceRecordId,
+        sourceKind: draft.sourceKind,
+        sourceTitle: draft.sourceTitle
+      }
       : runningRecord
-    const result = await api.competitorAnalysis.run(props.apiConfig, requestBodyForRecord(recordToRun))
+    mergeRecord(createdRecord)
+    const result = await api.competitorAnalysis.run(props.apiConfig, requestBodyForRecord(createdRecord))
     if (!result.ok) {
       mergeRecord({
-        ...runningRecord,
+        ...createdRecord,
         status: 'failed',
         statusLabel: '未完成',
         summary: result.message || '机会点分析暂时无法完成，请稍后重试。',
@@ -930,10 +1091,10 @@ async function runGapAnalysis(runningRecord = {}, draft = {}) {
       return
     }
     mergeRecord({
-      ...runningRecord,
+      ...createdRecord,
       status: result.data?.ok ? 'succeeded' : 'failed',
       statusLabel: result.data?.statusLabel || (result.data?.ok ? '已生成' : '未完成'),
-      title: result.data?.title || runningRecord.title,
+      title: result.data?.title || createdRecord.title,
       summary: result.data?.summary || '机会点分析已生成。',
       markdown: result.data?.markdown || '',
       updatedAt: new Date().toISOString()
@@ -1066,6 +1227,30 @@ function mergeRecord(record = {}) {
   return nextRecord
 }
 
+function mergeBackendRecordsWithLocalRunning(records = []) {
+  const backendRecords = records.map((record) => {
+    const localRecord = analysisRecords.value.find((item) => item.id === record.id)
+    if (!localRecord || !runningRecordIds.value.has(record.id)) return record
+    return normalizeRecord({
+      ...localRecord,
+      ...record,
+      status: record.status === 'pending' && localRecord.status === 'running' ? 'running' : record.status,
+      statusLabel: record.status === 'pending' && localRecord.status === 'running' ? '分析中' : record.statusLabel,
+      sourceContent: localRecord.sourceContent || record.sourceContent,
+      sourceRecordId: record.sourceRecordId || localRecord.sourceRecordId,
+      sourceKind: record.sourceKind || localRecord.sourceKind,
+      sourceTitle: record.sourceTitle || localRecord.sourceTitle
+    })
+  })
+  const backendIds = new Set(backendRecords.map((record) => record.id))
+  const localRunningRecords = analysisRecords.value.filter((record) =>
+    runningRecordIds.value.has(record.id) &&
+    record.projectId === effectiveProjectId.value &&
+    !backendIds.has(record.id)
+  )
+  return [...localRunningRecords, ...backendRecords]
+}
+
 async function loadCompetitors() {
   const requestProjectId = effectiveProjectId.value
   const result = await api.competitors.list(props.apiConfig, requestProjectId)
@@ -1082,7 +1267,7 @@ async function loadRecords() {
   })
   if (requestProjectId !== effectiveProjectId.value) return
   if (result.ok && Array.isArray(result.data?.records)) {
-    analysisRecords.value = result.data.records.map(normalizeRecord)
+    analysisRecords.value = mergeBackendRecordsWithLocalRunning(result.data.records.map(normalizeRecord))
     persistCachedAnalysis()
   }
 }
@@ -1649,6 +1834,162 @@ function markdownBlocksFor(markdown = '') {
     blocks.push({ type: 'paragraph', text: cleanMarkdownText(paragraph.join(' ')) })
   }
   return blocks
+}
+
+function normalizeMarkdownHeader(value = '') {
+  return cleanMarkdownText(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+function headingContextText(headings = []) {
+  return headings.filter(Boolean).join(' / ')
+}
+
+function markdownHeaderMatches(header = '', aliases = []) {
+  const normalizedHeader = normalizeMarkdownHeader(header)
+  return aliases.some((alias) => {
+    const normalizedAlias = normalizeMarkdownHeader(alias)
+    return normalizedHeader === normalizedAlias ||
+      normalizedHeader.includes(normalizedAlias) ||
+      normalizedAlias.includes(normalizedHeader)
+  })
+}
+
+function markdownHeadingMatches(headingContext = '', aliases = []) {
+  const normalizedContext = normalizeMarkdownHeader(headingContext)
+  return aliases.some((alias) => normalizedContext.includes(normalizeMarkdownHeader(alias)))
+}
+
+function markdownHeaderIndex(headers = [], aliases = []) {
+  return headers.findIndex((header) => markdownHeaderMatches(header, aliases))
+}
+
+function markdownHasHeader(headers = [], aliases = []) {
+  return markdownHeaderIndex(headers, aliases) >= 0
+}
+
+function classifyMarkdownTableBlock(block = {}, headingContext = '') {
+  const headers = block.headers || []
+  if (
+    markdownHasHeader(headers, ['S编号', '步骤编号', '编号']) &&
+    markdownHasHeader(headers, ['起点', '起始页面', '源页面']) &&
+    markdownHasHeader(headers, ['终点', '目标页面', '去向'])
+  ) {
+    return 'flow-table'
+  }
+  if (
+    markdownHasHeader(headers, ['当前状态', '当前状态ST编号', '起始状态', '起始状态ST编号']) &&
+    markdownHasHeader(headers, ['目标状态', '目标状态ST编号']) &&
+    markdownHasHeader(headers, ['转换条件', '触发条件', '条件'])
+  ) {
+    return 'state-machine-table'
+  }
+  if (
+    markdownHasHeader(headers, ['P编号', '页面编号', '编号']) &&
+    markdownHasHeader(headers, ['页面名称', '页面弹窗名称', '页面/弹窗名称', '名称']) &&
+    (markdownHasHeader(headers, ['目的', '页面目的', '定位']) || markdownHeadingMatches(headingContext, ['页面总览', '页面框架']))
+  ) {
+    return 'page-overview-table'
+  }
+  if (markdownHeadingMatches(headingContext, ['信息架构']) && headers.length) {
+    return 'architecture-map'
+  }
+  return 'table'
+}
+
+function enhancedMarkdownBlocksFor(markdown = '') {
+  const blocks = markdownBlocksFor(markdown)
+  const headingStack = []
+  return blocks.map((block) => {
+    if (block.type === 'heading') {
+      headingStack[block.level - 1] = block.text
+      headingStack.length = block.level
+      return block
+    }
+    const headingContext = headingContextText(headingStack)
+    if (block.type === 'table') {
+      return {
+        ...block,
+        type: classifyMarkdownTableBlock(block, headingContext),
+        headingContext
+      }
+    }
+    if (
+      markdownHeadingMatches(headingContext, ['信息架构']) &&
+      ['list', 'code'].includes(block.type)
+    ) {
+      return {
+        ...block,
+        type: 'architecture-map',
+        headingContext
+      }
+    }
+    return { ...block, headingContext }
+  })
+}
+
+function markdownCell(block = {}, row = [], aliases = []) {
+  const index = markdownHeaderIndex(block.headers || [], aliases)
+  if (index < 0) return ''
+  return cleanMarkdownText(row[index] || '')
+}
+
+function flowRowsForBlock(block = {}) {
+  return (block.rows || []).map((row) => ({
+    id: markdownCell(block, row, ['S编号', '步骤编号', '编号']),
+    from: markdownCell(block, row, ['起点', '起始页面', '源页面']),
+    to: markdownCell(block, row, ['终点', '目标页面', '去向']),
+    action: markdownCell(block, row, ['触发操作', '触发动作', '操作']),
+    condition: markdownCell(block, row, ['前置条件', '条件']),
+    confidence: markdownCell(block, row, ['证据置信度', '置信度', '证据'])
+  }))
+}
+
+function stateRowsForBlock(block = {}) {
+  return (block.rows || []).map((row) => ({
+    id: markdownCell(block, row, ['TR编号', 'S编号', '编号']),
+    from: markdownCell(block, row, ['当前状态', '当前状态ST编号', '起始状态', '起始状态ST编号']),
+    to: markdownCell(block, row, ['目标状态', '目标状态ST编号']),
+    condition: markdownCell(block, row, ['转换条件', '触发条件', '条件']),
+    reversible: markdownCell(block, row, ['可逆']),
+    evidence: markdownCell(block, row, ['证据', '置信度', '证据置信度'])
+  }))
+}
+
+function pageRowsForBlock(block = {}) {
+  return (block.rows || []).map((row) => ({
+    id: markdownCell(block, row, ['P编号', '页面编号', '编号']),
+    name: markdownCell(block, row, ['页面名称', '页面弹窗名称', '页面/弹窗名称', '名称']),
+    type: markdownCell(block, row, ['类型', '页面类型']),
+    purpose: markdownCell(block, row, ['目的', '页面目的', '页面定位', '定位']),
+    mainArea: markdownCell(block, row, ['主要区域', '核心区域', '页面框架', '框架']),
+    primaryAction: markdownCell(block, row, ['关键操作', '主操作', '核心操作']),
+    evidence: markdownCell(block, row, ['证据置信度', '置信度', '证据'])
+  }))
+}
+
+function architectureItemsForBlock(block = {}) {
+  if (block.type === 'architecture-map' && Array.isArray(block.rows) && block.rows.length) {
+    return block.rows.map((row) => {
+      const cells = row.map(cleanMarkdownText).filter(Boolean)
+      return {
+        title: cells[0] || '未命名模块',
+        detail: cells.slice(1).map((cell, index) => {
+          const header = block.headers?.[index + 1] || ''
+          return header ? `${header}：${cell}` : cell
+        }).join('；')
+      }
+    })
+  }
+  if (Array.isArray(block.items) && block.items.length) {
+    return block.items.map((item) => ({ title: cleanMarkdownText(item), detail: '' }))
+  }
+  return String(block.text || '')
+    .split(/\n+/)
+    .map((line) => cleanMarkdownText(line))
+    .filter(Boolean)
+    .map((line) => ({ title: line, detail: '' }))
 }
 
 function markdownBlockKey(block = {}, index = 0) {
@@ -2316,6 +2657,112 @@ watch(() => props.projectId, () => {
 
 .competitor-analysis-md-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.competitor-analysis-flow-timeline,
+.competitor-analysis-state-board,
+.competitor-analysis-page-card-grid,
+.competitor-analysis-architecture-map {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.competitor-analysis-flow-timeline article,
+.competitor-analysis-state-board article,
+.competitor-analysis-page-card-grid article,
+.competitor-analysis-architecture-map article {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.competitor-analysis-flow-main,
+.competitor-analysis-state-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: #1f2329;
+}
+
+.competitor-analysis-flow-id,
+.competitor-analysis-state-tags span,
+.competitor-analysis-page-card-grid header span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.competitor-analysis-flow-timeline dl,
+.competitor-analysis-page-card-grid dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.competitor-analysis-flow-timeline dl div,
+.competitor-analysis-page-card-grid dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.competitor-analysis-flow-timeline dt,
+.competitor-analysis-page-card-grid dt {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.competitor-analysis-flow-timeline dd,
+.competitor-analysis-page-card-grid dd {
+  margin: 0;
+  color: #344054;
+}
+
+.competitor-analysis-state-main span {
+  color: #98a2b3;
+}
+
+.competitor-analysis-state-board p,
+.competitor-analysis-architecture-map p {
+  margin: 0;
+  color: #475467;
+}
+
+.competitor-analysis-state-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.competitor-analysis-page-card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.competitor-analysis-page-card-grid header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.competitor-analysis-page-card-grid header strong,
+.competitor-analysis-architecture-map strong {
+  color: #1f2329;
+}
+
+.competitor-analysis-architecture-map {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .competitor-analysis-artifact-panel,

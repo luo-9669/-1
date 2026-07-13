@@ -2527,6 +2527,11 @@ function visibleNodeQuickActions(node = {}) {
     const fallbackAction = generationActions(node)[0]?.label
     return hasGenerationAction || !fallbackAction ? actions : [...actions, fallbackAction]
   }
+  if (isPreviewCodeDetail(node) && generationActions(node).length) {
+    const hasGenerationAction = actions.some((action) => codeQuickGenerationAction(node, action))
+    const fallbackAction = generationActions(node)[0]?.label
+    return hasGenerationAction || !fallbackAction ? actions : [...actions, fallbackAction]
+  }
   return actions
 }
 
@@ -5200,7 +5205,11 @@ function isInteractionPageDetail(node = {}) {
 }
 
 function isVisualGalleryDetail(node = {}) {
-  return node?.detailLayout === 'visual-gallery'
+  return node?.detailLayout === 'visual-gallery' ||
+    node?.stageId === 'ui-visual' ||
+    String(node?.id || '').startsWith('ui-') ||
+    Boolean(node?.visualPreview) ||
+    Boolean(node?.visualBrief)
 }
 
 function isPreviewCodeDetail(node = {}) {

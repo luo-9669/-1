@@ -3368,6 +3368,8 @@ const currentWorkflowAnalysisRequestId = ref('')
 const workflowAnalysisStreamController = ref(null)
 const workflowStageStatusMap = ref({})
 const workflowStageAutoGenerationTimer = ref(null)
+let workflowHtmlStagePollTimer = null
+let workflowHtmlStageJobRunId = ''
 const workflowRoute = ref('entry')
 const workflowActiveStageId = ref('')
 const workflowActiveStageTouchedByUser = ref(false)
@@ -6763,7 +6765,7 @@ const workflowCurrentStageId = computed(() => {
 const workflowUsesStageAgentScope = computed(() =>
   activeView.value === 'workflow' &&
   workflowRoute.value === 'canvas' &&
-  isWorkflowAgentWorkbenchStageId(workflowCurrentStageId.value)
+  isWorkflowAgentStageSessionScopeId(workflowCurrentStageId.value)
 )
 const workflowUsesEmbeddedAgent = computed(() => false)
 const workflowAgentCanUseLargeModes = computed(() => false)
@@ -7503,6 +7505,9 @@ function buildWorkflowStageStatuses(totalFlow = null, fallbackStatus = 'waiting'
 function workflowStageCanvasHasGeneratedContent(stageCanvas = null, stageId = '') {
   const nodes = Array.isArray(stageCanvas?.nodes) ? stageCanvas.nodes : []
   if (!nodes.length) return false
+  if (stageId === 'html-output') {
+    return nodes.every((node) => Boolean(node?.codePreview?.code || node?.artifact?.code || node?.artifact?.html || node?.artifact?.source || node?.code))
+  }
   return nodes.some((node) => {
     const nodeId = String(node?.id || '').trim()
     const contentStatus = String(node?.contentStatus || '').trim()
@@ -7531,6 +7536,7 @@ function workflowStageCanvasHasGeneratedContent(stageCanvas = null, stageId = ''
 function workflowStageCanvasHasRenderedContent(stageCanvas = null, stageId = '') {
   const nodes = Array.isArray(stageCanvas?.nodes) ? stageCanvas.nodes : []
   if (!nodes.length) return false
+  if (isManualArtifactStageId(stageId)) return true
   return nodes.some((node) => {
     const nodeId = String(node?.id || '').trim()
     const contentStatus = String(node?.contentStatus || '').trim()
@@ -7541,6 +7547,10 @@ function workflowStageCanvasHasRenderedContent(stageCanvas = null, stageId = '')
       contentStatus !== 'waiting-model' &&
       contentSource !== 'model-pending'
   })
+}
+
+function isManualArtifactStageId(stageId = '') {
+  return ['ui-visual', 'html-output', 'vue-output'].includes(normalizeWorkflowStageId(stageId))
 }
 
 function inferredWorkflowStageStatuses(totalFlow = null, fallbackStatus = 'waiting') {
@@ -8482,6 +8492,11 @@ function isWorkflowAgentWorkbenchStageId(stageId = '') {
     .includes(String(stageId || '').trim())
 }
 
+function isWorkflowAgentStageSessionScopeId(stageId = '') {
+  return ['requirement-dissection', 'interaction-lofi', 'ui-visual', 'html-output', 'vue-output']
+    .includes(String(stageId || '').trim())
+}
+
 function workflowAgentWorkbenchStageCanvas(stageId = '', sourceCanvas = null) {
   const normalizedStageId = String(stageId || '').trim()
   const stages = normalizeWorkflowTotalFlowStages(workflowTotalDesignFlow.value?.stages || [])
@@ -8784,6 +8799,54 @@ function workflowVisualNodeIdentityKeys(node = {}) {
     node?.route ? `route:${node.route}` : '',
     normalizeWorkflowVisualNodeTitle(node?.title) ? `title:${normalizeWorkflowVisualNodeTitle(node.title)}` : ''
   ].filter(Boolean)
+}
+
+function workflowGenerationNodeTitleKey(value = '') {
+  return String(value || '')
+    .replace(/UI视觉|高保真图|视觉稿|HTML|Vue|页面代码|代码/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+}
+
+function workflowGenerationNodeIdentityKeys(node = {}) {
+  const rawId = String(node?.id || '').trim()
+  const strippedIds = [
+    rawId.replace(/^ui-/, ''),
+    rawId.replace(/^html-page-/, ''),
+    rawId.replace(/^vue-page-/, ''),
+    rawId.replace(/^html-/, ''),
+    rawId.replace(/^vue-/, '')
+  ].filter((item) => item && item !== rawId)
+  return [
+    node?.sourcePageId ? `sourcePageId:${node.sourcePageId}` : '',
+    node?.pageId ? `pageId:${node.pageId}` : '',
+    node?.sourceNodeId ? `sourceNodeId:${node.sourceNodeId}` : '',
+    node?.route ? `route:${node.route}` : '',
+    ...strippedIds.map((id) => `id:${id}`),
+    workflowGenerationNodeTitleKey(node?.title) ? `title:${workflowGenerationNodeTitleKey(node.title)}` : ''
+  ].filter(Boolean)
+}
+
+function workflowStageNodesForId(stageId = '') {
+  const normalizedStageId = normalizeWorkflowStageId(stageId)
+  const stageCanvas = workflowTotalDesignFlow.value?.stageCanvases?.[normalizedStageId] ||
+    workflowAnalysisResult.value?.totalDesignFlow?.stageCanvases?.[normalizedStageId] ||
+    state.activeWorkflowRun?.documentAnalysis?.totalDesignFlow?.stageCanvases?.[normalizedStageId] ||
+    null
+  return Array.isArray(stageCanvas?.nodes) ? stageCanvas.nodes : []
+}
+
+function findWorkflowGenerationTargetNode(sourceNode = {}, targetStageId = '') {
+  const targetNodes = workflowStageNodesForId(targetStageId)
+  if (!targetNodes.length) return null
+  const sourceKeys = new Set(workflowGenerationNodeIdentityKeys(sourceNode))
+  const sameIdentity = (node = {}) => workflowGenerationNodeIdentityKeys(node).some((key) => sourceKeys.has(key))
+  return targetNodes.find((node) => sameIdentity(node)) ||
+    targetNodes.find((node) => {
+      const target = String(node?.targetGenerator || node?.codePreview?.codeLanguage || '').trim().toLowerCase()
+      return targetStageId === 'html-output' ? target === 'html' : target === 'vue'
+    }) ||
+    null
 }
 
 function preserveGeneratedWorkflowVisualArtifactsInCanvas(currentCanvas = {}, incomingCanvas = {}) {
@@ -14823,6 +14886,7 @@ function workflowStageRefreshNodeId(stageId = workflowCurrentStageId.value) {
 function shouldAutoGenerateWorkflowStage(stageId = '') {
   stageId = normalizeWorkflowStageId(stageId)
   if (!stageId || !workflowAnalysisResult.value?.totalDesignFlow) return false
+  if (isManualArtifactStageId(stageId)) return false
   if (!canAutoGenerateWorkflowStage(stageId)) return false
   const currentStatus = workflowStageStatusMap.value?.[stageId]?.status || ''
   if (currentStatus === 'generating' && !shouldResumeAdvancedUxPendingStageGeneration(stageId)) return false
@@ -14834,6 +14898,139 @@ function shouldAutoGenerateWorkflowStage(stageId = '') {
     node.id === `${stageId}-loading` ||
     node.contentStatus === 'model-pending'
   )
+}
+
+function workflowHtmlNodeHasGeneratedCode(node = {}) {
+  return String(node?.artifactStatus || '').trim() === 'generated' &&
+    Boolean(node?.codePreview?.code || node?.artifact?.html || node?.artifact?.code || node?.code)
+}
+
+function workflowHtmlStageNeedsGeneration(totalFlow = workflowTotalDesignFlow.value) {
+  const htmlCanvas = totalFlow?.stageCanvases?.['html-output'] || null
+  const nodes = Array.isArray(htmlCanvas?.nodes) ? htmlCanvas.nodes : []
+  if (!nodes.length) return false
+  return nodes.some((node) => !workflowHtmlNodeHasGeneratedCode(node))
+}
+
+function workflowHtmlStageIsGenerating(totalFlow = workflowTotalDesignFlow.value) {
+  const status = String(workflowStageStatusMap.value?.['html-output']?.status || totalFlow?.stageStatuses?.['html-output']?.status || '').trim()
+  const htmlCanvas = totalFlow?.stageCanvases?.['html-output'] || null
+  const nodes = Array.isArray(htmlCanvas?.nodes) ? htmlCanvas.nodes : []
+  return status === 'generating' || nodes.some((node) => String(node?.artifactStatus || '').trim() === 'generating')
+}
+
+function stopWorkflowHtmlStagePolling() {
+  if (workflowHtmlStagePollTimer) {
+    window.clearTimeout(workflowHtmlStagePollTimer)
+    workflowHtmlStagePollTimer = null
+  }
+  workflowHtmlStageJobRunId = ''
+}
+
+function scheduleWorkflowHtmlStagePolling(runId = state.activeWorkflowRun?.id || '') {
+  if (!runId) return
+  if (workflowHtmlStagePollTimer) window.clearTimeout(workflowHtmlStagePollTimer)
+  workflowHtmlStagePollTimer = window.setTimeout(() => {
+    workflowHtmlStagePollTimer = null
+    void pollWorkflowHtmlStageRun(runId)
+  }, 15000)
+}
+
+function applyWorkflowHtmlStageRun(run = {}) {
+  if (!run?.documentAnalysis?.totalDesignFlow) return
+  state.activeWorkflowRun = {
+    ...(state.activeWorkflowRun || {}),
+    ...run
+  }
+  state.workflowRuns = upsertWorkflowRunRecord(state.workflowRuns, state.activeWorkflowRun)
+  workflowAnalysisResult.value = normalizeWorkflowAnalysisForDisplay(run.documentAnalysis)
+  syncWorkflowActiveStageFromAnalysis(workflowAnalysisResult.value)
+  const totalFlow = workflowAnalysisResult.value?.totalDesignFlow || null
+  const htmlStatus = totalFlow?.stageStatuses?.['html-output'] || {}
+  if (htmlStatus.status) {
+    workflowStageStatusMap.value = {
+      ...workflowStageStatusMap.value,
+      'html-output': htmlStatus
+    }
+  }
+  if (workflowCurrentStageId.value === 'html-output') {
+    workflowCanvasLoading.value = workflowHtmlStageIsGenerating(totalFlow)
+    workflowCanvasRefreshingNodeId.value = workflowCanvasLoading.value
+      ? (htmlStatus.currentNodeId || workflowStageRefreshNodeId('html-output'))
+      : ''
+  }
+  saveState(state)
+}
+
+async function pollWorkflowHtmlStageRun(runId = state.activeWorkflowRun?.id || '') {
+  if (!runId) return
+  try {
+    const result = await api.workspace.getWorkflowRun(state.apiConfig, runId)
+    const run = result.ok && result.data?.run ? result.data.run : null
+    if (!run) return
+    applyWorkflowHtmlStageRun(run)
+    const totalFlow = workflowAnalysisResult.value?.totalDesignFlow || null
+    if (workflowHtmlStageIsGenerating(totalFlow) || workflowHtmlStageNeedsGeneration(totalFlow)) {
+      setStatus(skillWorkbenchStatus, 'loading', workflowHtmlStageStatusText(totalFlow))
+      scheduleWorkflowHtmlStagePolling(runId)
+    } else {
+      stopWorkflowHtmlStagePolling()
+      workflowCanvasLoading.value = false
+      workflowCanvasRefreshingNodeId.value = ''
+      setStatus(skillWorkbenchStatus, 'success', 'HTML 阶段已生成并回填画布')
+    }
+  } catch (error) {
+    void error
+    scheduleWorkflowHtmlStagePolling(runId)
+  }
+}
+
+function workflowHtmlStageStatusText(totalFlow = workflowTotalDesignFlow.value) {
+  const status = totalFlow?.stageStatuses?.['html-output'] || workflowStageStatusMap.value?.['html-output'] || {}
+  const generatedCount = Number(status.generatedCount || 0)
+  const totalCount = Number(status.totalCount || totalFlow?.stageCanvases?.['html-output']?.nodes?.length || 0)
+  const currentTitle = status.currentNodeTitle || ''
+  if (totalCount > 0) {
+    return currentTitle
+      ? `后台正在生成 HTML：${generatedCount}/${totalCount}，当前 ${currentTitle}`
+      : `后台正在生成 HTML：${generatedCount}/${totalCount}`
+  }
+  return '后台正在生成 HTML，完成后会自动回填画布。'
+}
+
+async function ensureWorkflowHtmlStageGeneration(options = {}) {
+  const run = state.activeWorkflowRun || {}
+  if (!run.id || workflowCurrentStageId.value !== 'html-output') return false
+  const totalFlow = workflowAnalysisResult.value?.totalDesignFlow || null
+  if (!workflowHtmlStageNeedsGeneration(totalFlow) && !workflowHtmlStageIsGenerating(totalFlow)) {
+    stopWorkflowHtmlStagePolling()
+    return false
+  }
+  workflowCanvasLoading.value = true
+  workflowCanvasRefreshingNodeId.value = workflowStageRefreshNodeId('html-output')
+  mergeWorkflowStageStatus('html-output', 'generating', workflowStageStatusMap.value?.['html-output'] || {})
+  applyWorkflowStageStatusesToAnalysis()
+  setStatus(skillWorkbenchStatus, 'loading', workflowHtmlStageStatusText(totalFlow))
+  scheduleWorkflowHtmlStagePolling(run.id)
+  if (workflowHtmlStageJobRunId === run.id && options.force !== true) return true
+  workflowHtmlStageJobRunId = run.id
+  try {
+    const result = await api.workflows.generateHtmlStageArtifacts(state.apiConfig, run.id, {
+      force: options.force === true,
+      timeoutMs: 0
+    }, {
+      timeoutMs: workflowAgentRequestTimeoutMs()
+    })
+    const data = applyApiResult(skillWorkbenchStatus, result, '启动 HTML 阶段生成失败')
+    if (data?.run) applyWorkflowHtmlStageRun(data.run)
+    scheduleWorkflowHtmlStagePolling(run.id)
+    return true
+  } catch (error) {
+    workflowHtmlStageJobRunId = ''
+    setStatus(skillWorkbenchStatus, 'failed', error.message ? `HTML 阶段生成启动失败：${error.message}` : 'HTML 阶段生成启动失败')
+    scheduleWorkflowHtmlStagePolling(run.id)
+    return false
+  }
 }
 
 function workflowStageConfirmation(stageId = '') {
@@ -14898,6 +15095,7 @@ function scheduleWorkflowStageAutoGeneration(stageId = workflowCurrentStageId.va
   if (!stageId || !workflowAnalysisResult.value?.totalDesignFlow) return
   workflowStageAutoGenerationTimer.value = window.setTimeout(() => {
     workflowStageAutoGenerationTimer.value = null
+    if (isManualArtifactStageId(stageId)) return
     if (force) {
       const currentStatus = workflowStageStatusMap.value?.[stageId]?.status || ''
       if (currentStatus === 'generating') return
@@ -15989,18 +16187,19 @@ function appendWorkflowGeneratedCodeAgentMessage(node = {}, generationAction = {
   })
 }
 
-function ensureWorkflowAgentCodeArtifactMessage(nodeId = '') {
+function ensureWorkflowAgentCodeArtifactMessage(nodeId = '', options = {}) {
   const node = canvasNodeById(nodeId)
   if (!node?.id || !workflowCodeArtifactSource(node)) return ''
+  const scopeId = options.scopeId || node.id
   const signature = workflowCodeArtifactSignature(node)
-  const session = ensureWorkflowAgentSession(node.id)
+  const session = ensureWorkflowAgentSession(scopeId)
   const hasCodeArtifact = session.some((message) =>
     message?.role === 'assistant' &&
     message?.meta?.action === 'generated-code' &&
     message?.meta?.generatedCodeSignature === signature
   )
   if (hasCodeArtifact) return ''
-  return appendWorkflowGeneratedCodeAgentMessage(node)
+  return appendWorkflowGeneratedCodeAgentMessage(node, {}, { scopeId })
 }
 
 function workflowVisualArtifactMessagePayload(node = {}, generationAction = {}) {
@@ -16678,7 +16877,7 @@ function openWorkflowAgentForNode(nodeId) {
   const targetNodeId = workflowCanvasResolvableNodeId(nodeId)
   workflowAgentNodeId.value = targetNodeId
   const artifactScopeId = workflowGenerationAgentScopeId(targetNodeId)
-  ensureWorkflowAgentCodeArtifactMessage(targetNodeId)
+  ensureWorkflowAgentCodeArtifactMessage(targetNodeId, { scopeId: artifactScopeId })
   ensureWorkflowAgentVisualArtifactMessage(targetNodeId, { scopeId: artifactScopeId })
   openWorkflowAgent()
 }
@@ -18446,6 +18645,35 @@ function workflowAgentVisualGenerationQuickAction(content = '', sourceMessage = 
   }
 }
 
+function isWorkflowAgentCodeGenerationQuickReply(content = '') {
+  return /生成\s*(HTML|Vue)|重新生成\s*(HTML|Vue)|生成页面代码/.test(String(content || '').trim())
+}
+
+function workflowAgentCodeGenerationQuickAction(content = '', sourceMessage = null) {
+  const normalizedContent = String(content || '').trim()
+  if (!isWorkflowAgentCodeGenerationQuickReply(normalizedContent)) return null
+  const targetStageId = /vue/i.test(normalizedContent) ? 'vue-output' : 'html-output'
+  const sourceNodeId = sourceMessage?.meta?.nodeId || sourceMessage?.nodeId || workflowAgentNodeId.value || workflowAgentScopeId()
+  const sourceNode = canvasNodeById(sourceNodeId) || workflowAgentNode.value || {}
+  const targetNode = sourceNode?.stageId === targetStageId
+    ? sourceNode
+    : findWorkflowGenerationTargetNode(sourceNode, targetStageId)
+  const generationActions = Array.isArray(targetNode?.generationActions) ? targetNode.generationActions : []
+  const generationAction = generationActions.find((action) => {
+    const target = String(action?.targetGenerator || targetNode?.targetGenerator || '').trim().toLowerCase()
+    return targetStageId === 'vue-output' ? target === 'vue' : target === 'html'
+  }) || generationActions[0] || null
+  if (!targetNode?.id || !generationAction) return null
+  return {
+    nodeId: targetNode.id,
+    action: generationAction.label || normalizedContent,
+    generationAction,
+    targetGenerator: generationAction.targetGenerator || targetNode.targetGenerator || '',
+    stageId: targetStageId,
+    mode: 'stage-detail-generation'
+  }
+}
+
 function useWorkflowAgentQuickReply(content, sourceMessage = null) {
   const normalizedContent = String(content || '').trim()
   if (!normalizedContent) {
@@ -18460,6 +18688,18 @@ function useWorkflowAgentQuickReply(content, sourceMessage = null) {
   const visualGenerationPayload = workflowAgentVisualGenerationQuickAction(content, sourceMessage)
   if (visualGenerationPayload) {
     runWorkflowGenerationAction(visualGenerationPayload)
+    return
+  }
+  const codeGenerationPayload = workflowAgentCodeGenerationQuickAction(content, sourceMessage)
+  if (codeGenerationPayload) {
+    if (codeGenerationPayload.stageId && workflowCurrentStageId.value !== codeGenerationPayload.stageId) {
+      selectWorkflowStage(codeGenerationPayload.stageId)
+    }
+    runWorkflowGenerationAction(codeGenerationPayload)
+    return
+  }
+  if (isWorkflowAgentCodeGenerationQuickReply(normalizedContent)) {
+    setStatus(skillWorkbenchStatus, 'failed', '没有找到可生成的 HTML/Vue 画布节点，请先进入对应阶段。')
     return
   }
   if (confirmWorkflowAgentApplyToCanvasRecommendation(content, sourceMessage)) return

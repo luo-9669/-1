@@ -7,6 +7,7 @@ import {
   getCurrentStep,
   regenerateStepDraft
 } from '../../frontend/src/services/workflows.js'
+import { readFile } from 'node:fs/promises'
 import { buildWorkflowAgentQuickReplies, normalizeRequirementDissectionQuickReplies } from '../../frontend/src/services/workflowWorkbench.js'
 import { buildAgentAnswerEvaluation, buildAgentEvidenceMeta, buildAgentEvidencePack, buildAgentTraceItems, generateAgentReply, withAgentEvidenceGrounding } from './agent-service.js'
 import { buildAgentContext } from './agent-context-builder.js'
@@ -1777,11 +1778,57 @@ function providerHtmlContent(result = {}) {
   return ''
 }
 
-function htmlArtifactModelContext(node = {}, payload = {}, run = {}) {
+const DEFAULT_HTML_REFERENCE_MARKDOWN_URL = new URL('../../docs/design/image-to-html-quality-version-2026-07-09.md', import.meta.url)
+
+async function defaultHtmlReferenceMarkdown(options = {}) {
+  if (typeof options.defaultHtmlReferenceMarkdown === 'string') return options.defaultHtmlReferenceMarkdown
+  try {
+    return await readFile(DEFAULT_HTML_REFERENCE_MARKDOWN_URL, 'utf8')
+  } catch {
+    return [
+      '# 默认 HTML 生成规范',
+      '',
+      '- 输出完整单文件 HTML。',
+      '- Web/桌面优先按 1920px 逻辑宽度组织，再适配 1440 / 768 / 390。',
+      '- 页面高度随内容自然增长，不要使用 transform/zoom 缩放整页。',
+      '- 使用语义化结构、4px 栅格、清晰交互状态、可读字号和不遮挡的图文关系。'
+    ].join('\n')
+  }
+}
+
+async function resolveHtmlReferenceForRun(run = {}, options = {}) {
+  if (typeof options.htmlReferenceResolver === 'function') {
+    const resolved = await options.htmlReferenceResolver(run, options)
+    if (resolved && typeof resolved === 'object' && String(resolved.markdown || '').trim()) {
+      return {
+        source: resolved.source || 'project-knowledge',
+        title: resolved.title || 'HTML 生成参考规范.md',
+        markdown: String(resolved.markdown || '').trim()
+      }
+    }
+  }
+  return {
+    source: 'default',
+    title: '默认 HTML 生成规范.md',
+    markdown: String(await defaultHtmlReferenceMarkdown(options) || '').trim()
+  }
+}
+
+function htmlReferencePromptSection(reference = {}) {
+  const markdown = String(reference.markdown || '').trim()
+  if (!markdown) return ''
+  return [
+    `HTML 参考规范来源：${reference.title || 'HTML 生成参考规范.md'}（${reference.source || 'default'}）`,
+    compactPromptText(markdown, 2600)
+  ].join('\n')
+}
+
+function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReference = {}) {
   const context = htmlCanvasArtifactContext(node, run)
   const logicalWidth = htmlTargetLogicalWidth(node, run)
   const surfaceLabel = logicalWidth >= 1440 ? 'Web/桌面' : '移动端/H5'
   const layoutItems = context.layoutItems.length ? context.layoutItems : context.fallbackItems
+  const referenceSection = htmlReferencePromptSection(htmlReference)
   const upstream = [
     `页面：${context.pageTitle || node.title || '当前页面'}`,
     context.summary ? `页面摘要：${context.summary}` : '',
@@ -1801,15 +1848,22 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}) {
     actionType: 'html-generation',
     node,
     run,
+    htmlReferenceSource: htmlReference.source || 'default',
+    htmlReferenceTitle: htmlReference.title || '默认 HTML 生成规范.md',
+    htmlReferenceMarkdown: htmlReference.markdown || '',
     model: payload.model || run.model || 'gpt-5.5',
     timeoutMs: payload.timeoutMs,
     maxOutputTokens: 12000,
     systemPrompt: [
       '你是资深前端工程师和产品 UI 还原专家。只输出一个可直接运行的单文件 HTML，不要输出 Markdown 解释。',
+      '必须遵守传入的 HTML 参考规范 md；如果项目知识库规范和默认规范冲突，优先使用项目知识库规范。',
+      '本次生成只写回工作流 HTML 画布节点，不创建网页工程资产、还原资产、restoredPage 或项目素材记录。',
       '必须严格基于上游交互低保、UI视觉说明和状态说明生成；不要编造无关业务页面，不要使用会员中心、余额、积分、优惠券等通用兜底内容，除非上游明确要求。',
       'HTML 必须包含完整 <!doctype html>、<html>、<head>、<body>、CSS 和必要 JS。'
     ].join('\n'),
     userPrompt: [
+      referenceSection,
+      referenceSection ? '' : '',
       upstream,
       '',
       '生成约束：',
@@ -1847,7 +1901,8 @@ async function buildHtmlModelCanvasArtifact(node = {}, payload = {}, run = {}, o
       }
     }
   }
-  const context = htmlArtifactModelContext(node, payload, run)
+  const htmlReference = await resolveHtmlReferenceForRun(run, options)
+  const context = htmlArtifactModelContext(node, payload, run, htmlReference)
   try {
     const result = await provider.generate(context)
     const html = providerHtmlContent(result)
@@ -2398,6 +2453,175 @@ export async function generateRunCanvasNodeArtifact(store, payload = {}, options
     analysis: nextAnalysis,
     node: updatedNode,
     artifact: updatedNode?.artifact || null
+  }
+}
+
+function htmlNodeHasGeneratedCode(node = {}) {
+  return String(node?.artifactStatus || '').trim() === 'generated' &&
+    Boolean(node?.codePreview?.code || node?.artifact?.html || node?.artifact?.code)
+}
+
+function htmlStageGenerationAction(node = {}, payload = {}) {
+  const action = Array.isArray(node.generationActions)
+    ? node.generationActions.find((item) => String(item?.targetGenerator || item?.id || item?.label || '').includes('html')) || node.generationActions[0]
+    : null
+  return {
+    id: action?.id || 'generate-html',
+    label: action?.label || payload.actionLabel || '生成 HTML',
+    targetGenerator: action?.targetGenerator || payload.targetGenerator || 'html'
+  }
+}
+
+function updateHtmlStageStatus(run = {}, patch = {}) {
+  const analysis = run.documentAnalysis || {}
+  const totalFlow = analysis.totalDesignFlow || {}
+  const nextHtmlStatus = {
+    ...(totalFlow.stageStatuses?.['html-output'] || {}),
+    ...patch,
+    updatedAt: patch.updatedAt || new Date().toISOString()
+  }
+  if (['generating', 'pending'].includes(String(nextHtmlStatus.status || '').trim())) {
+    delete nextHtmlStatus.completedAt
+  }
+  return {
+    ...run,
+    documentAnalysis: {
+      ...analysis,
+      totalDesignFlow: {
+        ...totalFlow,
+        stageStatuses: {
+          ...(totalFlow.stageStatuses || {}),
+          'html-output': nextHtmlStatus
+        }
+      }
+    },
+    updatedAt: new Date().toISOString()
+  }
+}
+
+function updateHtmlStageNode(run = {}, nodeId = '', patcher = (node) => node) {
+  const analysis = run.documentAnalysis || {}
+  const totalFlow = analysis.totalDesignFlow || {}
+  const stageCanvases = totalFlow.stageCanvases || {}
+  const htmlCanvas = stageCanvases['html-output'] || {}
+  const nextHtmlCanvas = patchCanvasNodeById(htmlCanvas, nodeId, patcher)
+  const nextAnalysisCanvas = patchCanvasNodeById(analysis.canvas || {}, nodeId, patcher)
+  return {
+    ...run,
+    documentAnalysis: {
+      ...analysis,
+      canvas: nextAnalysisCanvas,
+      totalDesignFlow: {
+        ...totalFlow,
+        stageCanvases: {
+          ...stageCanvases,
+          'html-output': nextHtmlCanvas
+        }
+      }
+    },
+    updatedAt: new Date().toISOString()
+  }
+}
+
+function htmlStageStatusFromNodes(nodes = []) {
+  const totalCount = nodes.length
+  const generatedCount = nodes.filter((node) => htmlNodeHasGeneratedCode(node)).length
+  const failedCount = nodes.filter((node) => String(node?.artifactStatus || '').trim() === 'failed').length
+  const pendingCount = Math.max(0, totalCount - generatedCount - failedCount)
+  const status = totalCount && generatedCount === totalCount
+    ? 'completed'
+    : generatedCount > 0
+      ? 'partial_failed'
+      : failedCount > 0
+        ? 'failed'
+        : pendingCount > 0
+          ? 'pending'
+          : 'completed'
+  return { status, totalCount, generatedCount, failedCount, pendingCount }
+}
+
+export async function generateRunHtmlStageArtifacts(store, payload = {}, options = {}) {
+  let run = findRun(store, payload.runId)
+  const analysis = run.documentAnalysis || {}
+  const totalFlow = analysis.totalDesignFlow || {}
+  const htmlCanvas = totalFlow.stageCanvases?.['html-output'] || {}
+  const nodes = Array.isArray(htmlCanvas.nodes) ? htmlCanvas.nodes : []
+  if (!nodes.length) throw new Error('当前运行没有 HTML 阶段画布节点')
+  const requestedNodeIds = Array.isArray(payload.nodeIds)
+    ? new Set(payload.nodeIds.map((item) => String(item || '').trim()).filter(Boolean))
+    : null
+  const force = payload.force === true
+  const targetNodes = nodes.filter((node) => {
+    if (requestedNodeIds && !requestedNodeIds.has(node?.id)) return false
+    if (!force && htmlNodeHasGeneratedCode(node)) return false
+    return true
+  })
+  const startedAt = new Date().toISOString()
+  const persistRun = async (nextRun) => {
+    run = replaceRun(store, nextRun)
+    if (typeof options.persistRun === 'function') await options.persistRun(run)
+    return run
+  }
+  await persistRun(updateHtmlStageStatus(run, {
+    status: targetNodes.length ? 'generating' : htmlStageStatusFromNodes(nodes).status,
+    stageId: 'html-output',
+    totalCount: nodes.length,
+    generatedCount: nodes.filter((node) => htmlNodeHasGeneratedCode(node)).length,
+    failedCount: nodes.filter((node) => String(node?.artifactStatus || '').trim() === 'failed').length,
+    pendingCount: targetNodes.length,
+    currentNodeId: targetNodes[0]?.id || '',
+    currentNodeTitle: targetNodes[0]?.title || '',
+    startedAt
+  }))
+
+  for (const nodeRef of targetNodes) {
+    const latestNode = findStageCanvasNodeById(run.documentAnalysis?.totalDesignFlow || {}, nodeRef.id)?.node || nodeRef
+    const generationAction = htmlStageGenerationAction(latestNode, payload)
+    await persistRun(updateHtmlStageNode(run, latestNode.id, (node) => ({
+      ...node,
+      artifactStatus: 'generating',
+      contentStatusLabel: '生成中',
+      generationActions: Array.isArray(node.generationActions)
+        ? node.generationActions.map((action) => ({
+            ...(typeof action === 'object' ? action : { label: String(action || '') }),
+            status: (action?.id || action?.label) === generationAction.id || action?.targetGenerator === 'html'
+              ? 'generating'
+              : action?.status
+          }))
+        : node.generationActions
+    })))
+    const beforeGenerate = updateHtmlStageStatus(run, {
+      ...htmlStageStatusFromNodes(run.documentAnalysis?.totalDesignFlow?.stageCanvases?.['html-output']?.nodes || []),
+      status: 'generating',
+      stageId: 'html-output',
+      currentNodeId: latestNode.id,
+      currentNodeTitle: latestNode.title || latestNode.id
+    })
+    await persistRun(beforeGenerate)
+    const patchedNode = await patchGeneratedArtifactOnNode(latestNode, {
+      ...payload,
+      nodeId: latestNode.id,
+      generationAction,
+      targetGenerator: 'html',
+      timeoutMs: payload.timeoutMs
+    }, run, options)
+    await persistRun(updateHtmlStageNode(run, latestNode.id, (node) => ({ ...node, ...patchedNode })))
+  }
+
+  const finalNodes = run.documentAnalysis?.totalDesignFlow?.stageCanvases?.['html-output']?.nodes || []
+  const finalStatus = htmlStageStatusFromNodes(finalNodes)
+  run = await persistRun(updateHtmlStageStatus(run, {
+    ...finalStatus,
+    stageId: 'html-output',
+    currentNodeId: '',
+    currentNodeTitle: '',
+    completedAt: new Date().toISOString()
+  }))
+  return {
+    run,
+    analysis: run.documentAnalysis || {},
+    status: run.documentAnalysis?.totalDesignFlow?.stageStatuses?.['html-output'] || finalStatus,
+    nodes: run.documentAnalysis?.totalDesignFlow?.stageCanvases?.['html-output']?.nodes || []
   }
 }
 

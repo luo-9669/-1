@@ -215,6 +215,32 @@ test('competitor analysis detail renders fenced markdown code blocks as code blo
   assert.match(pageSource, /\.competitor-analysis-md-code/)
 })
 
+test('competitor analysis detail enhances structured markdown tables without changing raw markdown', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const enhancerStart = pageSource.indexOf('function enhancedMarkdownBlocksFor')
+  const enhancerEnd = pageSource.indexOf('function markdownBlockKey', enhancerStart)
+  const enhancerSource = pageSource.slice(enhancerStart, enhancerEnd)
+  const classifierStart = pageSource.indexOf('function classifyMarkdownTableBlock')
+  const classifierEnd = pageSource.indexOf('function enhancedMarkdownBlocksFor', classifierStart)
+  const classifierSource = pageSource.slice(classifierStart, classifierEnd)
+
+  assert.ok(enhancerStart >= 0 && enhancerEnd > enhancerStart, 'enhancedMarkdownBlocksFor should wrap parsed markdown blocks')
+  assert.ok(classifierStart >= 0 && classifierEnd > classifierStart, 'classifyMarkdownTableBlock should be present')
+  assert.match(enhancerSource, /classifyMarkdownTableBlock/)
+  assert.match(classifierSource, /flow-table/)
+  assert.match(classifierSource, /state-machine-table/)
+  assert.match(classifierSource, /page-overview-table/)
+  assert.match(enhancerSource, /architecture-map/)
+  assert.match(enhancerSource, /headingContext/)
+  assert.match(pageSource, /enhancedMarkdownBlocksFor\(selectedInteractionArtifacts\.documentMarkdown\)/)
+  assert.match(pageSource, /enhancedMarkdownBlocksFor\(selectedDetailMarkdown\)/)
+  assert.match(pageSource, /class="competitor-analysis-flow-timeline"/)
+  assert.match(pageSource, /class="competitor-analysis-state-board"/)
+  assert.match(pageSource, /class="competitor-analysis-page-card-grid"/)
+  assert.match(pageSource, /class="competitor-analysis-architecture-map"/)
+  assert.match(pageSource, /class="competitor-analysis-md-table"/)
+})
+
 test('competitor analysis report modal lets long markdown scroll without clipping content', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const reportDialogRule = cssRule(pageSource, '.competitor-analysis-report-dialog')
@@ -269,7 +295,7 @@ test('competitor analysis detail footer exposes report actions', async () => {
   assert.match(pageSource, /sourceContent:\s*content/)
   assert.match(pageSource, /sourceRecordId:\s*record\.id/)
   assert.match(pageSource, /runGapAnalysis\(created,\s*draft\)/)
-  assert.match(pageSource, /api\.competitorAnalysis\.run\(props\.apiConfig,\s*requestBodyForRecord\(recordToRun\)\)/)
+  assert.match(pageSource, /api\.competitorAnalysis\.run\(props\.apiConfig,\s*requestBodyForRecord\(createdRecord\)\)/)
   assert.doesNotMatch(pageSource, /emit\('quick-analyze-report'/)
   assert.match(pageSource, /selectedSourceRecord/)
   assert.match(pageSource, /openSourceRecord/)
@@ -358,6 +384,57 @@ test('competitor analysis confirm shows running records before waiting for backe
   assert.match(confirmSource, /status:\s*'running'/)
   assert.match(confirmSource, /statusLabel:\s*'分析中'/)
   assert.match(confirmSource, /summary:\s*'分析任务已创建，正在调用竞品分析引擎。'/)
+})
+
+test('competitor analysis refresh preserves local running gap records until backend returns them', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const loadRecordsStart = pageSource.indexOf('async function loadRecords()')
+  const loadRecordsEnd = pageSource.indexOf('async function loadLatestAnalysis()', loadRecordsStart)
+  const loadRecordsSource = pageSource.slice(loadRecordsStart, loadRecordsEnd)
+
+  assert.ok(loadRecordsStart >= 0 && loadRecordsEnd > loadRecordsStart, 'loadRecords should be present')
+  assert.match(pageSource, /function mergeBackendRecordsWithLocalRunning/)
+  assert.match(loadRecordsSource, /mergeBackendRecordsWithLocalRunning\(result\.data\.records\.map\(normalizeRecord\)\)/)
+  assert.match(pageSource, /runningRecordIds\.value\.has\(record\.id\)/)
+  assert.match(pageSource, /backendIds\.has\(record\.id\)/)
+})
+
+test('competitor analysis keeps gap draft visible before switching to the gap tab', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const quickAnalyzeStart = pageSource.indexOf('function quickAnalyzeSelectedReport()')
+  const quickAnalyzeEnd = pageSource.indexOf('async function runGapAnalysis', quickAnalyzeStart)
+  const quickAnalyzeSource = pageSource.slice(quickAnalyzeStart, quickAnalyzeEnd)
+  const markRunningIndex = quickAnalyzeSource.indexOf('markRecordRunning(created.id)')
+  const mergeIndex = quickAnalyzeSource.indexOf('mergeRecord({')
+  const setActiveKindIndex = quickAnalyzeSource.indexOf("setActiveKind('gap')")
+
+  assert.ok(quickAnalyzeStart >= 0 && quickAnalyzeEnd > quickAnalyzeStart, 'quickAnalyzeSelectedReport should be present')
+  assert.ok(markRunningIndex >= 0, 'quickAnalyzeSelectedReport should mark the gap draft as running')
+  assert.ok(mergeIndex >= 0, 'quickAnalyzeSelectedReport should merge the gap draft locally')
+  assert.ok(setActiveKindIndex >= 0, 'quickAnalyzeSelectedReport should switch to the gap tab')
+  assert.ok(
+    markRunningIndex < setActiveKindIndex,
+    'gap draft should be marked running before setActiveKind triggers a list refresh'
+  )
+  assert.ok(
+    mergeIndex < setActiveKindIndex,
+    'gap draft should be merged locally before switching to the gap tab'
+  )
+})
+
+test('competitor analysis merges the backend-created gap record before long model generation finishes', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const runGapStart = pageSource.indexOf('async function runGapAnalysis')
+  const runGapEnd = pageSource.indexOf('async function copySelectedReport', runGapStart)
+  const runGapSource = pageSource.slice(runGapStart, runGapEnd)
+
+  assert.ok(runGapStart >= 0 && runGapEnd > runGapStart, 'runGapAnalysis should be present')
+  assert.match(runGapSource, /const createdRecord = createResult\.ok/)
+  assert.match(runGapSource, /mergeRecord\(createdRecord\)/)
+  assert.ok(
+    runGapSource.indexOf('mergeRecord(createdRecord)') < runGapSource.indexOf('api.competitorAnalysis.run'),
+    'backend-created gap record should appear in the list before waiting for the model run'
+  )
 })
 
 test('competitor analysis dialog type is bound to the primary tab state', async () => {

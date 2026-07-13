@@ -14,6 +14,7 @@ import {
   createWorkflowRunnerStore,
   editRunCanvasNode,
   generateRunCanvasNodeArtifact,
+  generateRunHtmlStageArtifacts,
   generateRunStep,
   regenerateRunStep
 } from '../services/workflow-runner.js'
@@ -27,6 +28,7 @@ export { createWorkflowRunnerStore }
 
 const DEFAULT_GENERATED_IMAGE_DIR = join(storageRoot, 'workspace', 'generated-images')
 const DEFAULT_MATERIAL_PREVIEW_DIR = join(storageRoot, 'workspace', 'material-previews')
+const activeHtmlStageJobs = new Map()
 
 function safeFileSegment(value = '') {
   return String(value || '')
@@ -203,6 +205,42 @@ async function persistWorkspaceRun(store, run) {
   else store.workflowRuns.unshift(run)
   if (typeof store.persist === 'function') await store.persist()
   return run
+}
+
+function htmlReferenceMaterialScore(material = {}) {
+  const haystack = [
+    material.title,
+    material.category,
+    material.meta,
+    material.summary,
+    material.content,
+    ...(Array.isArray(material.tags) ? material.tags : []),
+    ...(Array.isArray(material.roleScopes) ? material.roleScopes : [])
+  ].join(' ').toLowerCase()
+  let score = 0
+  ;['html', '页面代码', '网页工程', '生成规范', '参考规范', '还原规范', '前端规范', '代码规范'].forEach((token) => {
+    if (haystack.includes(token.toLowerCase())) score += 1
+  })
+  if (/\.md\b|markdown|规范/.test(haystack)) score += 1
+  return score
+}
+
+async function resolveWorkflowHtmlReferenceFromWorkspace(store, run = {}) {
+  const projectId = run.projectId || ''
+  if (!projectId || run.demandScope === 'non-project') return null
+  const candidates = (Array.isArray(store?.materials) ? store.materials : [])
+    .filter((material) => material?.projectId === projectId)
+    .filter((material) => ['knowledge', 'requirements'].includes(material?.type || 'knowledge'))
+    .map((material) => ({ material, score: htmlReferenceMaterialScore(material) }))
+    .filter((item) => item.score > 0 && String(item.material.content || item.material.notes || '').trim())
+    .sort((a, b) => b.score - a.score || new Date(b.material.updatedAt || b.material.createdAt || 0) - new Date(a.material.updatedAt || a.material.createdAt || 0))
+  const picked = candidates[0]?.material || null
+  if (!picked) return null
+  return {
+    source: 'project-knowledge',
+    title: picked.title || '项目 HTML 生成参考规范.md',
+    markdown: picked.content || picked.notes || ''
+  }
 }
 
 function buildConfirmPersistFailure(error, result = {}) {
@@ -631,6 +669,46 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     return result
   }
 
+  async function runHtmlStageGeneration(payload = {}) {
+    mirrorWorkspaceRuns(store, runnerStore)
+    const runId = payload.runId || payload.id
+    const currentRun = runnerStore.runs.find((item) => item.id === runId)
+    if (!currentRun) throw new Error(`未找到工作流运行：${runId}`)
+    const existingJob = activeHtmlStageJobs.get(runId)
+    if (existingJob && payload.force !== true) {
+      return {
+        run: runnerStore.runs.find((item) => item.id === runId) || currentRun,
+        analysis: (runnerStore.runs.find((item) => item.id === runId) || currentRun).documentAnalysis || {},
+        status: (runnerStore.runs.find((item) => item.id === runId) || currentRun).documentAnalysis?.totalDesignFlow?.stageStatuses?.['html-output'] || { status: 'generating' },
+        job: { status: 'running', runId }
+      }
+    }
+    const resolvedProvider = await resolveAgentProvider(options)
+    const generationPromise = generateRunHtmlStageArtifacts(runnerStore, {
+      ...payload,
+      runId,
+      timeoutMs: payload.timeoutMs ?? 0
+    }, {
+      agentProvider: resolvedProvider,
+      htmlProvider: resolvedProvider,
+      codeProvider: resolvedProvider,
+      timeoutMs: payload.timeoutMs ?? options.timeoutMs,
+      htmlReferenceResolver: (run) => resolveWorkflowHtmlReferenceFromWorkspace(store, run),
+      persistRun: (run) => persistWorkspaceRun(store, run)
+    }).finally(() => {
+      if (activeHtmlStageJobs.get(runId) === generationPromise) activeHtmlStageJobs.delete(runId)
+    })
+    activeHtmlStageJobs.set(runId, generationPromise)
+    if (payload.awaitCompletion === true) return generationPromise
+    const latestRun = runnerStore.runs.find((item) => item.id === runId) || currentRun
+    return {
+      run: latestRun,
+      analysis: latestRun.documentAnalysis || {},
+      status: latestRun.documentAnalysis?.totalDesignFlow?.stageStatuses?.['html-output'] || { status: 'generating' },
+      job: { status: 'started', runId }
+    }
+  }
+
   async function complete(payload = {}) {
     mirrorWorkspaceRuns(store, runnerStore)
     const result = completeRunStep(runnerStore, {
@@ -654,6 +732,7 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     'POST /api/workflows/runs/:runId/agent-proposals/:proposalId/confirm/stream': confirmProposalStream,
     'POST /api/workflows/runs/:runId/canvas-nodes/:nodeId/edit': editCanvasNode,
     'POST /api/workflows/runs/:runId/canvas-nodes/:nodeId/generate-artifact': generateCanvasNodeArtifact,
+    'POST /api/workflows/runs/:runId/stages/html-output/generate': runHtmlStageGeneration,
     'GET /api/workspace/generated-images/:fileName': (payload) => readGeneratedImage(payload, options),
     'POST /api/workflows/runs/:runId/complete': complete,
     'POST /api/workspace/workflow-runs': create,
@@ -668,6 +747,7 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
     'POST /api/workspace/workflow-runs/:id/agent-proposals/:proposalId/confirm/stream': confirmProposalStream,
     'POST /api/workspace/workflow-runs/:id/canvas-nodes/:nodeId/edit': editCanvasNode,
     'POST /api/workspace/workflow-runs/:id/canvas-nodes/:nodeId/generate-artifact': generateCanvasNodeArtifact,
+    'POST /api/workspace/workflow-runs/:id/stages/html-output/generate': runHtmlStageGeneration,
     'POST /api/workspace/workflow-runs/:id/complete-step': complete
   }
 }

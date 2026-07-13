@@ -5,7 +5,8 @@ import {
   appendRunMessageStream,
   confirmRunAgentProposal,
   createWorkflowRunnerStore,
-  generateRunCanvasNodeArtifact
+  generateRunCanvasNodeArtifact,
+  generateRunHtmlStageArtifacts
 } from './workflow-runner.js'
 
 test('dialogue skill stream skips workflow traces and forwards deltas directly', async () => {
@@ -2921,6 +2922,69 @@ test('HTML canvas artifact uses the model provider and carries upstream context'
   assert.doesNotMatch(html, /mobile-screen|会员中心/)
 })
 
+test('HTML canvas artifact rejects empty model output instead of marking it generated', async () => {
+  const store = createWorkflowRunnerStore({
+    runs: [
+      {
+        id: 'stage-canvas-html-empty-run',
+        workflowId: 'total-design-flow',
+        skillId: 'total-design-flow',
+        workflowName: '后台管理 Web',
+        input: '做一个后台管理 Web 页面',
+        currentStepId: 'html-output',
+        model: 'gpt-5.5',
+        steps: [],
+        documentAnalysis: {
+          canvas: { nodes: [], edges: [] },
+          totalDesignFlow: {
+            currentStage: 'html-output',
+            stages: [{ id: 'html-output', name: 'HTML' }],
+            stageCanvases: {
+              'html-output': {
+                nodes: [
+                  {
+                    id: 'html-empty',
+                    stageId: 'html-output',
+                    title: '空响应 HTML',
+                    targetGenerator: 'html',
+                    artifactStatus: 'pending',
+                    generationActions: [{ id: 'generate-html-empty', label: '生成 HTML', targetGenerator: 'html' }],
+                    codePreview: { previewTitle: '空响应 HTML 运行预览', previewSummary: '生成后预览页面。', codeLanguage: 'html', code: '' }
+                  }
+                ],
+                edges: [],
+                orderedTabs: ['html-empty']
+              }
+            }
+          }
+        },
+        agentSessions: {},
+        referenceFiles: {}
+      }
+    ]
+  })
+
+  const result = await generateRunCanvasNodeArtifact(store, {
+    runId: 'stage-canvas-html-empty-run',
+    nodeId: 'html-empty',
+    generationAction: { id: 'generate-html-empty', label: '生成 HTML', targetGenerator: 'html' },
+    targetGenerator: 'html'
+  }, {
+    agentProvider: {
+      name: 'empty-html-provider',
+      async generate() {
+        return { provider: 'empty-html-provider', model: 'gpt-5.5', html: '' }
+      }
+    }
+  })
+
+  const stageNode = result.analysis.totalDesignFlow.stageCanvases['html-output'].nodes[0]
+  assert.equal(stageNode.artifactStatus, 'failed')
+  assert.equal(stageNode.artifact.codeStatus, 'failed')
+  assert.equal(stageNode.codePreview.code, '')
+  assert.match(stageNode.artifact.failureMessage, /未返回完整 HTML 文档/)
+})
+
 test('canvas artifact generation stores image provider failures on the stage node', async () => {
   const store = createWorkflowRunnerStore({
     runs: [
@@ -3059,4 +3123,176 @@ test('canvas artifact generation does not mark empty image provider output as ge
   assert.ok(!stageNode.visualPreview.imageDataUrl)
   assert.match(stageNode.visualPreview.configurationMessage, /没有返回可展示图片/)
   assert.equal(result.artifact.imageStatus, 'failed')
+})
+
+test('html stage artifact generation processes all pending nodes without creating restored page assets', async () => {
+  const capturedContexts = []
+  const persistedHtmlStatuses = []
+  const store = createWorkflowRunnerStore({
+    runs: [
+      {
+        id: 'html-stage-batch-run',
+        workflowId: 'total-design-flow',
+        skillId: 'total-design-flow',
+        workflowName: 'AI 视频爆款复刻',
+        input: '做一个 AI 生成视频拥有爆款复刻功能的 web 工具',
+        projectId: 'project-video',
+        currentStepId: 'html-output',
+        model: 'gpt-5.5',
+        steps: [],
+        documentAnalysis: {
+          canvas: { nodes: [], edges: [] },
+          totalDesignFlow: {
+            currentStage: 'html-output',
+            stages: [{ id: 'html-output', name: 'HTML' }],
+            stageStatuses: {
+              'html-output': { status: 'completed', completedAt: '2026-07-13T00:00:00.000Z' }
+            },
+            stageCanvases: {
+              'html-output': {
+                nodes: [
+                  {
+                    id: 'html-home',
+                    stageId: 'html-output',
+                    title: '复刻首页 HTML',
+                    summary: '展示爆款视频复刻入口。',
+                    targetGenerator: 'html',
+                    artifactStatus: 'pending',
+                    generationActions: [{ id: 'generate-html', label: '生成 HTML', targetGenerator: 'html' }]
+                  },
+                  {
+                    id: 'html-progress',
+                    stageId: 'html-output',
+                    title: '任务进度页 HTML',
+                    summary: '展示复刻任务生成状态。',
+                    targetGenerator: 'html',
+                    artifactStatus: 'pending',
+                    generationActions: [{ id: 'generate-html', label: '生成 HTML', targetGenerator: 'html' }]
+                  }
+                ],
+                edges: [],
+                orderedTabs: [
+                  { key: 'html-home', label: '复刻首页 HTML' },
+                  { key: 'html-progress', label: '任务进度页 HTML' }
+                ]
+              }
+            }
+          }
+        },
+        agentSessions: {},
+        referenceFiles: {}
+      }
+    ]
+  })
+
+  const result = await generateRunHtmlStageArtifacts(
+    store,
+    { runId: 'html-stage-batch-run', timeoutMs: 0 },
+    {
+      htmlProvider: {
+        name: 'html-batch-test-provider',
+        async generate(context) {
+          capturedContexts.push(context)
+          return {
+            provider: 'html-batch-test-provider',
+            model: context.model,
+            html: `<!doctype html><html><head><title>${context.node.title}</title></head><body><main>${context.node.title}</main></body></html>`
+          }
+        }
+      },
+      htmlReferenceResolver: async () => ({
+        source: 'project-knowledge',
+        title: '项目 HTML 生成规范.md',
+        markdown: '# 项目 HTML 生成规范\n\n必须使用项目知识库里的按钮、图标和响应式约束。'
+      }),
+      persistRun: async (run) => {
+        const status = run.documentAnalysis?.totalDesignFlow?.stageStatuses?.['html-output']
+        if (status) persistedHtmlStatuses.push(status)
+      }
+    }
+  )
+
+  const htmlCanvas = result.analysis.totalDesignFlow.stageCanvases['html-output']
+  assert.equal(htmlCanvas.nodes.length, 2)
+  assert.deepEqual(htmlCanvas.nodes.map((node) => node.artifactStatus), ['generated', 'generated'])
+  assert.ok(htmlCanvas.nodes.every((node) => node.codePreview?.code?.includes('<!doctype html>')))
+  assert.equal(result.status.status, 'completed')
+  assert.equal(result.status.generatedCount, 2)
+  assert.equal(result.status.totalCount, 2)
+  assert.equal(result.analysis.totalDesignFlow.stageStatuses['html-output'].status, 'completed')
+  assert.equal(capturedContexts.length, 2)
+  const secondNodeGeneratingStatus = persistedHtmlStatuses.find((status) =>
+    status.status === 'generating' &&
+    status.currentNodeId === 'html-progress'
+  )
+  assert.equal(secondNodeGeneratingStatus?.generatedCount, 1)
+  assert.equal(secondNodeGeneratingStatus?.pendingCount, 1)
+  assert.equal(secondNodeGeneratingStatus?.completedAt, undefined)
+  assert.match(capturedContexts[0].htmlReferenceMarkdown, /项目 HTML 生成规范/)
+  assert.match(capturedContexts[0].userPrompt, /项目知识库里的按钮、图标和响应式约束/)
+  assert.equal(store.restoredPages, undefined)
+})
+
+test('html stage artifact generation uses the default md reference when project knowledge has no html spec', async () => {
+  let capturedContext = null
+  const store = createWorkflowRunnerStore({
+    runs: [
+      {
+        id: 'html-stage-default-reference-run',
+        workflowId: 'total-design-flow',
+        skillId: 'total-design-flow',
+        workflowName: '默认规范',
+        input: '做一个后台工具',
+        currentStepId: 'html-output',
+        model: 'gpt-5.5',
+        steps: [],
+        documentAnalysis: {
+          canvas: { nodes: [], edges: [] },
+          totalDesignFlow: {
+            currentStage: 'html-output',
+            stageCanvases: {
+              'html-output': {
+                nodes: [
+                  {
+                    id: 'html-dashboard',
+                    stageId: 'html-output',
+                    title: '数据看板 HTML',
+                    targetGenerator: 'html',
+                    artifactStatus: 'pending',
+                    generationActions: [{ id: 'generate-html', label: '生成 HTML', targetGenerator: 'html' }]
+                  }
+                ],
+                edges: []
+              }
+            }
+          }
+        },
+        agentSessions: {},
+        referenceFiles: {}
+      }
+    ]
+  })
+
+  await generateRunHtmlStageArtifacts(
+    store,
+    { runId: 'html-stage-default-reference-run', timeoutMs: 0 },
+    {
+      htmlProvider: {
+        name: 'html-default-reference-provider',
+        async generate(context) {
+          capturedContext = context
+          return {
+            html: '<!doctype html><html><body><main>数据看板 HTML</main></body></html>',
+            provider: 'html-default-reference-provider',
+            model: context.model
+          }
+        }
+      },
+      defaultHtmlReferenceMarkdown: '# 默认 HTML 生成规范\n\n默认规范要求 1920px-first 和 4px 栅格。'
+    }
+  )
+
+  assert.equal(capturedContext.htmlReferenceSource, 'default')
+  assert.match(capturedContext.htmlReferenceMarkdown, /默认 HTML 生成规范/)
+  assert.match(capturedContext.userPrompt, /1920px-first 和 4px 栅格/)
 })

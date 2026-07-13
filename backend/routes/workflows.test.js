@@ -215,6 +215,82 @@ test('workflow agent routes pass zero timeout through to provider context', asyn
   assert.equal(receivedTimeoutMs, 0)
 })
 
+test('workflow html stage route runs as a workflow artifact job and does not create restored pages', async () => {
+  let capturedContext = null
+  const run = createWorkspaceWorkflowRun({
+    id: 'route-html-stage-run',
+    title: 'AI 视频爆款复刻 HTML',
+    workflowId: 'total-design-flow',
+    projectId: 'project-video',
+    demandScope: 'project',
+    steps: [],
+    currentStepId: 'html-output',
+    documentAnalysis: {
+      canvas: { nodes: [], edges: [] },
+      totalDesignFlow: {
+        currentStage: 'html-output',
+        stageCanvases: {
+          'html-output': {
+            nodes: [
+              {
+                id: 'html-home',
+                stageId: 'html-output',
+                title: '复刻首页 HTML',
+                summary: '上传参考视频并生成拆解任务。',
+                targetGenerator: 'html',
+                artifactStatus: 'pending',
+                generationActions: [{ id: 'generate-html', label: '生成 HTML', targetGenerator: 'html' }]
+              }
+            ],
+            edges: []
+          }
+        }
+      }
+    }
+  })
+  const store = createWorkspaceStore({
+    workflowRuns: [run],
+    restoredPages: [],
+    materials: [
+      {
+        id: 'html-reference-md',
+        projectId: 'project-video',
+        type: 'knowledge',
+        title: '项目 HTML 参考规范.md',
+        category: 'HTML 生成规范',
+        content: '# 项目 HTML 参考规范\n\n必须保留项目资产引用，不要创建网页工程资产。'
+      }
+    ]
+  })
+  const routes = workflowRoutes(store, {
+    agentProvider: {
+      name: 'route-html-provider',
+      async generate(context) {
+        capturedContext = context
+        return {
+          html: '<!doctype html><html><body><main>复刻首页 HTML</main></body></html>',
+          provider: 'route-html-provider',
+          model: context.model
+        }
+      }
+    }
+  })
+
+  const result = await routes['POST /api/workspace/workflow-runs/:id/stages/html-output/generate']({
+    id: 'route-html-stage-run',
+    awaitCompletion: true,
+    timeoutMs: 0
+  })
+
+  const htmlNode = result.analysis.totalDesignFlow.stageCanvases['html-output'].nodes[0]
+  assert.equal(htmlNode.artifactStatus, 'generated')
+  assert.match(htmlNode.codePreview.code, /<!doctype html>/)
+  assert.equal(result.status.status, 'completed')
+  assert.equal(store.restoredPages.length, 0)
+  assert.match(capturedContext.userPrompt, /项目 HTML 参考规范/)
+  assert.match(capturedContext.userPrompt, /不要创建网页工程资产/)
+})
+
 test('workflow agent routes fall back safely when workspace settings are missing', async () => {
   const run = createWorkspaceWorkflowRun({
     id: 'run-missing-settings',

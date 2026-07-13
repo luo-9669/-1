@@ -782,6 +782,51 @@ test('gap analysis uses backend model from source report and persists source met
   assert.match(listed.records[0].markdown, /OP01/)
 })
 
+test('gap analysis keeps source metadata when running an existing created record', async () => {
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      generate: async () => ({
+        content: '# 机会点分析结果\n\n## 机会点卡片\n\n- OP01：围绕源报告补齐差距。'
+      })
+    })
+  })
+  const projectId = 'competitor-analysis-gap-existing-record-regression'
+  const created = await service.createRecord({
+    id: 'gap-record-1',
+    projectId,
+    kind: 'gap',
+    competitorNames: ['HeyGen'],
+    sourceRecordId: 'framework-record-2',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架报告'
+  })
+
+  const response = await service.run({
+    projectId,
+    recordId: created.record.id,
+    kind: 'gap',
+    competitorNames: ['HeyGen'],
+    sourceContent: '# 完整框架报告\n\n竞品已经覆盖模板化视频生成。',
+    sourceRecordId: 'framework-record-2',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架报告'
+  })
+  const listed = await service.listRecords({ projectId })
+
+  assert.equal(response.ok, true)
+  assert.equal(listed.records[0].id, 'gap-record-1')
+  assert.equal(listed.records[0].sourceRecordId, 'framework-record-2')
+  assert.equal(listed.records[0].sourceKind, 'framework')
+  assert.equal(listed.records[0].sourceTitle, '完整框架报告')
+  assert.match(listed.records[0].markdown, /OP01/)
+})
+
 test('python interaction flow serializes normalized evidence quality fields', () => {
   const result = spawnSync('python3', ['-c', `
 from models import InteractionFlow
