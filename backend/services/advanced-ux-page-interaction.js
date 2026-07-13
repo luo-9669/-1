@@ -239,7 +239,19 @@ function frameTable(tables = []) {
 
 function frameRowsAsObjects(table = null) {
   return rowsAsObjects(table).map((row) => {
-    if (row['区域'] || row['内容'] || row['说明']) return row
+    if (row['区域'] || row['内容'] || row['说明']) {
+      const stateDescription = row['状态说明'] || row.stateDescription || row.state_description || ''
+      const componentReference = row['组件引用'] || row.componentReference || row.component_reference || ''
+      const regionId = row['区域编号'] || row.regionId || row.region_id || ''
+      const regionName = row['区域名称'] || row.regionName || row.region_name || ''
+      return {
+        ...row,
+        regionId,
+        regionName,
+        stateDescription,
+        componentReference
+      }
+    }
     const regionId = row['区域编号'] || row.region_id || ''
     const regionName = row['区域名称'] || row.region_name || ''
     const regionType = row['区域类型'] || row.region_type || ''

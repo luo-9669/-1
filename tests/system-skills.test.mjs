@@ -221,7 +221,7 @@ test('advanced UX upload route prompts require the latest ten headings and new r
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/需求阶段一产出约束\.md/)
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/交互低保阶段二\.md/)
   assert.match(uploadsSource, /docs\/skills\/advanced-ux\/AI视频爆款复刻-对照参考\.md/)
-  assert.match(uploadsSource, /docs\/skills\/advanced-ux\/AI视频爆款复刻工具-阶段二产出参考\.md/)
+  assert.match(uploadsSource, /docs\/skills\/advanced-ux\/交互低保阶段二输出参考文档\.md/)
   assert.match(directPromptSource, /禁止复制、套用或改写参考文档中的业务内容/)
   ;[
     'GWT',
@@ -259,6 +259,170 @@ test('advanced UX upload route prompts require the latest ten headings and new r
   assert.doesNotMatch(directPromptSource, /必须包含且仅用以下 7 个二级标题：## 需求理解/)
   assert.doesNotMatch(repairPromptSource, /保持高级 UX 7 节点结构：需求理解/)
   assert.match(uploadsSource, /包含旧章节标题/)
+})
+
+test('advanced UX stage one prompt and docs include latest expanded framework fields', async () => {
+  const uploadsSource = await readFile(new URL('../backend/routes/uploads.js', import.meta.url), 'utf8')
+  const skillDoc = await readFile(new URL('../docs/skills/advanced-ux/需求分析阶段一skill.md', import.meta.url), 'utf8')
+  const constraintDoc = await readFile(new URL('../docs/skills/advanced-ux/需求阶段一产出约束.md', import.meta.url), 'utf8')
+  const directPromptSource = uploadsSource.slice(
+    uploadsSource.indexOf('const advancedUxDirectMarkdownPrompt'),
+    uploadsSource.indexOf('const advancedUxMarkdownCompletenessPrompt')
+  )
+  const repairPromptSource = uploadsSource.slice(
+    uploadsSource.indexOf('const advancedUxMarkdownCompletenessPrompt'),
+    uploadsSource.indexOf('const fastMarkdownReplyPrompt')
+  )
+
+  ;[
+    '需求冲突识别',
+    '多分支假设',
+    '问题重写',
+    '症状-原因-方案拆分表',
+    '功能边界对比表',
+    'JTBD 任务定义',
+    '风险优先级矩阵',
+    '现有流程诊断',
+    '用户-场景-任务矩阵',
+    '设计方向对比',
+    '推荐决策'
+  ].forEach((token) => {
+    assert.match(skillDoc, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  })
+
+  ;[
+    '18',
+    '需求冲突识别表',
+    '多分支5Whys追溯表',
+    '问题重写3版本',
+    '症状-原因-方案拆分表',
+    '功能边界对比表',
+    '用户-场景-任务矩阵',
+    '设计方向对比表',
+    '推荐决策卡片'
+  ].forEach((token) => {
+    assert.match(constraintDoc, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  })
+
+  ;[
+    '需求冲突识别表',
+    '多分支5Whys',
+    '问题重写3版本',
+    '症状-原因-方案拆分表',
+    '功能边界对比表',
+    '用户-场景-任务矩阵',
+    '设计方向对比表',
+    '推荐决策卡片'
+  ].forEach((token) => {
+    assert.match(directPromptSource, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(repairPromptSource, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(uploadsSource, new RegExp(`缺少.*${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+  })
+})
+
+test('advanced UX stage one imported details preserve expanded subsection blocks', () => {
+  const headings = [
+    '原始需求分析',
+    '设计问题定义',
+    '用户与场景',
+    '假设与验证',
+    '设计机会',
+    '整体交互链路',
+    '三套设计方案',
+    '异常流补充',
+    '推荐方案建议',
+    '设计优先级与分阶段计划'
+  ]
+  const markdown = [
+    '# 新版阶段一导入测试',
+    '## 原始需求分析',
+    '### 需求冲突识别',
+    '| # | 冲突描述 | 冲突类型 | 涉及来源 | 严重度 | 消解建议 | 置信度 |',
+    '|---|----------|----------|----------|--------|----------|--------|',
+    '| 1 | 入口效率与控制感存在冲突 | 动机 | 用户输入 | 高 | 默认推荐并保留编辑 | 中 |',
+    '',
+    '### 多分支假设5Whys',
+    '| 假设路径 | Why 1 | Why 2 | 推论 | 置信度 |',
+    '|----------|-------|-------|------|--------|',
+    '| 新手路径 | 想快速开始 | 不知道规则 | 需要引导式入口 | 中 |',
+    '',
+    '### 问题重写3版本',
+    '| 版本编号 | JTBD问题陈述 | 对应根因方向 | 优先级 | 置信度 |',
+    '|----------|--------------|--------------|--------|--------|',
+    '| V1 | 当用户需要完成任务时，希望快速理解输入并得到结果 | 新手路径 | P0 | 中 |',
+    '',
+    '## 设计问题定义',
+    '### 症状-原因-方案拆分表',
+    '| # | 症状描述 | 可能原因 | 方案方向 | 影响力 | 可行性 | 置信度 |',
+    '|---|----------|----------|----------|--------|--------|--------|',
+    '| 1 | 用户不知道下一步 | 状态反馈不足 | 增加步骤提示 | 高 | 高 | 中 |',
+    '',
+    '### 功能边界对比表',
+    '| 对比维度 | 新需求定位 | 现有功能定位 | 差异说明 | 边界判定 |',
+    '|----------|------------|--------------|----------|----------|',
+    '| 入口 | 任务启动 | 信息展示 | 需区分启动与介绍 | 新增 |',
+    '',
+    '## 用户与场景',
+    '### JTBD 任务定义',
+    '| 用户类型 | 场景 | 行为 | 结果 | 障碍 | 痛点 | 关键洞察 |',
+    '|----------|------|------|------|------|------|----------|',
+    '| 新手 | 首次使用 | 提交输入 | 获得结果 | 不懂规则 | 容易放弃 | 需要模板化引导 |',
+    '',
+    '## 假设与验证',
+    '### 风险优先级矩阵',
+    '| 风险 | 影响 | 发生概率 | 优先级 | 验证方式 |',
+    '|------|------|----------|--------|----------|',
+    '| 输入不完整 | 高 | 中 | P0 | 可用性测试 |',
+    '',
+    '### 用户-场景-任务矩阵',
+    '| 用户类型 | 关键场景 | 核心任务 | 当前障碍 | 期望能力 | 需求差异 | 置信度 |',
+    '|----------|----------|----------|----------|----------|----------|--------|',
+    '| 新手 | 首次提交 | 完成任务 | 不知道规则 | 引导和纠错 | 需要更强引导 | 中 |',
+    '',
+    '## 设计机会',
+    '### 现有流程诊断',
+    '| 节点 | 当前问题 | 影响 | 优化方向 |',
+    '|------|----------|------|----------|',
+    '| 入口 | 规则不清 | 启动慢 | 增加前置提示 |',
+    ...headings.slice(5, 8).flatMap((heading) => [`## ${heading}`, '### 占位详情', '当前章节用于补齐十节点导入。']),
+    '## 推荐方案建议',
+    '### 设计方向对比',
+    '| 对比维度 | 方向A评分 | 方向B评分 | 方向C评分 | 权重 |',
+    '|----------|-----------|-----------|-----------|------|',
+    '| 效率 | 5 | 3 | 4 | 30% |',
+    '',
+    '### 推荐决策',
+    '| 推荐方案 | 核心理由 | 方案融合点 | 后续演进方向 | 置信度 |',
+    '|----------|----------|------------|--------------|--------|',
+    '| 方向A | 能最快闭合主流程 | 融合方向B的可控项 | 后续扩展团队协作 | 中 |',
+    '',
+    '## 设计优先级与分阶段计划',
+    '### 占位详情',
+    '当前章节用于补齐十节点导入。'
+  ].join('\n')
+
+  const flow = importAdvancedUxMarkdownReportToTotalFlow(
+    { stageCanvases: { 'requirement-dissection': { nodes: [] } } },
+    { markdown, fileName: '新版阶段一导入测试.md' }
+  )
+  const tabs = flow.requirementDissectionArtifact.productAnalysisPipeline.tabs
+  const detailTitles = tabs.flatMap((tab) => (tab.detailBlocks || []).map((block) => block.title))
+
+  ;[
+    '需求冲突识别',
+    '多分支假设5Whys',
+    '问题重写3版本',
+    '症状-原因-方案拆分表',
+    '功能边界对比表',
+    'JTBD 任务定义',
+    '风险优先级矩阵',
+    '用户-场景-任务矩阵',
+    '现有流程诊断',
+    '设计方向对比',
+    '推荐决策'
+  ].forEach((title) => {
+    assert.ok(detailTitles.includes(title), `missing imported detail block: ${title}`)
+  })
 })
 
 test('advanced UX page interaction prompt allows required text code blocks', async () => {
@@ -310,6 +474,30 @@ test('advanced UX low-fi comparison prompts require separated solution wireframe
     assert.doesNotMatch(source, /用 ASCII (?:文本布局图|线框图)(?:或 image_generate 工具生成)?并排对比/)
     assert.doesNotMatch(source, /用 ```text 代码块并排展示方案一\/方案二\/方案三/)
   })
+})
+
+test('advanced UX stage two prompt and docs include latest output reference gates', async () => {
+  const [uploadsSource, stageTwoSkill, stageTwoReference] = await Promise.all([
+    readFile(new URL('../backend/routes/uploads.js', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/交互低保阶段二.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/交互低保阶段二输出参考文档.md', import.meta.url), 'utf8')
+  ])
+  const pagePromptSource = uploadsSource.slice(
+    uploadsSource.indexOf('const pageInteractionDocumentPrompt'),
+    uploadsSource.indexOf('const generateAdvancedUxPageInteractionDocument')
+  )
+
+  assert.match(uploadsSource, /交互低保阶段二输出参考文档\.md/)
+  ;[stageTwoSkill, pagePromptSource].forEach((source) => {
+    assert.match(source, /需求快析[\s\S]*页面识别与编号[\s\S]*信息架构实体表[\s\S]*主流程与状态机/)
+    assert.match(source, /低保真原型完成度规范|低保真完成度自检清单/)
+    assert.match(source, /Draw\.io[\s\S]*图规划/)
+    assert.match(source, /产物规范说明/)
+    assert.match(source, /页面完整性验收清单|全局自检清单|19项/)
+  })
+  assert.match(stageTwoReference, /页面识别与编号|页面总览表/)
+  assert.match(stageTwoReference, /低保真线框图规范[\s\S]*Draw\.io 产出规范/)
+  assert.match(stageTwoReference, /产物规范说明[\s\S]*全局自检清单/)
 })
 
 test('advanced UX stage two import keeps spec-shaped detail content', () => {
@@ -455,6 +643,8 @@ test('advanced UX stage two import keeps spec-shaped detail content', () => {
   assert.equal(canvas.pageInteractionDocumentArtifact.stateRows.length, 1)
   assert.equal(canvas.pageInteractionDocumentArtifact.globalInteractionRows.length, 1)
   assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.map((section) => section.key).join(','), 'position,framework-table,text-layout,interaction-rules,exception-states')
+  assert.equal(canvas.nodes[0].pageLayoutArtifact.layoutRegions[0].stateDescription, '当前页高亮')
+  assert.equal(canvas.nodes[0].pageLayoutArtifact.layoutRegions[0].componentReference, 'NavBar')
   assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.find((section) => section.key === 'interaction-rules').rows.length, 3)
   assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.find((section) => section.key === 'exception-states').rows.length, 5)
 })
