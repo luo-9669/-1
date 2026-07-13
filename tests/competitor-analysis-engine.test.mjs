@@ -525,7 +525,7 @@ test('flow fallback markdown is rewritten by configured codex model when evidenc
   assert.deepEqual(response.interactionArtifacts.lowFiWireframeImages, [])
 })
 
-test('flow evidence_quality none does not call backend model and returns no-evidence report', async () => {
+test('flow evidence_quality none rejects unsafe model output and returns no-evidence report', async () => {
   let providerCalled = false
   const service = createCompetitorAnalysisEngineService({
     modelSettingsProvider: async () => ({
@@ -568,9 +568,10 @@ test('flow evidence_quality none does not call backend model and returns no-evid
     feature: 'AI Avatar'
   })
 
-  assert.equal(providerCalled, false)
+  assert.equal(providerCalled, true)
   assert.equal(response.ok, true)
   assert.match(response.markdown, /未找到|待补采/)
+  assert.doesNotMatch(response.markdown, /不应该生成/)
   assert.equal(response.interactionArtifacts.evidenceStatus, 'not_found')
   assert.equal(response.interactionArtifacts.evidenceQuality, 'none')
   assert.equal(response.interactionArtifacts.evidenceCount, 0)
@@ -683,6 +684,102 @@ test('framework evidence_quality none does not call backend model or show fabric
   assert.equal(response.ok, true)
   assert.match(response.markdown, /未找到|待补采|证据质量：none/)
   assert.doesNotMatch(response.markdown, /核心页面、关键任务链路、信息架构/)
+})
+
+test('gap analysis requires source report content before any runner work', async () => {
+  let pythonCalled = false
+  const service = createCompetitorAnalysisEngineService({
+    pythonRunner: async () => {
+      pythonCalled = true
+      return { code: 0, stdout: '', stderr: '' }
+    },
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      generate: async () => ({ content: '# 不应该生成' })
+    })
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-gap-missing-source-regression',
+    kind: 'gap',
+    productName: 'HeyGen'
+  })
+
+  assert.equal(pythonCalled, false)
+  assert.equal(response.ok, false)
+  assert.equal(response.kind, 'gap')
+  assert.match(response.summary, /源报告内容|已有报告详情页/)
+  assert.match(response.markdown, /机会点分析/)
+})
+
+test('gap analysis uses backend model from source report and persists source metadata', async () => {
+  let pythonCalled = false
+  let capturedPrompt = ''
+  const service = createCompetitorAnalysisEngineService({
+    pythonRunner: async () => {
+      pythonCalled = true
+      return { code: 0, stdout: '', stderr: '' }
+    },
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      generate: async (payload = {}) => {
+        capturedPrompt = payload.userPrompt
+        assert.equal(payload.responseFormat, 'markdown')
+        assert.equal(payload.timeoutMs, 0)
+        assert.match(payload.systemPrompt, /不得编造/)
+        return {
+          content: [
+            '# 机会点分析结果',
+            '',
+            '## 差距矩阵',
+            '',
+            '| 维度 | 我方产品 | 竞品 | 机会 |',
+            '|---|---|---|---|',
+            '| 爆款复刻 | 待补充 | HeyGen 提供模板化能力 | OP01：增强复刻链路 |',
+            '',
+            '## 机会点卡片',
+            '',
+            '- OP01：爆款视频结构拆解，来源：输入报告。'
+          ].join('\n')
+        }
+      }
+    })
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-gap-model-regression',
+    kind: 'gap',
+    competitorNames: ['HeyGen'],
+    productName: 'HeyGen',
+    sourceContent: '# 完整框架结果\n\nHeyGen 提供模板化视频生成与导出链路。',
+    sourceRecordId: 'framework-record-1',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架结果'
+  })
+  const listed = await service.listRecords({
+    projectId: 'competitor-analysis-gap-model-regression'
+  })
+
+  assert.equal(pythonCalled, false)
+  assert.equal(response.ok, true)
+  assert.equal(response.kind, 'gap')
+  assert.match(response.markdown, /机会点分析结果/)
+  assert.match(capturedPrompt, /源报告内容/)
+  assert.match(capturedPrompt, /HeyGen 提供模板化视频生成与导出链路/)
+  assert.equal(listed.records[0].kind, 'gap')
+  assert.equal(listed.records[0].sourceRecordId, 'framework-record-1')
+  assert.equal(listed.records[0].sourceKind, 'framework')
+  assert.match(listed.records[0].markdown, /OP01/)
 })
 
 test('python interaction flow serializes normalized evidence quality fields', () => {

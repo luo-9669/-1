@@ -124,7 +124,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
         )
 
         # 2. 抓取前几个页面的详细内容
-        entries = scraper.enrich_entries_with_content(entries, max_pages=3)
+        entries = scraper.enrich_entries_with_content(entries, max_pages=10)
 
         # 3. 分析变更
         changes = analyzer.analyze_changes(
@@ -355,7 +355,7 @@ def run_interaction_flow(
     )
 
     # 2. 抓取页面内容（交互流程需要详细内容）
-    entries = scraper.enrich_entries_with_content(entries, max_pages=5)
+    entries = scraper.enrich_entries_with_content(entries, max_pages=20)
 
     # 3. 提取交互流程
     flow = analyzer.extract_interaction_flow(target.name, feature, entries)

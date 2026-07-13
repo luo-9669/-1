@@ -442,7 +442,7 @@ def fetch_blog(url: str) -> List[SearchEntry]:
     return entries
 
 
-def enrich_entries_with_content(entries: List[SearchEntry], max_pages: int = 5) -> List[SearchEntry]:
+def enrich_entries_with_content(entries: List[SearchEntry], max_pages: int = 15) -> List[SearchEntry]:
     """
     为搜索结果补充页面内容（抓取前 N 个页面的正文）。
 

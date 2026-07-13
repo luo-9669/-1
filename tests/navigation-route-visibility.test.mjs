@@ -75,7 +75,7 @@ test('workflow current step tolerates analysis records without steps', () => {
   assert.deepEqual(getCurrentStep({ id: 'empty-run', currentStepId: '', steps: [] }), null)
 })
 
-test('competitor report quick analysis routes to design agent with markdown attachment', async () => {
+test('competitor report quick analysis routes non-gap reports to design agent with markdown attachment', async () => {
   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
   const handlerStart = appSource.indexOf('async function handleCompetitorReportQuickAnalyze')
   const handlerEnd = appSource.indexOf('function switchView', handlerStart)
@@ -83,6 +83,7 @@ test('competitor report quick analysis routes to design agent with markdown atta
 
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'quick analysis handler should be present')
   assert.match(appSource, /@quick-analyze-report="handleCompetitorReportQuickAnalyze"/)
+  assert.match(handlerSource, /if \(payload\.kind === 'gap'\) return/)
   assert.match(handlerSource, /activeView\.value = 'workflow'/)
   assert.match(handlerSource, /syncRouteToView\('workflow'\)/)
   assert.match(handlerSource, /await startWorkflowRun\(\{ auto: true \}\)/)

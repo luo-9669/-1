@@ -171,25 +171,60 @@ def _prepare_analysis_material(entries: List[SearchEntry]) -> str:
 
 
 def _llm_analyze_changes(competitor_name: str, material: str) -> Optional[List[ChangeRecord]]:
-    """使用 LLM 进行变更分析"""
-    system_prompt = """你是一个专业的竞品分析师。请根据提供的信息，分析竞品的最新动态和变化。
-你需要：
-1. 识别每一条有价值的变更/动态
-2. 将其归类到以下类别之一：功能更新、设计变更、定价调整、内容更新、市场动态、缺陷修复、性能优化、其他
-3. 评估每条变更的影响等级：高（对竞争格局有重大影响）、中（有一定影响）、低（影响较小）
-4. 给出影响评估的原因
+    """使用 LLM 进行变更分析（趋势模式识别+三维评分）"""
+    system_prompt = """你是一个专业的竞品分析师。请根据提供的信息，分析竞品的最新动态和变化，识别趋势模式并做三维评分。
 
-请以 JSON 数组格式返回，每个元素包含：
+你需要：
+1. 识别每一条有价值的变更/动态，归类到以下类别之一：
+   feature_launch / ui_redesign / pricing / content / performance / bugfix / market
+2. 识别跨条目的趋势模式（accelerating/stable/declining/new_pattern）
+3. 对整体竞争态势做三维评分（1-10）：
+   - activity_score: 竞品活跃度（发布频率、更新幅度）
+   - threat_score: 竞争威胁度（对标自身产品的威胁程度）
+   - opportunity_score: 机会窗口度（可借鉴或差异化反击的空间）
+4. 给出建议深入分析的推荐目标
+
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 low。
+
+请以 JSON 格式返回：
 {
-    "category": "变更类别",
-    "summary": "一句话摘要",
-    "details": "详细说明（2-3句话）",
-    "impact": "高/中/低",
-    "impact_reason": "影响评估原因",
-    "source_indices": [1, 2]  // 信息来源的编号
+    "changes": [
+        {
+            "id": "CHG01",
+            "category": "feature_launch|ui_redesign|pricing|content|performance|bugfix|market",
+            "summary": "一句话摘要",
+            "details": "详细说明（2-3句）",
+            "evidence_indices": [1, 2],
+            "confidence": "high|medium|low",
+            "trend_signal": "accelerating|stable|declining|new_pattern"
+        }
+    ],
+    "trend_patterns": [
+        {
+            "pattern": "趋势名称",
+            "description": "趋势描述",
+            "related_changes": ["CHG01", "CHG03"],
+            "trajectory": "accelerating|stable|declining",
+            "strategic_implication": "战略含义"
+        }
+    ],
+    "scores": {
+        "activity_score": 1-10,
+        "threat_score": 1-10,
+        "opportunity_score": 1-10,
+        "rationale": "评分依据"
+    },
+    "recommended_deep_dive": [
+        {
+            "target": "建议深入分析的功能/流程",
+            "reason": "推荐理由"
+        }
+    ],
+    "summary": "周报总结（5-8句概括本周趋势）",
+    "data_gaps": ["信息缺口"]
 }
 
-如果没有发现有价值的变更，返回空数组 []。
+如果没有发现有价值的变更，返回空 changes 数组但仍需填写 scores 和 summary。
 只返回 JSON，不要其他内容。"""
 
     prompt = f"请分析竞品「{competitor_name}」的以下搜索结果，识别最近的动态和变化：\n\n{material}"
@@ -206,38 +241,90 @@ def _llm_analyze_changes(competitor_name: str, material: str) -> Optional[List[C
             lines = response_text.split("\n")
             response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-        changes_data = json.loads(response_text)
+        result_data = json.loads(response_text)
+
+        # 新格式：result_data 是一个对象，changes 是其中的数组
+        if isinstance(result_data, dict) and "changes" in result_data:
+            changes_data = result_data.get("changes", [])
+            extra_data = {
+                "trend_patterns": result_data.get("trend_patterns", []),
+                "scores": result_data.get("scores", {}),
+                "recommended_deep_dive": result_data.get("recommended_deep_dive", []),
+                "weekly_summary": result_data.get("summary", ""),
+                "data_gaps": result_data.get("data_gaps", []),
+            }
+        else:
+            # 向后兼容：旧格式直接是数组
+            changes_data = result_data if isinstance(result_data, list) else []
+            extra_data = {}
+
         changes = []
+        # 新类别映射
+        category_map_new = {
+            "feature_launch": ChangeCategory.FEATURE_UPDATE,
+            "ui_redesign": ChangeCategory.DESIGN_CHANGE,
+            "pricing": ChangeCategory.PRICING_CHANGE,
+            "content": ChangeCategory.CONTENT_UPDATE,
+            "performance": ChangeCategory.PERFORMANCE,
+            "bugfix": ChangeCategory.BUG_FIX,
+            "market": ChangeCategory.MARKET_MOVE,
+        }
+        # 旧类别映射（向后兼容）
+        category_map_old = {
+            "功能更新": ChangeCategory.FEATURE_UPDATE,
+            "设计变更": ChangeCategory.DESIGN_CHANGE,
+            "定价调整": ChangeCategory.PRICING_CHANGE,
+            "内容更新": ChangeCategory.CONTENT_UPDATE,
+            "市场动态": ChangeCategory.MARKET_MOVE,
+            "缺陷修复": ChangeCategory.BUG_FIX,
+            "性能优化": ChangeCategory.PERFORMANCE,
+            "其他": ChangeCategory.OTHER,
+        }
+        category_map = {**category_map_new, **category_map_old}
+
+        impact_map = {"高": ImpactLevel.HIGH, "中": ImpactLevel.MEDIUM, "低": ImpactLevel.LOW}
 
         for item in changes_data:
-            # 映射类别
-            category_map = {
-                "功能更新": ChangeCategory.FEATURE_UPDATE,
-                "设计变更": ChangeCategory.DESIGN_CHANGE,
-                "定价调整": ChangeCategory.PRICING_CHANGE,
-                "内容更新": ChangeCategory.CONTENT_UPDATE,
-                "市场动态": ChangeCategory.MARKET_MOVE,
-                "缺陷修复": ChangeCategory.BUG_FIX,
-                "性能优化": ChangeCategory.PERFORMANCE,
-                "其他": ChangeCategory.OTHER,
-            }
-
-            impact_map = {"高": ImpactLevel.HIGH, "中": ImpactLevel.MEDIUM, "低": ImpactLevel.LOW}
-
             category = category_map.get(item.get("category", "其他"), ChangeCategory.OTHER)
             impact = impact_map.get(item.get("impact", "中"), ImpactLevel.MEDIUM)
+            # 新格式：confidence 映射为影响等级
+            confidence = item.get("confidence", "")
+            if not item.get("impact") and confidence:
+                confidence_impact_map = {"high": ImpactLevel.HIGH, "medium": ImpactLevel.MEDIUM, "low": ImpactLevel.LOW}
+                impact = confidence_impact_map.get(confidence, ImpactLevel.MEDIUM)
 
             # 获取来源 URL
-            source_indices = item.get("source_indices", [])
+            source_indices = item.get("source_indices", item.get("evidence_indices", []))
 
-            changes.append(ChangeRecord(
+            change_record = ChangeRecord(
                 competitor=competitor_name,
                 category=category,
                 summary=item.get("summary", ""),
                 details=item.get("details", ""),
                 impact=impact,
                 impact_reason=item.get("impact_reason", ""),
-            ))
+            )
+            # 将新增字段存入 structured_data
+            change_record.structured_data = {
+                "id": item.get("id", ""),
+                "confidence": confidence,
+                "trend_signal": item.get("trend_signal", ""),
+                "evidence_indices": source_indices,
+            }
+            changes.append(change_record)
+
+        # 将趋势、评分等附加数据存入第一个 ChangeRecord 的 structured_data（如果有的话）
+        # 或者作为返回值的一部分——通过 caller 的 scan_result.structured_data 使用
+        # 这里我们通过在 changes 列表上附加一个 _extra_data 属性来传递
+        if extra_data and changes:
+            changes[0].structured_data["trend_patterns"] = extra_data.get("trend_patterns", [])
+            changes[0].structured_data["scores"] = extra_data.get("scores", {})
+            changes[0].structured_data["recommended_deep_dive"] = extra_data.get("recommended_deep_dive", [])
+            changes[0].structured_data["weekly_summary"] = extra_data.get("weekly_summary", "")
+            changes[0].structured_data["data_gaps"] = extra_data.get("data_gaps", [])
+        # 即使没有 changes，也将 extra_data 保存以便上层使用
+        if extra_data:
+            _llm_analyze_changes._last_extra_data = extra_data
 
         logger.info(f"LLM 分析完成，竞品 [{competitor_name}] 发现 {len(changes)} 条变更")
         return changes
@@ -397,14 +484,41 @@ def scan_for_new_features(competitor_name: str, entries: List[SearchEntry], toda
     if config.LLM_API_KEY:
         # LLM 分析
         material = _prepare_analysis_material(today_entries)
-        system_prompt = """你是一个产品分析师。请分析以下搜索结果，判断竞品是否有新功能发布。
-如果有新功能，请列出。
+        system_prompt = """你是一个专业的竞品信号分析师。请分析以下搜索结果，全量采集竞品动态信号并标注置信度。
+
+你需要识别以下6类信号：
+1. feature_launch: 新功能发布/上线
+2. pricing_change: 定价/套餐/促销变化
+3. ui_redesign: 界面改版/视觉更新
+4. content_update: 文档/帮助/博客内容更新
+5. performance: 性能优化/速度提升
+6. market_move: 融资/合作/招聘/市场活动
+
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
 
 请以 JSON 格式返回：
 {
-    "has_new_features": true/false,
-    "new_features": ["功能1", "功能2"],
-    "summary": "扫描总结"
+    "signals": [
+        {
+            "id": "SIG01",
+            "type": "feature_launch|pricing_change|ui_redesign|content_update|performance|market_move",
+            "title": "一句话标题",
+            "description": "2-3句详细说明",
+            "evidence_urls": ["来源URL"],
+            "confidence": "high|medium|low",
+            "impact_assessment": {
+                "user_impact": "对用户的影响",
+                "competitive_threat": "high|medium|low",
+                "opportunity": "high|medium|low"
+            },
+            "tags": ["标签1", "标签2"],
+            "action_needed": "monitor|deep_dive|respond",
+            "raw_date": "原始发布日期（如有）"
+        }
+    ],
+    "market_sentiment": "整体市场情绪（积极/中性/消极）",
+    "summary": "今日扫描总结（3-5句话概括趋势）",
+    "data_gaps": ["信息缺口1", "信息缺口2"]
 }
 只返回 JSON。"""
 
@@ -418,9 +532,22 @@ def scan_for_new_features(competitor_name: str, entries: List[SearchEntry], toda
                     lines = response_text.split("\n")
                     response_text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
                 data = json.loads(response_text)
-                scan_result.has_new_features = data.get("has_new_features", False)
-                scan_result.new_features = data.get("new_features", [])
-                scan_result.summary = data.get("summary", "")
+
+                # 新格式：signals 数组
+                signals = data.get("signals", [])
+                if signals:
+                    scan_result.has_new_features = True
+                    scan_result.new_features = [s.get("title", "") for s in signals if s.get("title")]
+                    scan_result.summary = data.get("summary", "")
+                    # 将完整信号数据写入 structured_data
+                    scan_result.structured_data["signals"] = signals
+                    scan_result.structured_data["market_sentiment"] = data.get("market_sentiment", "")
+                    scan_result.structured_data["data_gaps"] = data.get("data_gaps", [])
+                else:
+                    # 向后兼容旧格式
+                    scan_result.has_new_features = data.get("has_new_features", False)
+                    scan_result.new_features = data.get("new_features", [])
+                    scan_result.summary = data.get("summary", "")
             except Exception as e:
                 logger.error(f"解析新功能扫描结果失败: {e}")
     else:
@@ -523,28 +650,101 @@ def extract_interaction_flow(
     material = "\n---\n".join(material_parts)
 
     if config.LLM_API_KEY:
-        system_prompt = """你是一个UX分析师。请根据提供的信息，整理出竞品某个功能的操作交互流程。
+        system_prompt = """你是一位资深UX交互分析师。请根据提供的竞品信息，输出完整的页面交互分析文档。
 
-请以 JSON 格式返回：
+输出 JSON 格式，包含以下部分：
+
 {
-    "flow_description": "流程概述（1-2句话）",
-    "steps": [
-        {
-            "step_number": 1,
-            "description": "步骤描述",
-            "ui_element": "涉及的UI元素（按钮、菜单等）",
-            "expected_result": "预期结果",
-            "notes": "备注（可选）"
-        }
-    ]
-}
-只返回 JSON。"""
+    "flow_description": "流程概述（2-3句话，说明核心用户任务和主要路径）",
+    "confidence": "full|partial|none",
 
-        prompt = f"""请根据以下信息，整理竞品「{competitor_name}」的「{feature}」功能的交互操作流程：
+    "page_overview": [
+        {
+            "page_id": "P01",
+            "page_name": "页面名称",
+            "page_type": "page|popup|drawer|overlay",
+            "purpose": "页面目的（1句话）",
+            "url": "页面URL（如有）",
+            "evidence": "full|partial|inferred"
+        }
+    ],
+
+    "page_flow": [
+        {
+            "step": "S1",
+            "from_page": "P01",
+            "to_page": "P02",
+            "trigger": "用户操作描述",
+            "condition": "前置条件（可选）",
+            "evidence": "full|partial|inferred"
+        }
+    ],
+
+    "state_machines": [
+        {
+            "entity": "核心实体名称",
+            "states": [
+                {"id": "ST0", "name": "初始态", "description": "描述"},
+                {"id": "ST1", "name": "状态名", "description": "描述"}
+            ],
+            "transitions": [
+                {"from": "ST0", "to": "ST1", "trigger": "触发操作", "condition": "条件（可选）"}
+            ]
+        }
+    ],
+
+    "popup_definitions": [
+        {
+            "popup_id": "P02",
+            "name": "弹窗名称",
+            "type": "dialog|drawer|toast|tooltip",
+            "trigger": "触发条件",
+            "content_summary": "弹窗内容概述",
+            "actions": ["确认", "取消"]
+        }
+    ],
+
+    "exception_states": [
+        {
+            "id": "E01",
+            "page_id": "P01",
+            "type": "error|empty|loading|timeout|validation",
+            "scenario": "异常场景描述",
+            "system_response": "系统处理方式",
+            "recovery": "用户恢复路径"
+        }
+    ],
+
+    "interaction_rules": [
+        {
+            "id": "IR01",
+            "page_id": "P01",
+            "trigger": "用户操作",
+            "system_action": "系统响应",
+            "reference": "关联的弹窗P编号或状态机ST编号（如有）"
+        }
+    ],
+
+    "missing_info": ["根据现有证据无法确认的项目列表"]
+}
+
+要求：
+- 每个元素必须标注 evidence 置信度（full=有直接证据, partial=部分证据推断, inferred=无证据推断）
+- 无法确认的内容放入 missing_info，不要编造
+- page_id 统一用 P01/P02... 编号，弹窗也共用 P 编号
+- 状态机用 ST0/ST1... 编号，ST0 固定为初始态
+- 主流程步骤用 S1/S2... 编号
+- 交互规则用 IR01/IR02... 编号
+- 异常状态用 E01/E02... 编号
+- 编号必须前后一致：交互规则引用的弹窗/状态机编号必须在对应表中存在
+
+只返回 JSON，不要其他内容。"""
+
+        prompt = f"""请分析竞品「{competitor_name}」的「{feature}」功能的完整交互流程。
 
 {material}
 
-请尽可能详细地列出操作步骤。"""
+请输出完整的页面交互分析文档（JSON格式），包括：页面总览、页面流转、状态机、弹窗定义、异常状态、交互规则。"""
 
         response = _call_llm(prompt, system_prompt)
 
@@ -557,14 +757,44 @@ def extract_interaction_flow(
                 data = json.loads(response_text)
                 flow.flow_description = data.get("flow_description", "")
 
-                for step_data in data.get("steps", []):
-                    flow.steps.append(InteractionStep(
-                        step_number=step_data.get("step_number", 0),
-                        description=step_data.get("description", ""),
-                        ui_element=step_data.get("ui_element", ""),
-                        expected_result=step_data.get("expected_result", ""),
-                        notes=step_data.get("notes", ""),
-                    ))
+                # 尝试解析新结构化 JSON
+                new_format = "page_flow" in data or "page_overview" in data
+                if new_format:
+                    # 新格式：将 page_flow 映射为 InteractionStep 列表
+                    for idx, pf in enumerate(data.get("page_flow", []), 1):
+                        trigger = pf.get("trigger", "")
+                        condition = pf.get("condition", "")
+                        from_page = pf.get("from_page", "")
+                        to_page = pf.get("to_page", "")
+                        desc = f"{from_page} → {to_page}: {trigger}"
+                        if condition:
+                            desc += f"（前置: {condition}）"
+                        flow.steps.append(InteractionStep(
+                            step_number=idx,
+                            description=desc,
+                            ui_element=trigger,
+                            expected_result=to_page,
+                            notes=pf.get("evidence", ""),
+                        ))
+                    # 将新结构的完整数据存入 structured_data
+                    flow.structured_data["confidence"] = data.get("confidence", "none")
+                    flow.structured_data["page_overview"] = data.get("page_overview", [])
+                    flow.structured_data["page_flow"] = data.get("page_flow", [])
+                    flow.structured_data["state_machines"] = data.get("state_machines", [])
+                    flow.structured_data["popup_definitions"] = data.get("popup_definitions", [])
+                    flow.structured_data["exception_states"] = data.get("exception_states", [])
+                    flow.structured_data["interaction_rules"] = data.get("interaction_rules", [])
+                    flow.structured_data["missing_info"] = data.get("missing_info", [])
+                else:
+                    # 旧格式 fallback：直接解析 steps 列表
+                    for step_data in data.get("steps", []):
+                        flow.steps.append(InteractionStep(
+                            step_number=step_data.get("step_number", 0),
+                            description=step_data.get("description", ""),
+                            ui_element=step_data.get("ui_element", ""),
+                            expected_result=step_data.get("expected_result", ""),
+                            notes=step_data.get("notes", ""),
+                        ))
             except Exception as e:
                 logger.error(f"解析交互流程失败: {e}")
     else:
@@ -875,10 +1105,43 @@ def analyze_product_framework(
     framework.structured_data["feature_modules"] = [module.to_dict() for module in framework.feature_modules]
     framework.structured_data["user_journeys"] = [journey.to_dict() for journey in framework.user_journeys]
 
+    # 汇总所有步骤的 data_gaps
+    all_data_gaps = []
+    for gap_key in ["info_arch_data_gaps", "journey_data_gaps", "decision_data_gaps",
+                     "exception_data_gaps", "state_data_gaps", "cross_function_data_gaps"]:
+        gaps = framework.structured_data.get(gap_key, [])
+        if isinstance(gaps, list):
+            all_data_gaps.extend(gaps)
+    # 去重
+    framework.structured_data["data_gaps"] = list(dict.fromkeys(all_data_gaps))
+
+    # 生成可复用 UX 洞察
+    reusable_insights = []
+    # 从决策点提取洞察
+    for dp in framework.decision_points:
+        sd = getattr(dp, "structured_data", {}) or {}
+        if sd.get("user_cognitive_load") == "high":
+            reusable_insights.append(f"决策点「{dp.decision}」认知负荷高，建议简化选项或提供默认值")
+        if sd.get("current_ux_quality") == "差":
+            reusable_insights.append(f"决策点「{dp.decision}」当前UX质量差，需改进: {sd.get('improvement_suggestion', '')}")
+    # 从异常流提取洞察
+    for ef in framework.exception_flows:
+        sd = getattr(ef, "structured_data", {}) or {}
+        if sd.get("user_frustration_level") == "high":
+            reusable_insights.append(f"异常「{ef.scenario}」用户挫败感高，需优化恢复路径")
+    # 从跨功能关联提取洞察
+    for cfl in framework.cross_function_links:
+        sd = getattr(cfl, "structured_data", {}) or {}
+        if sd.get("link_strength") == "strong" and sd.get("user_visibility") == "用户可见":
+            reusable_insights.append(f"「{cfl.source_feature}」与「{cfl.target_feature}」强关联且用户可见，可考虑合并入口或统一交互模式")
+    framework.structured_data["reusable_insights"] = reusable_insights
+
     logger.info(
         f"框架分析完成: {len(framework.feature_modules)} 个功能模块, "
         f"{len(framework.user_journeys)} 个用户旅程, "
-        f"{len(framework.decision_points)} 个决策点"
+        f"{len(framework.decision_points)} 个决策点, "
+        f"{len(reusable_insights)} 条可复用洞察, "
+        f"{len(framework.structured_data.get('data_gaps', []))} 个信息缺口"
     )
 
     return framework
@@ -1070,23 +1333,31 @@ def _analyze_information_architecture(
     if config.LLM_API_KEY:
         system_prompt = """你是一位资深 UX 架构师和信息架构专家。请根据提供的产品网站数据，分析产品的信息架构。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 你需要输出 JSON 格式的结果，包含以下三个部分：
 
-1. navigation_tree: 导航结构树（数组，每项包含 name, url, level, children, node_type）
+1. navigation_tree: 导航结构树（数组，每项包含 name, url, level, children, node_type, confidence）
    node_type 可选: "page", "feature", "section", "action"
+   confidence 可选: "full"（有直接证据）, "partial"（部分推断）, "inferred"（无证据推断）
 
-2. feature_modules: 功能模块列表（数组，每项包含 module_id, name, level, purpose, entry_path, prerequisite, complexity）
+2. feature_modules: 功能模块列表（数组，每项包含 module_id, name, level, purpose, entry_path, prerequisite, complexity, confidence, data_sources）
    module_id 格式: M01, M02...
    level 格式: L1-首页核心, L1-二级导航, L2-子功能, L3-辅助功能 等
    complexity: ★☆☆☆☆ 到 ★★★★★
+   confidence: "full"|"partial"|"inferred"
+   data_sources: 说明该模块结论基于什么证据（如"导航栏直接出现"/"sitemap推断"/"页面内容推断"）
 
 3. page_hierarchy: 页面层级关系（文本格式的树状图，用缩进和连接线表示）
+
+4. data_gaps: 信息缺口列表（缺失的页面/模块/导航层级）
 
 请以 JSON 格式返回：
 {
     "navigation_tree": [...],
     "feature_modules": [...],
-    "page_hierarchy": "树状图文本..."
+    "page_hierarchy": "树状图文本...",
+    "data_gaps": ["缺失的页面/模块"]
 }
 只返回 JSON，不要其他内容。"""
 
@@ -1105,7 +1376,7 @@ def _analyze_information_architecture(
 
                     # 解析功能模块
                     for item in data.get("feature_modules", []):
-                        framework.feature_modules.append(FeatureModule(
+                        module = FeatureModule(
                             module_id=item.get("module_id", f"M{len(framework.feature_modules)+1:02d}"),
                             name=item.get("name", ""),
                             level=item.get("level", ""),
@@ -1113,10 +1384,18 @@ def _analyze_information_architecture(
                             entry_path=item.get("entry_path", ""),
                             prerequisite=item.get("prerequisite", ""),
                             complexity=item.get("complexity", ""),
-                        ))
+                        )
+                        # 将 confidence 和 data_sources 存入 structured_data
+                        module.structured_data = {
+                            "confidence": item.get("confidence", "inferred"),
+                            "data_sources": item.get("data_sources", ""),
+                        }
+                        framework.feature_modules.append(module)
 
                     # 页面层级
                     framework.page_hierarchy = data.get("page_hierarchy", "")
+                    # 存储 data_gaps
+                    framework.structured_data["info_arch_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"信息架构分析完成: {len(framework.feature_modules)} 个功能模块")
                     return
             except Exception as e:
@@ -1239,12 +1518,19 @@ def _analyze_user_journeys(framework, material):
     if config.LLM_API_KEY and feature_names:
         system_prompt = """你是一位 UX 研究专家，擅长用户旅程地图绘制。请根据提供的产品信息，为每个核心功能提取完整的用户旅程。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 每个用户旅程需要包含：
 1. feature_name: 功能名称
 2. entry_point: 入口位置
-3. steps: 详细步骤列表（每项包含 step_id, description, ui_element, user_action, system_feedback, is_exception）
-4. normal_flow: 正常流程步骤 ID 列表
-5. exception_flows: 异常流程描述列表
+3. journey_id: 旅程编号（J01, J02...）
+4. steps: 详细步骤列表（每项包含 step_id, description, ui_element, user_action, system_feedback, is_exception, confidence, evidence）
+   step_id 格式: S1, S2...
+   confidence: "full"（有直接证据）, "partial"（部分推断）, "inferred"（无证据推断）
+   evidence: 说明该步骤结论基于什么证据
+5. normal_flow: 正常流程步骤 ID 列表
+6. exception_flows: 异常流程描述列表
+7. journey_confidence: 整体旅程的置信度（full/partial/inferred）
 
 请以 JSON 格式返回：
 {
@@ -1252,20 +1538,25 @@ def _analyze_user_journeys(framework, material):
         {
             "feature_name": "功能名称",
             "entry_point": "入口路径",
+            "journey_id": "J01",
             "steps": [
                 {
-                    "step_id": "1a",
+                    "step_id": "S1",
                     "description": "步骤描述",
                     "ui_element": "涉及的UI元素",
                     "user_action": "用户操作",
                     "system_feedback": "系统反馈",
-                    "is_exception": false
+                    "is_exception": false,
+                    "confidence": "full|partial|inferred",
+                    "evidence": "证据说明"
                 }
             ],
-            "normal_flow": ["1a", "1b", "2a"],
-            "exception_flows": ["异常流1描述", "异常流2描述"]
+            "normal_flow": ["S1", "S2"],
+            "exception_flows": ["异常流1描述"],
+            "journey_confidence": "overall journey confidence"
         }
-    ]
+    ],
+    "data_gaps": ["缺失的旅程信息"]
 }
 只返回 JSON。"""
 
@@ -1283,17 +1574,29 @@ def _analyze_user_journeys(framework, material):
                             normal_flow=journey_data.get("normal_flow", []),
                             exception_flows=journey_data.get("exception_flows", []),
                         )
+                        # 存储新增的 journey_id 和 journey_confidence
+                        journey.structured_data = {
+                            "journey_id": journey_data.get("journey_id", ""),
+                            "journey_confidence": journey_data.get("journey_confidence", "inferred"),
+                        }
                         for step_data in journey_data.get("steps", []):
-                            journey.steps.append(UserJourneyStep(
+                            step = UserJourneyStep(
                                 step_id=step_data.get("step_id", ""),
                                 description=step_data.get("description", ""),
                                 ui_element=step_data.get("ui_element", ""),
                                 user_action=step_data.get("user_action", ""),
                                 system_feedback=step_data.get("system_feedback", ""),
                                 is_exception=step_data.get("is_exception", False),
-                            ))
+                            )
+                            # 存储新增的 confidence 和 evidence
+                            step.structured_data = {
+                                "confidence": step_data.get("confidence", "inferred"),
+                                "evidence": step_data.get("evidence", ""),
+                            }
+                            journey.steps.append(step)
                         framework.user_journeys.append(journey)
-
+                    # 存储 data_gaps
+                    framework.structured_data["journey_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"用户旅程提取完成: {len(framework.user_journeys)} 个旅程")
                     return
             except Exception as e:
@@ -1321,6 +1624,8 @@ def _analyze_decision_points(framework, material):
     if config.LLM_API_KEY:
         system_prompt = """你是一位产品设计师，擅长分析用户决策路径。请根据产品信息，识别用户在各个流程中需要做出的关键决策。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 请以 JSON 格式返回：
 {
     "decision_points": [
@@ -1329,9 +1634,14 @@ def _analyze_decision_points(framework, material):
             "decision": "用户需要做什么决策",
             "options": ["选项1", "选项2", "选项3"],
             "criteria": "用户做决策的依据",
-            "ux_implication": "UX设计影响/建议"
+            "ux_implication": "UX设计影响/建议",
+            "decision_type": "选择|配置|确认|放弃",
+            "user_cognitive_load": "high|medium|low",
+            "current_ux_quality": "好|一般|差",
+            "improvement_suggestion": "改进建议"
         }
-    ]
+    ],
+    "data_gaps": ["信息缺口"]
 }
 只返回 JSON。"""
 
@@ -1343,13 +1653,23 @@ def _analyze_decision_points(framework, material):
                 data = _parse_json_response(response)
                 if data:
                     for dp_data in data.get("decision_points", []):
-                        framework.decision_points.append(DecisionPoint(
+                        dp = DecisionPoint(
                             location=dp_data.get("location", ""),
                             decision=dp_data.get("decision", ""),
                             options=dp_data.get("options", []),
                             criteria=dp_data.get("criteria", ""),
                             ux_implication=dp_data.get("ux_implication", ""),
-                        ))
+                        )
+                        # 存储新增字段到 structured_data
+                        dp.structured_data = {
+                            "decision_type": dp_data.get("decision_type", ""),
+                            "user_cognitive_load": dp_data.get("user_cognitive_load", ""),
+                            "current_ux_quality": dp_data.get("current_ux_quality", ""),
+                            "improvement_suggestion": dp_data.get("improvement_suggestion", ""),
+                        }
+                        framework.decision_points.append(dp)
+                    # 存储 data_gaps
+                    framework.structured_data["decision_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"决策点识别完成: {len(framework.decision_points)} 个决策点")
                     return
             except Exception as e:
@@ -1369,6 +1689,8 @@ def _analyze_exception_flows(framework, material):
     if config.LLM_API_KEY:
         system_prompt = """你是一位 QA 和异常处理专家。请根据产品信息，分析可能的异常场景及其处理方式。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 覆盖以下异常类型：
 - error: 系统错误
 - empty: 空状态（无数据）
@@ -1380,13 +1702,18 @@ def _analyze_exception_flows(framework, material):
 {
     "exception_flows": [
         {
+            "exception_id": "E01",
             "scenario": "异常场景描述",
             "trigger": "触发条件",
             "system_response": "系统响应方式",
             "recovery_path": "用户恢复路径",
-            "error_type": "error/empty/loading/timeout/validation"
+            "error_type": "error/empty/loading/timeout/validation",
+            "affected_pages": ["P01", "P02"],
+            "user_frustration_level": "high|medium|low",
+            "recovery_success_estimate": "预估恢复成功率（如90%）"
         }
-    ]
+    ],
+    "data_gaps": ["信息缺口"]
 }
 只返回 JSON。"""
 
@@ -1398,13 +1725,23 @@ def _analyze_exception_flows(framework, material):
                 data = _parse_json_response(response)
                 if data:
                     for ef_data in data.get("exception_flows", []):
-                        framework.exception_flows.append(ExceptionFlow(
+                        ef = ExceptionFlow(
                             scenario=ef_data.get("scenario", ""),
                             trigger=ef_data.get("trigger", ""),
                             system_response=ef_data.get("system_response", ""),
                             recovery_path=ef_data.get("recovery_path", ""),
                             error_type=ef_data.get("error_type", ""),
-                        ))
+                        )
+                        # 存储新增字段到 structured_data
+                        ef.structured_data = {
+                            "exception_id": ef_data.get("exception_id", ""),
+                            "affected_pages": ef_data.get("affected_pages", []),
+                            "user_frustration_level": ef_data.get("user_frustration_level", ""),
+                            "recovery_success_estimate": ef_data.get("recovery_success_estimate", ""),
+                        }
+                        framework.exception_flows.append(ef)
+                    # 存储 data_gaps
+                    framework.structured_data["exception_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"异常流程分析完成: {len(framework.exception_flows)} 个异常场景")
                     return
             except Exception as e:
@@ -1426,19 +1763,26 @@ def _analyze_state_transitions(framework, material):
     if config.LLM_API_KEY:
         system_prompt = """你是一位系统架构师，擅长状态机建模。请根据产品信息，识别核心实体的状态流转。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 核心实体可能包括：视频、数字人、用户账户、订单、任务 等。
 
 请以 JSON 格式返回：
 {
     "state_transitions": [
         {
+            "transition_id": "TR01",
             "entity": "实体名称",
+            "state_machine_id": "SM01",
             "from_state": "起始状态",
             "to_state": "目标状态",
             "trigger": "触发动作",
-            "conditions": "前置条件（可选）"
+            "conditions": "前置条件（可选）",
+            "confidence": "full|partial|inferred",
+            "reversible": true/false
         }
-    ]
+    ],
+    "data_gaps": ["信息缺口"]
 }
 只返回 JSON。"""
 
@@ -1450,13 +1794,23 @@ def _analyze_state_transitions(framework, material):
                 data = _parse_json_response(response)
                 if data:
                     for st_data in data.get("state_transitions", []):
-                        framework.state_transitions.append(StateTransition(
+                        st = StateTransition(
                             entity=st_data.get("entity", ""),
                             from_state=st_data.get("from_state", ""),
                             to_state=st_data.get("to_state", ""),
                             trigger=st_data.get("trigger", ""),
                             conditions=st_data.get("conditions", ""),
-                        ))
+                        )
+                        # 存储新增字段到 structured_data
+                        st.structured_data = {
+                            "transition_id": st_data.get("transition_id", ""),
+                            "state_machine_id": st_data.get("state_machine_id", ""),
+                            "confidence": st_data.get("confidence", "inferred"),
+                            "reversible": st_data.get("reversible", None),
+                        }
+                        framework.state_transitions.append(st)
+                    # 存储 data_gaps
+                    framework.structured_data["state_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"状态流转建模完成: {len(framework.state_transitions)} 个转换")
                     return
             except Exception as e:
@@ -1480,6 +1834,8 @@ def _analyze_cross_function_links(framework, material):
     if config.LLM_API_KEY and feature_names:
         system_prompt = """你是一位产品架构师，擅长分析功能间的关联关系。请根据产品信息，分析各功能模块之间的关联。
 
+只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
+
 关联类型包括：
 - 数据共享：两个功能共享某些数据
 - 导航跳转：从一个功能可以跳转到另一个
@@ -1490,12 +1846,17 @@ def _analyze_cross_function_links(framework, material):
 {
     "cross_function_links": [
         {
+            "link_id": "LNK01",
             "source_feature": "源功能",
             "target_feature": "目标功能",
             "relationship": "关联类型（数据共享/导航跳转/依赖关系/流程串联）",
-            "description": "关联描述"
+            "description": "关联描述",
+            "link_strength": "strong|medium|weak",
+            "user_visibility": "用户可见|系统内部",
+            "data_shared": ["共享的数据字段1", "共享的数据字段2"]
         }
-    ]
+    ],
+    "data_gaps": ["信息缺口"]
 }
 只返回 JSON。"""
 
@@ -1507,12 +1868,22 @@ def _analyze_cross_function_links(framework, material):
                 data = _parse_json_response(response)
                 if data:
                     for cfl_data in data.get("cross_function_links", []):
-                        framework.cross_function_links.append(CrossFunctionLink(
+                        cfl = CrossFunctionLink(
                             source_feature=cfl_data.get("source_feature", ""),
                             target_feature=cfl_data.get("target_feature", ""),
                             relationship=cfl_data.get("relationship", ""),
                             description=cfl_data.get("description", ""),
-                        ))
+                        )
+                        # 存储新增字段到 structured_data
+                        cfl.structured_data = {
+                            "link_id": cfl_data.get("link_id", ""),
+                            "link_strength": cfl_data.get("link_strength", ""),
+                            "user_visibility": cfl_data.get("user_visibility", ""),
+                            "data_shared": cfl_data.get("data_shared", []),
+                        }
+                        framework.cross_function_links.append(cfl)
+                    # 存储 data_gaps
+                    framework.structured_data["cross_function_data_gaps"] = data.get("data_gaps", [])
                     logger.info(f"跨功能关联分析完成: {len(framework.cross_function_links)} 个关联")
                     return
             except Exception as e:

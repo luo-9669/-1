@@ -454,13 +454,13 @@ const props = defineProps({
   apiConfig: { type: Object, required: true },
   projectId: { type: String, default: '' }
 })
-const emit = defineEmits(['quick-analyze-report'])
 
 const analysisTabs = [
   { value: 'daily', label: '每日生成' },
   { value: 'weekly', label: '周报生成' },
   { value: 'flow', label: '交互流程' },
   { value: 'framework', label: '完整框架' }
+  // 注意：gap（机会点分析）不从对话框手动触发，仅通过报告详情页「快速分析」按钮触发
 ]
 
 const primaryTabs = [
@@ -468,7 +468,8 @@ const primaryTabs = [
   { value: 'daily', label: '每日生成' },
   { value: 'weekly', label: '周报生成' },
   { value: 'flow', label: '交互流程' },
-  { value: 'framework', label: '完整框架' }
+  { value: 'framework', label: '完整框架' },
+  { value: 'gap', label: '机会点分析' }
 ]
 
 const statusFilterOptions = [
@@ -601,7 +602,7 @@ const hasSelectedInteractionArtifacts = computed(() => Boolean(
 ))
 
 function isAnalysisKind(kind = '') {
-  return ['daily', 'weekly', 'flow', 'framework'].includes(kind)
+  return ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(kind)
 }
 
 function currentDialogAnalysisKind() {
@@ -611,6 +612,7 @@ function currentDialogAnalysisKind() {
 }
 
 function getKindLabel(kind = '') {
+  if (kind === 'gap') return '机会点分析'
   return analysisTabs.find((item) => item.value === kind)?.label || '每日生成'
 }
 
@@ -792,16 +794,89 @@ function quickAnalyzeSelectedReport() {
   const content = String(selectedReportCopyText.value || '').trim()
   const record = selectedRecord.value
   if (!content || !record || !isAnalysisKind(record.kind)) return
-  emit('quick-analyze-report', {
+  const draftId = localAnalysisRecordId(0)
+  // 调用后端API，kind='gap'，传递源报告内容
+  const draft = {
+    id: draftId,
     projectId: effectiveProjectId.value,
-    recordId: record.id || '',
-    kind: record.kind || '',
-    title: record.title || getKindLabel(record.kind),
-    competitors: recordCompetitorNameList(record),
-    fileName: selectedReportFileName(record),
-    content,
-    message: '分析这个文档'
+    kind: 'gap',
+    competitorIds: record.competitorIds || [],
+    competitorNames: recordCompetitorNameList(record),
+    competitorName: record.competitorName || recordCompetitorNameList(record)[0] || '',
+    productUrl: record.productUrl || '',
+    productUrls: record.productUrls || [],
+    productName: record.productName || '',
+    feature: record.feature || '',
+    goal: `基于「${record.title || getKindLabel(record.kind)}」生成机会点分析`,
+    sourceContent: content,
+    sourceRecordId: record.id || '',
+    sourceKind: record.kind || '',
+    sourceTitle: record.title || getKindLabel(record.kind)
+  }
+  const created = mergeRecord({
+    ...draft,
+    status: 'running',
+    statusLabel: '分析中',
+    title: `机会点分析：${record.title || getKindLabel(record.kind)}`,
+    summary: '正在基于源报告生成机会点分析...',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   })
+  closeRecord()
+  setActiveKind('gap')
+  void runGapAnalysis(created, draft)
+}
+
+async function runGapAnalysis(runningRecord = {}, draft = {}) {
+  markRecordRunning(runningRecord.id)
+  statusTone.value = 'info'
+  statusMessage.value = '正在生成机会点分析...'
+  try {
+    const createResult = await api.competitorAnalysis.createRecord(props.apiConfig, draft)
+    // 合并记录，保留sourceContent（createRecord不会返回它）
+    const recordToRun = createResult.ok
+      ? { ...runningRecord, ...createResult.data.record, sourceContent: draft.sourceContent, sourceRecordId: draft.sourceRecordId, sourceKind: draft.sourceKind, sourceTitle: draft.sourceTitle }
+      : runningRecord
+    const result = await api.competitorAnalysis.run(props.apiConfig, requestBodyForRecord(recordToRun))
+    if (!result.ok) {
+      mergeRecord({
+        ...runningRecord,
+        status: 'failed',
+        statusLabel: '未完成',
+        summary: result.message || '机会点分析暂时无法完成，请稍后重试。',
+        markdown: result.data?.markdown || '机会点分析暂时无法完成，请稍后重试。',
+        updatedAt: new Date().toISOString()
+      })
+      statusTone.value = 'failed'
+      statusMessage.value = result.message || '机会点分析暂时无法完成。'
+      return
+    }
+    mergeRecord({
+      ...runningRecord,
+      status: result.data?.ok ? 'succeeded' : 'failed',
+      statusLabel: result.data?.statusLabel || (result.data?.ok ? '已生成' : '未完成'),
+      title: result.data?.title || runningRecord.title,
+      summary: result.data?.summary || '机会点分析已生成。',
+      markdown: result.data?.markdown || '',
+      updatedAt: new Date().toISOString()
+    })
+    statusTone.value = result.data?.ok ? 'info' : 'failed'
+    statusMessage.value = result.data?.summary || '机会点分析已生成。'
+  } catch (error) {
+    mergeRecord({
+      ...runningRecord,
+      status: 'failed',
+      statusLabel: '未完成',
+      summary: error?.message || '机会点分析暂时无法完成，请稍后重试。',
+      markdown: error?.message || '机会点分析暂时无法完成，请稍后重试。',
+      updatedAt: new Date().toISOString()
+    })
+    statusTone.value = 'failed'
+    statusMessage.value = error?.message || '机会点分析暂时无法完成。'
+  } finally {
+    clearRecordRunning(runningRecord.id)
+    void loadRecords()
+  }
 }
 
 async function copySelectedReport() {
@@ -858,7 +933,7 @@ function normalizeRecord(record = {}) {
   return {
     id: record.id || `local-${Date.now()}`,
     projectId: record.projectId || effectiveProjectId.value,
-    kind: ['daily', 'weekly', 'flow', 'framework'].includes(record.kind) ? record.kind : 'daily',
+    kind: ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(record.kind) ? record.kind : 'daily',
     title: record.title || `${getKindLabel(record.kind)}：${recordCompetitorNames(record)}`,
     status: record.status || 'pending',
     statusLabel: record.statusLabel || statusLabel(record.status),
@@ -876,6 +951,10 @@ function normalizeRecord(record = {}) {
     featureEvents: normalizeFeatureEvents(record.featureEvents || record.feature_events),
     sourceFeatureEvent: normalizeFeatureEvents([record.sourceFeatureEvent || record.source_feature_event]).at(0) || null,
     monitorEvidence: record.monitorEvidence || record.monitor_evidence || null,
+    sourceContent: record.sourceContent || '',
+    sourceRecordId: record.sourceRecordId || '',
+    sourceKind: record.sourceKind || '',
+    sourceTitle: record.sourceTitle || '',
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || record.createdAt || new Date().toISOString()
   }
@@ -919,7 +998,7 @@ async function loadLatestAnalysis() {
   })
   if (!result.ok || !result.data?.markdown) return
   analysisResult.value = result.data
-  if (['daily', 'weekly', 'flow', 'framework'].includes(result.data.kind)) {
+  if (['daily', 'weekly', 'flow', 'framework', 'gap'].includes(result.data.kind)) {
     mergeRecord({
       id: `restored-${result.data.kind}`,
       projectId: effectiveProjectId.value,
@@ -1106,7 +1185,7 @@ function requestBodyForRecord(record = {}) {
   const names = Array.isArray(record.competitorNames) ? record.competitorNames.filter(Boolean) : []
   const firstId = Array.isArray(record.competitorIds) ? record.competitorIds[0] : ''
   const savedCompetitor = competitors.value.find((item) => item.id === firstId) || {}
-  return {
+  const body = {
     projectId: effectiveProjectId.value,
     recordId: record.id,
     kind: record.kind,
@@ -1121,6 +1200,13 @@ function requestBodyForRecord(record = {}) {
     sourceFeatureEvent: record.sourceFeatureEvent,
     monitorEvidence: record.monitorEvidence
   }
+  if (record.kind === 'gap') {
+    body.sourceContent = record.sourceContent || record.markdown || ''
+    body.sourceRecordId = record.sourceRecordId || ''
+    body.sourceKind = record.sourceKind || ''
+    body.sourceTitle = record.sourceTitle || ''
+  }
+  return body
 }
 
 function localAnalysisRecordId(index = 0) {

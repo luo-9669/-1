@@ -13,13 +13,14 @@ const SAFE_FAILURE_MESSAGE = '竞品分析暂时无法完成，请检查 Python 
 const MODEL_FALLBACK_FAILURE_MESSAGE = '当前后端模型暂时无法生成竞品分析，请检查模型配置后重试。'
 
 function normalizeKind(value = '') {
-  return ['daily', 'weekly', 'flow', 'framework'].includes(value) ? value : 'daily'
+  return ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(value) ? value : 'daily'
 }
 
 function kindLabel(kind = '') {
   if (kind === 'weekly') return '周报生成'
   if (kind === 'flow') return '交互流程'
   if (kind === 'framework') return '完整框架'
+  if (kind === 'gap') return '机会点分析'
   return '每日生成'
 }
 
@@ -438,6 +439,9 @@ function normalizeRecord(record = {}) {
     featureEvents: normalizeFeatureEvents(record.featureEvents || record.feature_events),
     sourceFeatureEvent: normalizeFeatureEvent(record.sourceFeatureEvent || record.source_feature_event) || null,
     monitorEvidence: normalizeMonitorEvidence(record.monitorEvidence || record.monitor_evidence),
+    sourceRecordId: safeText(record.sourceRecordId || record.source_record_id, ''),
+    sourceKind: safeText(record.sourceKind || record.source_kind, ''),
+    sourceTitle: safeText(record.sourceTitle || record.source_title, ''),
     durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : 0,
     createdAt,
     updatedAt
@@ -547,6 +551,9 @@ function requiredInputFailure(input = {}) {
   if (kind === 'framework' && !String(input.productUrl || '').trim()) {
     return '请填写产品官网地址，完整框架必须基于目标站点爬取结果生成。'
   }
+  if (kind === 'gap' && !String(input.sourceContent || '').trim()) {
+    return '机会点分析需要源报告内容，请从已有报告详情页点击「快速分析」触发。'
+  }
   return ''
 }
 
@@ -636,12 +643,44 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     '',
     evidence ? `证据材料：\n${evidence}` : '证据材料：\n未采集到足够证据；只能输出待补采清单和分析计划。'
   ]
-  if (kind === 'weekly') {
+  if (kind === 'daily') {
+    lines.push('- 每日监控需要包含6类信号全量采集：feature_launch（新功能发布）、pricing_change（定价变化）、ui_redesign（界面改版）、content_update（内容更新）、performance（性能优化）、market_move（市场活动）。')
+    lines.push('- 每个信号需标注：id（SIG01格式）、type、title、description、evidence_urls、confidence（high/medium/low）、impact_assessment（user_impact/competitive_threat/opportunity）、tags、action_needed（monitor/deep_dive/respond）、raw_date。')
+    lines.push('- 需输出 market_sentiment（整体市场情绪）和 data_gaps（信息缺口）。')
+    lines.push('- 证据不足的信号 confidence 标注为 low，action_needed 建议为 deep_dive。')
+  } else if (kind === 'weekly') {
     lines.push('- 周报需要包含本周重点、变化分类、影响判断、建议动作。')
+    lines.push('- 每条变更需标注：id（CHG01格式）、category（feature_launch/ui_redesign/pricing/content/performance/bugfix/market）、confidence、trend_signal（accelerating/stable/declining/new_pattern）。')
+    lines.push('- 需识别跨条目的趋势模式（trend_patterns），每个模式包含 pattern、description、related_changes、trajectory、strategic_implication。')
+    lines.push('- 需输出三维评分（scores）：activity_score（竞品活跃度1-10）、threat_score（竞争威胁度1-10）、opportunity_score（机会窗口度1-10）及 rationale。')
+    lines.push('- 需输出 recommended_deep_dive（建议深入分析的目标和理由）和 data_gaps（信息缺口）。')
   } else if (kind === 'flow') {
-    lines.push('- 交互流程需要包含页面交互框架与说明、主流程、状态流转、低保真线框图描述、状态机明细。')
+    lines.push('- 交互流程报告需要包含以下结构化章节：')
+    lines.push('  1. 页面总览表（P编号、页面名称、类型、目的、证据置信度）')
+    lines.push('  2. 页面流转表（S编号、起点→终点、触发操作、前置条件）')
+    lines.push('  3. 状态机明细（实体、状态ST编号、转换条件）')
+    lines.push('  4. 弹窗定义表（P编号、类型、触发条件、内容、操作按钮）')
+    lines.push('  5. 异常状态表（E编号、所属页面、类型、场景、系统响应、恢复路径）')
+    lines.push('  6. 交互规则表（IR编号、所属页面、触发→响应、关联编号）')
+    lines.push('- 每个条目必须标注置信度（有直接证据/部分证据推断/无证据推断）')
+    lines.push('- 缺失信息单独列出"待补采清单"')
   } else if (kind === 'framework') {
     lines.push('- 完整框架需要包含产品定位、核心页面、关键任务链路、信息架构、状态与异常、可复用启发。')
+    lines.push('- 统一产品模型：每个功能模块标注 confidence（full/partial/inferred）和 data_sources；每个步骤标注 confidence 和 evidence；无证据信息不编造，放入 data_gaps。')
+    lines.push('- 决策点增加 decision_type（选择/配置/确认/放弃）、user_cognitive_load（high/medium/low）、current_ux_quality（好/一般/差）、improvement_suggestion。')
+    lines.push('- 异常流增加 exception_id（E01格式）、affected_pages、user_frustration_level（high/medium/low）、recovery_success_estimate。')
+    lines.push('- 状态流转增加 transition_id（TR01格式）、state_machine_id（SM01格式，同一实体归为同一状态机）、confidence、reversible。')
+    lines.push('- 跨功能关联增加 link_id（LNK01格式）、link_strength（strong/medium/weak）、user_visibility（用户可见/系统内部）、data_shared（共享字段列表）。')
+    lines.push('- 输出 reusable_insights（可复用UX洞察列表）和 data_gaps（所有步骤的信息缺口汇总）。')
+  } else if (kind === 'gap') {
+    lines.push('- 机会点分析报告需要包含以下结构化章节：')
+    lines.push('  1. 差距矩阵（gap_matrix）：我方产品 vs 竞品的功能差距，表格形式')
+    lines.push('  2. 机会点卡片（opportunity_cards）：每个机会点包含 id（OP01格式）、标题、描述、来源竞品、影响范围、优先级（P0/P1/P2）、实施难度（高/中/低）')
+    lines.push('  3. 需求卡片（requirement_cards）：每个需求包含 id（RQ01格式）、关联机会点（OP编号）、需求标题、用户故事、验收标准、优先级')
+    lines.push('  4. 战略建议（strategic_recommendations）：基于机会点的3-5条战略行动建议')
+    lines.push('  5. 数据来源与置信度：标注每个结论的来源报告和分析置信度')
+    lines.push('- 所有结论必须基于输入的报告内容，不得编造')
+    lines.push('- 缺失信息标注为"待补充"')
   }
   if (pythonFailure) {
     lines.push('', `本地脚本未产出报告原因：${safeText(pythonFailure, '本地脚本暂不可用')}`)
@@ -1248,6 +1287,36 @@ function buildInteractionArtifactsFromData(kind = '', markdown = '', input = {},
   }
 }
 
+function buildGapAnalysisPrompt(input = {}) {
+  const sourceContent = String(input.sourceContent || '').trim()
+  const sourceKind = kindLabel(normalizeKind(input.sourceKind || input.kind || ''))
+  const sourceTitle = safeText(input.sourceTitle || input.title || '', '竞品分析报告')
+  const subject = competitorSubject(input)
+  const lines = [
+    `分析类型：机会点分析`,
+    `来源报告类型：${sourceKind}`,
+    `来源报告标题：${sourceTitle}`,
+    `竞品名称：${subject}`,
+    input.feature ? `分析功能：${input.feature}` : '',
+    input.goal ? `分析目标：${input.goal}` : '',
+    '',
+    '请基于以下源报告内容，生成一份中文 Markdown 机会点分析报告。要求：',
+    '- 只输出 Markdown 正文，不要输出 JSON。',
+    '- 机会点分析报告需要包含以下结构化章节：',
+    '  1. 差距矩阵（gap_matrix）：我方产品 vs 竞品的功能差距，表格形式',
+    '  2. 机会点卡片（opportunity_cards）：每个机会点包含 id（OP01格式）、标题、描述、来源竞品、影响范围、优先级（P0/P1/P2）、实施难度（高/中/低）',
+    '  3. 需求卡片（requirement_cards）：每个需求包含 id（RQ01格式）、关联机会点（OP编号）、需求标题、用户故事、验收标准、优先级',
+    '  4. 战略建议（strategic_recommendations）：基于机会点的3-5条战略行动建议',
+    '  5. 数据来源与置信度：标注每个结论的来源报告和分析置信度',
+    '- 所有结论必须基于输入的报告内容，不得编造',
+    '- 缺失信息标注为"待补充"',
+    '- 内容不允许出现内部调试信息、密钥、堆栈、原始网页源码或执行过程。',
+    '',
+    `源报告内容：\n${sourceContent || '未提供源报告内容。'}`
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
 export function createCompetitorAnalysisEngineService(options = {}) {
   const pythonRunner = typeof options.pythonRunner === 'function' ? options.pythonRunner : runPython
   const currentDateProvider = typeof options.currentDateProvider === 'function'
@@ -1423,6 +1492,88 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           statusLabel: '分析中'
         })
       }
+
+      // 机会点分析：不走Python脚本，纯LLM分析
+      if (kind === 'gap') {
+        const gapPrompt = buildGapAnalysisPrompt(input)
+        let generatedMarkdown = ''
+        if (resolveAgentProvider && modelSettings.enabled) {
+          let provider = null
+          try {
+            provider = await resolveAgentProvider({
+              purpose: 'competitor-analysis',
+              modelSettings
+            })
+          } catch {}
+          if (provider && typeof provider.generate === 'function') {
+            const model = input.llmName || modelSettings.defaultModel || 'gpt-5.5'
+            try {
+              const result = await provider.generate({
+                model,
+                responseFormat: 'markdown',
+                actionType: 'competitor-analysis-report',
+                scopeId: input.recordId || input.projectId || '',
+                systemPrompt: '你是流程通后端的竞品分析报告模型，负责基于现有竞品分析报告内容生成机会点分析报告。所有结论必须基于输入的报告内容，不得编造。',
+                userPrompt: gapPrompt,
+                timeoutMs: modelSettings.timeoutMs,
+                references: [],
+                retrievedKnowledge: []
+              })
+              generatedMarkdown = sanitizeCompetitorAnalysisMarkdown(result?.content || '', '')
+            } catch {}
+          }
+        }
+        const ok = Boolean(generatedMarkdown)
+        const response = {
+          ok,
+          title: `${kindLabel(kind)}结果`,
+          kind,
+          statusLabel: ok ? '已生成' : '未完成',
+          summary: ok
+            ? '已使用当前后端模型基于源报告内容生成机会点分析报告。'
+            : MODEL_FALLBACK_FAILURE_MESSAGE,
+          markdown: ok ? generatedMarkdown : fallbackMarkdown(input, MODEL_FALLBACK_FAILURE_MESSAGE),
+          interactionArtifacts: undefined,
+          featureEvents: [],
+          jsonAvailable: false,
+          durationMs: Date.now() - startedAt
+        }
+        if (response.markdown) await persistLatestReport(projectId, response)
+        if (recordId) {
+          await patchRecord(projectId, recordId, {
+            status: ok ? 'succeeded' : 'failed',
+            statusLabel: response.statusLabel,
+            title: response.title || analysisRecordTitle(input),
+            summary: response.summary,
+            markdown: response.markdown,
+            durationMs: response.durationMs
+          })
+        } else if (response.markdown) {
+          await upsertRecord(projectId, {
+            projectId,
+            kind,
+            title: response.title || analysisRecordTitle(input),
+            status: ok ? 'succeeded' : 'failed',
+            statusLabel: response.statusLabel,
+            competitorIds: input.competitorIds,
+            competitorNames: input.competitorNames || input.competitor || input.productName,
+            competitorName: input.competitorName || input.competitor,
+            productUrl: input.productUrl,
+            productUrls: input.productUrls,
+            productName: input.productName,
+            feature: input.feature,
+            goal: input.goal,
+            summary: response.summary,
+            markdown: response.markdown,
+            durationMs: response.durationMs,
+            sourceRecordId: input.sourceRecordId || '',
+            sourceKind: input.sourceKind || '',
+            createdAt: new Date().toISOString()
+          })
+        }
+        return response
+      }
+
       const outputDir = await mkdtemp(path.join(os.tmpdir(), 'liuchengtong-competitor-analysis-'))
       const modelEnv = resolvePythonModelEnv(input, modelSettings)
       const competitorsConfigPath = await writeSelectedCompetitorsConfig({ ...input, kind }, outputDir)
@@ -1448,8 +1599,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
       const evidenceCountValue = evidenceCount(analysisData)
       const shouldUseEvidenceModel = kind === 'framework' && evidenceQuality !== 'none' && Boolean(analysisEvidence.trim()) && modelSettings.enabled
       const flowHasEvidenceResult = kind !== 'flow' || Boolean(flowStatus)
-      const shouldBlockFlowModel = kind === 'flow' && evidenceQuality === 'none'
-      const shouldUsePartialFlowModel = kind === 'flow' && scriptOk && evidenceQuality === 'partial' && Boolean(analysisEvidence.trim()) && modelSettings.enabled
+      const shouldBlockFlowModel = false  // 不再完全阻止 flow 分析
+      const shouldUsePartialFlowModel = kind === 'flow' && Boolean(analysisEvidence.trim()) && modelSettings.enabled
       const shouldRewriteFallbackFlow = kind === 'flow' && scriptOk && scriptFallbackMarkdown && flowStatus === 'exact' && Boolean(analysisEvidence.trim()) && modelSettings.enabled
       const modelReport = (!shouldBlockFlowModel && (!scriptOk || shouldUseEvidenceModel || shouldRewriteFallbackFlow)) ? await generateBackendModelReport({
         ...input,
@@ -1464,10 +1615,12 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         evidenceCount: evidenceCountValue
       }, modelSettings, '') : null
       const rawModelReport = modelReport || partialModelReport
-      const effectiveModelReport = evidenceQuality === 'partial' && rawModelReport?.markdown && !partialEvidenceMarkdownIsSafe(rawModelReport.markdown)
+      const effectiveModelReport = ['partial', 'none'].includes(evidenceQuality) && rawModelReport?.markdown && !partialEvidenceMarkdownIsSafe(rawModelReport.markdown)
         ? null
         : rawModelReport
-      const noEvidenceMarkdown = shouldBlockFlowModel || (kind === 'framework' && evidenceQuality === 'none')
+      const noEvidenceMarkdown = shouldBlockFlowModel ||
+        (kind === 'flow' && evidenceQuality === 'none' && !effectiveModelReport) ||
+        (kind === 'framework' && evidenceQuality === 'none')
         ? buildNoEvidenceAnalysisMarkdown(kind, input, analysisData)
         : ''
       const generatedMarkdown = noEvidenceMarkdown

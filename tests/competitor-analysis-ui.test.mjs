@@ -83,14 +83,15 @@ test('competitor analysis restores primary tabs with competitor table first', as
     primaryTabsSource.indexOf("value: 'competitors'") < primaryTabsSource.indexOf("value: 'daily'") &&
     primaryTabsSource.indexOf("value: 'daily'") < primaryTabsSource.indexOf("value: 'weekly'") &&
     primaryTabsSource.indexOf("value: 'weekly'") < primaryTabsSource.indexOf("value: 'flow'") &&
-    primaryTabsSource.indexOf("value: 'flow'") < primaryTabsSource.indexOf("value: 'framework'"),
-    'primary tabs should be competitor table, daily, weekly, flow, framework'
+    primaryTabsSource.indexOf("value: 'flow'") < primaryTabsSource.indexOf("value: 'framework'") &&
+    primaryTabsSource.indexOf("value: 'framework'") < primaryTabsSource.indexOf("value: 'gap'"),
+    'primary tabs should be competitor table, daily, weekly, flow, framework, gap'
   )
   assert.match(pageSource, /const activeKind = ref\('competitors'\)/)
   assert.match(pageSource, /kind: 'daily'/)
   assert.match(pageSource, /record\.kind !== activeKind\.value/)
   assert.match(pageSource, /if \(\['daily', 'weekly'\]\.includes\(record\.kind\)\) return '全部功能'/)
-  assert.match(pageSource, /kind:\s*\['daily', 'weekly', 'flow', 'framework'\]\.includes\(record\.kind\)/)
+  assert.match(pageSource, /kind:\s*\['daily', 'weekly', 'flow', 'framework', 'gap'\]\.includes\(record\.kind\)/)
   assert.match(pageSource, /:items="primaryTabs"/)
   assert.match(pageSource, /<ElOption v-for="item in analysisTabs"/)
   assert.doesNotMatch(pageSource, /<ElOption[^>]+label="竞品表"/)
@@ -238,15 +239,16 @@ test('competitor analysis detail footer exposes report actions', async () => {
   const detailFooterRule = cssRule(pageSource, '.competitor-analysis-detail-actions')
 
   assert.match(pageSource, /class="competitor-analysis-detail-actions"/)
-  assert.match(pageSource, /defineEmits\(\['quick-analyze-report'\]\)/)
   assert.match(pageSource, /copySelectedReport/)
   assert.match(pageSource, /quickAnalyzeSelectedReport/)
   assert.match(pageSource, /selectedReportCopyText/)
   assert.match(pageSource, />快速分析</)
-  assert.match(pageSource, /emit\('quick-analyze-report'/)
-  assert.match(pageSource, /message:\s*'分析这个文档'/)
-  assert.match(pageSource, /fileName:\s*selectedReportFileName/)
-  assert.match(pageSource, /content/)
+  assert.match(pageSource, /kind:\s*'gap'/)
+  assert.match(pageSource, /sourceContent:\s*content/)
+  assert.match(pageSource, /sourceRecordId:\s*record\.id/)
+  assert.match(pageSource, /runGapAnalysis\(created,\s*draft\)/)
+  assert.match(pageSource, /api\.competitorAnalysis\.run\(props\.apiConfig,\s*requestBodyForRecord\(recordToRun\)\)/)
+  assert.doesNotMatch(pageSource, /emit\('quick-analyze-report'/)
   assert.match(pageSource, />复制报告</)
   assert.match(pageSource, /selectedFeatureEventId/)
   assert.match(pageSource, /selectedFeatureEventForAction/)

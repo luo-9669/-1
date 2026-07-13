@@ -4096,6 +4096,7 @@ function applyRouteState(key, options = {}) {
 async function handleCompetitorReportQuickAnalyze(payload = {}) {
   const content = String(payload.content || '').trim()
   if (!content) return
+  if (payload.kind === 'gap') return
   activeView.value = 'workflow'
   syncRouteToView('workflow')
   if (!state.activeWorkflowRun) {
