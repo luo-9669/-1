@@ -141,6 +141,13 @@
           <button type="button" aria-label="关闭弹窗" @click="closeRecord">×</button>
         </header>
       <section class="competitor-analysis-detail-card">
+        <section v-if="selectedDetailMetaRows.length" class="competitor-analysis-detail-meta" aria-label="报告信息">
+          <article v-for="row in selectedDetailMetaRows" :key="row.label">
+            <span>{{ row.label }}</span>
+            <strong>{{ row.value }}</strong>
+          </article>
+        </section>
+
         <section v-if="selectedFeatureEvents.length" class="competitor-analysis-feature-events">
           <h4>新功能事件</h4>
           <BaseDataTable class="competitor-analysis-feature-event-table" table-class="competitor-analysis-table">
@@ -288,6 +295,12 @@
       </section>
         <footer class="competitor-analysis-detail-actions">
           <BaseButton type="button" :disabled="!selectedReportCopyText" @click="copySelectedReport">复制报告</BaseButton>
+          <BaseButton type="button" :disabled="!selectedReportCopyText" @click="downloadSelectedReport">下载报告</BaseButton>
+          <BaseButton
+            v-if="selectedSourceRecord"
+            type="button"
+            @click="openSourceRecord"
+          >查看来源报告</BaseButton>
           <ElSelect
             v-if="selectedFeatureEvents.length > 1"
             v-model="selectedFeatureEventId"
@@ -310,7 +323,7 @@
             @click="deepAnalyzeFeatureEvent(selectedFeatureEventForAction)"
           >深度分析</BaseButton>
           <BaseButton
-            v-if="isAnalysisKind(selectedRecord?.kind)"
+            v-if="canQuickAnalyzeSelectedRecord"
             variant="primary"
             type="button"
             :disabled="!selectedReportCopyText"
@@ -578,6 +591,16 @@ const analysisRequiresScopeFields = computed(() => !['daily', 'weekly'].includes
 const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRecord.value))
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))
+const selectedDetailMetaRows = computed(() => detailMetaRowsForRecord(selectedRecord.value))
+const selectedSourceRecord = computed(() => {
+  const sourceRecordId = String(selectedRecord.value?.sourceRecordId || '').trim()
+  if (!sourceRecordId) return null
+  return analysisRecords.value.find((record) => record.id === sourceRecordId) || null
+})
+const canQuickAnalyzeSelectedRecord = computed(() =>
+  isAnalysisKind(selectedRecord.value?.kind) &&
+  selectedRecord.value?.kind !== 'gap'
+)
 const selectedFeatureEventForAction = computed(() => {
   const events = selectedFeatureEvents.value
   return events.find((event) => featureEventKey(event) === selectedFeatureEventId.value) || events.at(0) || null
@@ -644,6 +667,58 @@ function statusVariant(status = '') {
   if (status === 'succeeded') return 'success'
   if (status === 'failed') return 'error'
   return 'info'
+}
+
+function detailMetaValue(value = '') {
+  const text = String(value || '').trim()
+  return text || ''
+}
+
+function formatDuration(value = 0) {
+  const ms = Number(value)
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
+}
+
+function recordEvidenceQuality(record = {}) {
+  const artifacts = interactionArtifactsForRecord(record)
+  return detailMetaValue(
+    artifacts.evidenceQuality ||
+    artifacts.evidence_quality ||
+    record.evidenceQuality ||
+    record.evidence_quality
+  )
+}
+
+function detailMetaRowsForRecord(record = {}) {
+  if (!record?.id) return []
+  const rows = [
+    { label: '标题', value: record.title || getKindLabel(record.kind) },
+    { label: '状态', value: record.statusLabel || statusLabel(record.status) },
+    { label: '分析类型', value: getKindLabel(record.kind) },
+    { label: '耗时', value: formatDuration(record.durationMs) }
+  ]
+  if (record.kind === 'gap') {
+    rows.push(
+      { label: '来源报告', value: record.sourceTitle },
+      { label: '来源类型', value: record.sourceKind ? getKindLabel(record.sourceKind) : '' }
+    )
+  } else {
+    rows.push({ label: '竞品', value: recordCompetitorNames(record) })
+  }
+  if (record.kind === 'flow') {
+    rows.push(
+      { label: '功能', value: recordFeatureLabel(record) },
+      { label: '证据质量', value: recordEvidenceQuality(record) }
+    )
+  }
+  if (record.kind === 'framework') {
+    rows.push({ label: '产品URL', value: record.productUrl })
+  }
+  return rows
+    .map((row) => ({ ...row, value: detailMetaValue(row.value) }))
+    .filter((row) => row.value)
 }
 
 function formatTime(value = '') {
@@ -794,6 +869,7 @@ function quickAnalyzeSelectedReport() {
   const content = String(selectedReportCopyText.value || '').trim()
   const record = selectedRecord.value
   if (!content || !record || !isAnalysisKind(record.kind)) return
+  if (record.kind === 'gap') return
   const draftId = localAnalysisRecordId(0)
   // 调用后端API，kind='gap'，传递源报告内容
   const draft = {
@@ -890,6 +966,25 @@ async function copySelectedReport() {
     statusTone.value = 'failed'
     statusMessage.value = '复制失败，请手动选择报告内容。'
   }
+}
+
+function downloadSelectedReport() {
+  const text = selectedReportCopyText.value
+  if (!text || typeof document === 'undefined') return
+  const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = selectedReportFileName()
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+function openSourceRecord() {
+  if (!selectedSourceRecord.value?.id) return
+  selectedRecordId.value = selectedSourceRecord.value.id
 }
 
 function persistCachedAnalysis(records = analysisRecords.value) {
@@ -1551,6 +1646,8 @@ function interactionArtifactsForRecord(record = {}) {
       stateMatrix: [],
       transitions: [],
       evidenceStatus: artifacts.evidenceStatus || artifacts.evidence_status || 'not_found',
+      evidenceQuality: artifacts.evidenceQuality || artifacts.evidence_quality || '',
+      evidenceCount: artifacts.evidenceCount || artifacts.evidence_count || 0,
       evidenceReason: artifacts.evidenceReason || artifacts.evidence_reason || '未生成阶段二规范产物。',
       similarFeatures: []
     }
@@ -1561,7 +1658,11 @@ function interactionArtifactsForRecord(record = {}) {
     stateDiagramFile: artifacts.stateDiagramFile || artifacts.stateDiagram || artifactByBuiltKey(artifacts, 'stateDiagram') || artifactByBuiltKey(pageDoc, 'stateDiagram') || '',
     lowFiWireframeImages: normalizeArtifactList(artifacts.lowFiWireframeImages || artifacts.wireframeImages || pageDoc.lowFiWireframeImages),
     stateMatrix: normalizeArtifactList(artifacts.stateMatrix || pageDoc.stateMatrix),
-    transitions: normalizeArtifactList(artifacts.transitions || artifacts.stateTransitions || pageDoc.transitions)
+    transitions: normalizeArtifactList(artifacts.transitions || artifacts.stateTransitions || pageDoc.transitions),
+    evidenceStatus: artifacts.evidenceStatus || artifacts.evidence_status || '',
+    evidenceQuality: artifacts.evidenceQuality || artifacts.evidence_quality || '',
+    evidenceCount: artifacts.evidenceCount || artifacts.evidence_count || 0,
+    evidenceReason: artifacts.evidenceReason || artifacts.evidence_reason || ''
   }
 }
 
@@ -1959,6 +2060,34 @@ watch(() => props.projectId, () => {
 .competitor-analysis-inline-button {
   min-height: 36px;
   padding: 0 14px;
+}
+
+.competitor-analysis-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.competitor-analysis-detail-meta article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.competitor-analysis-detail-meta span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.competitor-analysis-detail-meta strong {
+  min-width: 0;
+  color: #1f2329;
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .competitor-analysis-feature-events {
