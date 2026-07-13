@@ -200,6 +200,21 @@ test('competitor analysis list shows feature display and markdown detail renderi
   assert.doesNotMatch(pageSource, /<pre class="competitor-analysis-markdown">\{\{ selectedInteractionArtifacts\.documentMarkdown \}\}<\/pre>/)
 })
 
+test('competitor analysis detail renders fenced markdown code blocks as code blocks', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const parserStart = pageSource.indexOf('function markdownBlocksFor')
+  const parserEnd = pageSource.indexOf('function markdownBlockKey', parserStart)
+  const parserSource = pageSource.slice(parserStart, parserEnd)
+
+  assert.ok(parserStart >= 0 && parserEnd > parserStart, 'markdownBlocksFor should be present')
+  assert.match(parserSource, /fence/i)
+  assert.match(parserSource, /type:\s*'code'/)
+  assert.match(parserSource, /language/)
+  assert.match(pageSource, /block\.type === 'code'/)
+  assert.match(pageSource, /class="competitor-analysis-md-code"/)
+  assert.match(pageSource, /\.competitor-analysis-md-code/)
+})
+
 test('competitor analysis report modal lets long markdown scroll without clipping content', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const reportDialogRule = cssRule(pageSource, '.competitor-analysis-report-dialog')

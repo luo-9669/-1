@@ -205,6 +205,7 @@
                   </tbody>
                 </table>
                 <blockquote v-else-if="block.type === 'quote'">{{ block.text }}</blockquote>
+                <pre v-else-if="block.type === 'code'" class="competitor-analysis-md-code"><code>{{ block.text }}</code></pre>
                 <p v-else>{{ block.text }}</p>
               </template>
             </section>
@@ -284,6 +285,7 @@
               </tbody>
             </table>
             <blockquote v-else-if="block.type === 'quote'">{{ block.text }}</blockquote>
+            <pre v-else-if="block.type === 'code'" class="competitor-analysis-md-code"><code>{{ block.text }}</code></pre>
             <p v-else>{{ block.text }}</p>
           </template>
         </section>
@@ -1565,6 +1567,10 @@ function isMarkdownTableSeparator(line = '') {
   return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || ''))
 }
 
+function isMarkdownFence(line = '') {
+  return /^```\s*(\S+)?\s*$/.test(String(line || '').trim())
+}
+
 function markdownBlocksFor(markdown = '') {
   const lines = String(markdown || '').split(/\r?\n/)
   const blocks = []
@@ -1574,6 +1580,22 @@ function markdownBlocksFor(markdown = '') {
     const trimmed = line.trim()
     if (!trimmed) {
       index += 1
+      continue
+    }
+
+    const fence = trimmed.match(/^```\s*(\S+)?\s*$/)
+    if (fence) {
+      const language = cleanMarkdownText(fence[1] || '')
+      const codeLines = []
+      index += 1
+      while (index < lines.length && !isMarkdownFence(lines[index])) {
+        codeLines.push(lines[index] || '')
+        index += 1
+      }
+      if (index < lines.length && isMarkdownFence(lines[index])) {
+        index += 1
+      }
+      blocks.push({ type: 'code', language, text: codeLines.join('\n').trim() })
       continue
     }
 
@@ -1620,7 +1642,7 @@ function markdownBlocksFor(markdown = '') {
     index += 1
     while (index < lines.length) {
       const next = lines[index]?.trim() || ''
-      if (!next || /^#{1,4}\s+/.test(next) || /^[-*]\s+/.test(next) || /^\d+\.\s+/.test(next) || /^>\s?/.test(next) || (next.includes('|') && isMarkdownTableSeparator(lines[index + 1] || ''))) break
+      if (!next || isMarkdownFence(next) || /^#{1,4}\s+/.test(next) || /^[-*]\s+/.test(next) || /^\d+\.\s+/.test(next) || /^>\s?/.test(next) || (next.includes('|') && isMarkdownTableSeparator(lines[index + 1] || ''))) break
       paragraph.push(next)
       index += 1
     }
@@ -2242,6 +2264,23 @@ watch(() => props.projectId, () => {
   padding-left: 16px;
   border-left: 4px solid #d0d5dd;
   color: #667085;
+}
+
+.competitor-analysis-md-code {
+  max-height: 360px;
+  margin: 16px 0 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #f8f9fb;
+  color: #344054;
+  font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+.competitor-analysis-md-code code {
+  font: inherit;
 }
 
 .competitor-analysis-md-table {
