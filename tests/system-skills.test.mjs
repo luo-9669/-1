@@ -19,6 +19,7 @@ import { buildWorkflowStageRuntime } from '../backend/services/stage-runtime.js'
 import { buildRequirementDissectionGuidanceArtifact } from '../backend/services/requirement-dissection-guidance.js'
 import { validateSkillOutput } from '../backend/services/schema-validator.js'
 import { buildSkillPrompt } from '../backend/services/prompt-builder.js'
+import { advancedUxInteractionLofiCanvasFromPageInteractionDocument } from '../backend/services/advanced-ux-page-interaction.js'
 
 test('system skill list only exposes latest advanced UX skill', () => {
   const normalized = normalizeSkill({
@@ -271,6 +272,191 @@ test('advanced UX page interaction prompt allows required text code blocks', asy
   assert.match(pagePromptSource, /必须使用 ```text 代码块输出页面流转文本流程图/)
   assert.match(pagePromptSource, /必须保留精确二级标题/)
   assert.doesNotMatch(pagePromptSource, /不输出 JSON、解释、代码围栏或前后缀/)
+})
+
+test('advanced UX prompts require readable cross-reference labels', async () => {
+  const [uploadsSource, stageOneConstraints, stageTwoSkill] = await Promise.all([
+    readFile(new URL('../backend/routes/uploads.js', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/需求阶段一产出约束.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/交互低保阶段二.md', import.meta.url), 'utf8')
+  ])
+  const pagePromptSource = uploadsSource.slice(
+    uploadsSource.indexOf('const pageInteractionDocumentPrompt'),
+    uploadsSource.indexOf('const generateAdvancedUxPageInteractionDocument')
+  )
+
+  ;[uploadsSource, stageOneConstraints, stageTwoSkill].forEach((source) => {
+    assert.match(source, /禁止裸编号引用/)
+    assert.match(source, /编号 - 名称\/说明/)
+  })
+  assert.match(stageOneConstraints, /弹窗\/抽屉编号统一使用 `M \+ 两位数字`/)
+  assert.match(stageTwoSkill, /弹窗\/抽屉\s+\| M \+ 两位数字/)
+  assert.match(stageTwoSkill, /M\[N\].*\[关联的页面：P01 - 页面名\]/)
+  assert.match(pagePromptSource, /弹窗与抽屉编号使用 M01/)
+})
+
+test('advanced UX low-fi comparison prompts require separated solution wireframes', async () => {
+  const [uploadsSource, stageOneConstraints, stageTwoSkill, stageOneSkill] = await Promise.all([
+    readFile(new URL('../backend/routes/uploads.js', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/需求阶段一产出约束.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/交互低保阶段二.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/skills/advanced-ux/需求分析阶段一skill.md', import.meta.url), 'utf8')
+  ])
+
+  ;[uploadsSource, stageOneConstraints, stageTwoSkill, stageOneSkill].forEach((source) => {
+    assert.match(source, /禁止把方案A\/方案B\/方案C挤在同一个 ASCII 代码块/)
+    assert.match(source, /每个方案单独一个 ```text 代码块/)
+    assert.match(source, /差异表/)
+    assert.doesNotMatch(source, /用 ASCII (?:文本布局图|线框图)(?:或 image_generate 工具生成)?并排对比/)
+    assert.doesNotMatch(source, /用 ```text 代码块并排展示方案一\/方案二\/方案三/)
+  })
+})
+
+test('advanced UX stage two import keeps spec-shaped detail content', () => {
+  const markdown = [
+    '# 复刻工具-页面交互框架与说明',
+    '',
+    '## 1. 文档概述',
+    '',
+    '| 核心假设 | 依据 | 风险 | 验证方式 | 置信度 |',
+    '| --- | --- | --- | --- | --- |',
+    '| 支持用户从首页导入参考视频 | 阶段一结论 | 输入不完整 | 原型评审 | 高 |',
+    '',
+    '## 2. 页面总览',
+    '',
+    '| 编号 | 页面名称 | 类型 | 所属模块 | 入口来源 | 核心职责 | 角色权限 | 数据来源 | 权限规则 | 路由路径 | analyzed |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| P01 | 复制首页 | 页面 | 核心流程 | 顶部入口 | 导入参考视频并启动解析 | user | 上传/链接 | 登录后可用 | /copy | true |',
+    '',
+    '## 3. 页面流转总览',
+    '',
+    '| 源页面 | 源页面名称 | 目标页面 | 目标页面名称 | 触发操作 | 前置条件 | 流转类型 | 触发角色 | 跳转方式 | 备注 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| P01 | 复制首页 | P01 | 复制首页 | 点击开始解析 | 链接有效 | 主流程 | user | stay | 进入解析状态 |',
+    '',
+    '| 源页面 | 目标页面 | 传递数据 | 触发动作 | 数据用途 | 异常处理 |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| P01 | P01 | 链接、上传文件 | 点击开始解析 | 创建解析任务 | 链接失败展示重试 |',
+    '',
+    '```text',
+    'P01 复制首页 ──[点击开始解析]──> P01 解析中',
+    '```',
+    '',
+    '## 4. 信息架构实体表',
+    '',
+    '| 信息实体 | 核心属性 | 关系/依赖 | 状态/流转 | 设计提示 |',
+    '| --- | --- | --- | --- | --- |',
+    '| 参考视频 | 链接、文件、时长 | 输入到解析任务 | 待解析/解析中/完成 | 明确格式限制 |',
+    '',
+    '## 5. 核心用户流程',
+    '',
+    '| 步骤 | 名称 | 用户行为 | 系统响应 | 产出 | 页面 |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| S1 | 导入 | 用户粘贴链接 | 校验链接 | 有效输入 | P01 |',
+    '',
+    '## 6. 状态机',
+    '',
+    '| 当前状态 | 触发事件 | 目标状态 | 页面表现 | 数据变更 |',
+    '| --- | --- | --- | --- | --- |',
+    '| ST0 待输入 | 用户粘贴链接 | ST1 待解析 | 输入框展示链接 | 暂存输入 |',
+    '',
+    '## 7. 弹窗与抽屉定义表',
+    '',
+    '| 编号 | 名称 | 触发动作 | 关闭行为 | 提交/取消去向 | 关联页面 |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| P10 | 上传说明弹窗 | 点击格式说明 | 点击关闭 | 返回 P01 | P01 |',
+    '',
+    '## 8. 逐页交互说明',
+    '',
+    '### P01 复制首页',
+    '',
+    '**页面定位**：导入参考视频，展示支持说明和启动入口。',
+    '',
+    '**页面框架**：',
+    '',
+    '| 区域 | 内容 | 说明 | 状态说明 | 组件引用 |',
+    '| --- | --- | --- | --- | --- |',
+    '| R01 顶部导航 | Logo、复制首页、模板广场 | 固定顶部 | 当前页高亮 | NavBar |',
+    '| R02 主导入区 | 链接输入框、开始解析按钮、本地上传按钮 | 页面核心 CTA | 支持粘贴/拖拽 | UploadPanel |',
+    '',
+    '**文本布局图（ASCII）**：',
+    '',
+    '```text',
+    '┌────────────────────┐',
+    '│ R01 顶部导航        │',
+    '├────────────────────┤',
+    '│ R02 主导入区        │',
+    '└────────────────────┘',
+    '```',
+    '',
+    '**交互规则**：',
+    '',
+    '| 编号 | 用户操作 | 系统反馈 | 关联状态/弹窗 | 备注 |',
+    '| --- | --- | --- | --- | --- |',
+    '| IR1 | 粘贴链接 | 校验格式并显示成功状态 | ST1 | 失败时提示原因 |',
+    '| IR2 | 点击开始解析 | 按钮 loading，进入解析中 | ST2 | 防重复点击 |',
+    '',
+    '**异常状态**：',
+    '',
+    '| 编号 | 状态 | 表现 | 处理方式 |',
+    '| --- | --- | --- | --- |',
+    '| E1 | 加载中 | 骨架屏 | 禁用重复提交 |',
+    '| E2 | 空状态 | 引导输入链接 | 聚焦输入框 |',
+    '| E3 | 错误态 | Toast 展示错误原因 | 支持重试 |',
+    '| E4 | 无权限 | 登录提示 | 登录后恢复输入 |',
+    '| E5 | 链接不可解析 | 红色提示 | 更换链接或上传文件 |',
+    '',
+    '## 9. 关键断点与优化节点',
+    '',
+    '| 断点节点 | 断点风险 | 优化动作 | 覆盖路径 | 置信度 |',
+    '| --- | --- | --- | --- | --- |',
+    '| S1/P01 | 用户不知道支持格式 | 展示格式说明 | 主路径 | 高 |',
+    '',
+    '## 10. 交互规则表（自有产品）',
+    '',
+    '| 规则编号 | 页面编号 | 区域编号 | 触发元素 | 触发动作 | 前置条件 | 交互行为 | 成功反馈 | 失败反馈 | 边界情况 | 关联接口 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| IR-G1 | P01 | R02 | 开始解析按钮 | 点击 | 链接有效 | 创建解析任务 | 进入解析中 | 展示错误 | 防重复点击 | /parse |',
+    '',
+    '## 11. 全局交互规范',
+    '',
+    '| 规范类型 | 规则 | 示例 | 例外 |',
+    '| --- | --- | --- | --- |',
+    '| 加载状态 | 超过 300ms 展示 loading | 解析按钮 loading | 极短操作可省略 |',
+    '',
+    '## 12. 页面3方案',
+    '',
+    '| 对比维度 | 方案A | 方案B | 方案C | 推荐判断 |',
+    '| --- | --- | --- | --- | --- |',
+    '| 入口密度 | 单入口 | 双入口 | 多入口 | 方案B |',
+    '',
+    '## 13. 方案验证与收敛',
+    '',
+    '| 核心问题 | 对应方案 | 匹配证据 | 未匹配风险 | 验证方式 |',
+    '| --- | --- | --- | --- | --- |',
+    '| 导入效率 | 方案B | 覆盖链接和上传 | 格式仍需确认 | 可用性测试 |',
+    '',
+    '## 14. 交付物清单',
+    '',
+    '| 产物 | 状态 | 说明 |',
+    '| --- | --- | --- |',
+    '| 页面交互文档 | 已生成 | Markdown 结构化内容 |'
+  ].join('\n')
+
+  const canvas = advancedUxInteractionLofiCanvasFromPageInteractionDocument({
+    fileName: '复刻工具-页面交互框架与说明.md',
+    markdown
+  })
+
+  assert.ok(canvas.pageInteractionDocumentArtifact, 'stage canvas should keep document-level stage two detail artifact')
+  assert.equal(canvas.pageInteractionDocumentArtifact.overviewRows.length, 1)
+  assert.equal(canvas.pageInteractionDocumentArtifact.flowRows.length, 1)
+  assert.equal(canvas.pageInteractionDocumentArtifact.entityRows.length, 1)
+  assert.equal(canvas.pageInteractionDocumentArtifact.stateRows.length, 1)
+  assert.equal(canvas.pageInteractionDocumentArtifact.globalInteractionRows.length, 1)
+  assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.map((section) => section.key).join(','), 'position,framework-table,text-layout,interaction-rules,exception-states')
+  assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.find((section) => section.key === 'interaction-rules').rows.length, 3)
+  assert.equal(canvas.nodes[0].pageLayoutArtifact.detailSections.find((section) => section.key === 'exception-states').rows.length, 5)
 })
 
 test('advanced UX requirement analysis builds total-flow canvas with PDF ten-node requirement stage', () => {
@@ -696,10 +882,33 @@ test('advanced UX markdown import wraps natural diagrams and rejects placeholder
     '',
     '### 7. 关键节点低保真对比',
     '',
-    '方案一：分步向导        方案二：单页工作台        方案三：AI 对话助手',
-    '┌────────┐          ┌────────┐          ┌────────┐',
-    '│ 导入   │          │ 输入区 │          │ 对话区 │',
-    '└────────┘          └────────┘          └────────┘',
+    '#### 方案一 - 分步向导',
+    '',
+    '```text',
+    '┌────────┐',
+    '│ 导入   │',
+    '└────────┘',
+    '```',
+    '',
+    '#### 方案二 - 单页工作台',
+    '',
+    '```text',
+    '┌────────┐',
+    '│ 输入区 │',
+    '└────────┘',
+    '```',
+    '',
+    '#### 方案三 - AI 对话助手',
+    '',
+    '```text',
+    '┌────────┐',
+    '│ 对话区 │',
+    '└────────┘',
+    '```',
+    '',
+    '| 对比点 | 方案一 | 方案二 | 方案三 |',
+    '|--------|--------|--------|--------|',
+    '| 布局差异 | 分步进入 | 单页集中 | 对话引导 |',
     '',
     '## 节点 09：推荐方案建议',
     '',
@@ -730,7 +939,9 @@ test('advanced UX markdown import wraps natural diagrams and rejects placeholder
   assert.match(normalized, /### 2\. 业务流程图[\s\S]*```text[\s\S]*\[项目草稿创建\][\s\S]*```/)
   assert.match(normalized, /### 7\. 状态迁移图[\s\S]*```text[\s\S]*ST0\(草稿\).*ST1\(解析中\)[\s\S]*```/)
   assert.match(normalized, /### 9\. 低保真线框图[\s\S]*```text[\s\S]*┌/)
-  assert.match(normalized, /### 7\. 关键节点低保真对比[\s\S]*```text[\s\S]*方案一[\s\S]*方案二[\s\S]*方案三[\s\S]*```/)
+  assert.match(normalized, /### 7\. 关键节点低保真对比[\s\S]*#### 方案一[\s\S]*```text[\s\S]*┌[\s\S]*```[\s\S]*#### 方案二[\s\S]*```text[\s\S]*┌[\s\S]*```[\s\S]*#### 方案三[\s\S]*```text[\s\S]*┌[\s\S]*```/)
+  const normalizedTextBlocks = Array.from(normalized.matchAll(/```text\s*([\s\S]*?)```/g), (match) => match[1] || '')
+  assert.ok(normalizedTextBlocks.every((block) => !/方案一[\s\S]{0,120}方案二[\s\S]{0,120}方案三/.test(block)))
   assert.doesNotMatch(normalized, /当前仅输出 ASCII 文本布局；真实低保真图片和 Draw\.io 文件待后续按触发条件生成/)
 
   const flowBlocks = importedFlow.requirementDissectionArtifact.productAnalysisPipeline.tabs
@@ -740,7 +951,7 @@ test('advanced UX markdown import wraps natural diagrams and rejects placeholder
     .find((tab) => tab.id === 'ux-three-design-solutions')
     .detailBlocks
   assert.ok(flowBlocks.filter((block) => block.type === 'flow-wireframe').length >= 4)
-  assert.ok(solutionBlocks.some((block) => block.type === 'flow-wireframe' && /方案一/.test(block.content || '')))
+  assert.ok(solutionBlocks.filter((block) => block.type === 'flow-wireframe' && /┌/.test(block.content || '')).length >= 3)
 })
 
 test('advanced UX markdown import recognizes natural numbered node headings', () => {
@@ -1310,6 +1521,24 @@ test('base dropdown renders plain label without relying on slot fallback', async
   assert.match(dropdownSource, /<slot v-if="\$slots\.trigger" name="trigger" \/>/)
   assert.match(dropdownSource, /<span v-else class="ui-dropdown__label">\{\{ label \}\}<\/span>/)
   assert.doesNotMatch(dropdownSource, /<slot name="trigger">\{\{ label \}\}<\/slot>/)
+})
+
+test('advanced UX stage-one canvas cards and detail prefer markdown-style tables', async () => {
+  const canvasSource = await readFile(new URL('../frontend/src/features/workflow/components/WorkflowCanvasPage.vue', import.meta.url), 'utf8')
+  const styleSource = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
+
+  assert.match(canvasSource, /requirementCanvasPreviewTable\(node\)/)
+  assert.match(canvasSource, /class="requirement-canvas-card-table-preview"/)
+  assert.match(canvasSource, /requirementPreviewTableHeaders\(requirementCanvasPreviewTable\(node\)\)/)
+  assert.match(canvasSource, /requirementPreviewTableRows\(requirementCanvasPreviewTable\(node\)\)/)
+  assert.match(canvasSource, /isAdvancedUxTablePreferredBlock\(block,\s*fullscreenNode\)/)
+  assert.match(canvasSource, /function requirementMarkdownPreviewTable/)
+  assert.match(canvasSource, /function requirementBlockPreviewTable/)
+  assert.doesNotMatch(canvasSource, /<span v-for="item in requirementCanvasPreviewItems\(node\)"/)
+
+  assert.match(styleSource, /\.requirement-canvas-card-table-preview/)
+  assert.match(styleSource, /\.requirement-canvas-card-table-preview table/)
+  assert.match(styleSource, /\.requirement-pipeline-block\.layout-advanced-ux-table/)
 })
 
 test('workflow canvas promotes stages and version history to topbar while hiding quality checks', async () => {
@@ -1949,7 +2178,7 @@ test('workflow total-flow stages render all entries and disable unreached stages
   assert.match(canOpenSource, /if \(stageConfirmation\(stageId\)\) return true/)
   assert.match(canOpenSource, /const previousStageId = previousStageIdForCanvasStage\(stageId\)/)
   assert.match(canOpenSource, /if \(previousStageId && stageConfirmation\(previousStageId\)\) return true/)
-  assert.doesNotMatch(canOpenSource, /loadedStageIds\.value\.has\(stageId\)/)
+  assert.match(canOpenSource, /loadedStageIds\.value\.has\(stageId\)/)
   assert.match(canOpenSource, /return false/)
   assert.match(canvasSource, /function stageCanvasHasRenderedContent\(stageId = ''\)/)
   assert.match(canvasSource, /contentStatus !== 'model-pending'/)
@@ -4847,13 +5076,25 @@ test('workflow generation detail actions update artifact status before handing o
   assert.match(generationSource, /patchWorkflowCanvasNodeArtifactStatus\(nodeId,[\s\S]*artifactStatus:\s*'generated'/)
   assert.match(apiSource, /generateCanvasNodeArtifact\(config,\s*runId,\s*nodeId,\s*payload = \{\}/)
   assert.match(apiSource, /\/api\/workspace\/workflow-runs\/\$\{encodeURIComponent\(runId\)\}\/canvas-nodes\/\$\{encodeURIComponent\(nodeId\)\}\/generate-artifact/)
-  assert.match(generationSource, /appendWorkflowGeneratedCodeAgentMessage\(generatedNode, generationAction\)/)
-  assert.match(generationSource, /appendWorkflowVisualArtifactAgentMessage\(generatedNode, generationAction\)/)
+  assert.match(generationSource, /const agentScopeId = workflowGenerationAgentScopeId\(nodeId\)/)
+  assert.match(generationSource, /appendWorkflowGeneratedCodeAgentMessage\(generatedNode, generationAction, \{ scopeId: agentScopeId \}\)/)
+  assert.match(generationSource, /appendWorkflowVisualArtifactAgentMessage\(generatedNode, generationAction, \{ scopeId: agentScopeId \}\)/)
 })
 
 test('backend workflow route generates and persists canvas node artifacts', async () => {
   const { workflowRoutes } = await import('../backend/routes/workflows.js')
-  const backendRoutes = workflowRoutes()
+  const backendRoutes = workflowRoutes(undefined, {
+    agentProvider: {
+      name: 'test-html-provider',
+      async generate() {
+        return {
+          content: '<!doctype html><html><body><main><h1>HTML 预览</h1><section>顶部搜索区 饮品分类横向 Tab 固定底部结算栏 清爽茶饮品牌高保真点单页</section></main></body></html>',
+          provider: 'test-html-provider',
+          model: 'test-html-model'
+        }
+      }
+    }
+  })
   const created = await backendRoutes['POST /api/workspace/workflow-runs']({
     id: 'run-canvas-artifact',
     workflowId: 'total-design-flow',

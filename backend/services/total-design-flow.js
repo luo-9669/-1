@@ -4053,6 +4053,22 @@ function parseMarkdownCodeBlock(markdown = '') {
   return cleanText(match?.[1] || '')
 }
 
+function parseMarkdownCodeBlocks(markdown = '') {
+  const text = String(markdown || '').replace(/\r\n/g, '\n')
+  return [...text.matchAll(/```(?:\w+)?\n([\s\S]*?)```/g)]
+    .map((match, index) => {
+      const before = text.slice(0, match.index || 0)
+      const headingMatches = [...before.matchAll(/^####\s+(.+?)\s*$/gm)]
+      const nearestHeading = headingMatches.at(-1)?.[1] || ''
+      return {
+        index,
+        title: cleanText(nearestHeading),
+        content: cleanText(match?.[1] || '')
+      }
+    })
+    .filter((block) => block.content)
+}
+
 function advancedUxDiagramSubsectionTitle(title = '') {
   return /用户流程图|业务流程图|状态迁移图|低保真线框图|关键页面低保真|核心页面低保真|关键节点低保真对比|低保真并排对比/.test(cleanText(title))
 }
@@ -4197,7 +4213,8 @@ function parseAdvancedUxSectionBlocks(section = {}) {
   const subsections = advancedUxMarkdownSubsections(section.markdown)
   return subsections.flatMap((subsection, index) => {
     const table = parseMarkdownTable(subsection.markdown)
-    const code = parseMarkdownCodeBlock(subsection.markdown)
+    const codeBlocks = parseMarkdownCodeBlocks(subsection.markdown)
+    const code = codeBlocks[0]?.content || ''
     const type = advancedUxBlockTypeForSubsection(subsection.title, table, code)
     const base = {
       id: `${section.id}-block-${index + 1}`,
@@ -4211,6 +4228,27 @@ function parseAdvancedUxSectionBlocks(section = {}) {
         items: parseAdvancedUxFeatureItems(subsection.markdown),
         content: subsection.markdown
       }]
+    }
+    if (codeBlocks.length > 1) {
+      const blocks = codeBlocks.map((codeBlock, codeIndex) => ({
+        ...base,
+        id: `${base.id}-${codeIndex + 1}`,
+        title: codeBlock.title || subsection.title,
+        type: 'flow-wireframe',
+        summary: codeBlock.title || base.summary,
+        content: codeBlock.content
+      }))
+      if (table) {
+        blocks.push({
+          ...base,
+          id: `${base.id}-table`,
+          title: `${subsection.title}差异表`,
+          type: 'table',
+          columns: table.columns,
+          rows: table.rows
+        })
+      }
+      return blocks
     }
     if (code) return [{ ...base, content: code }]
     if (table) return [{ ...base, columns: table.columns, rows: table.rows }]

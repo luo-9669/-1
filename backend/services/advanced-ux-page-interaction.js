@@ -61,6 +61,88 @@ function rowsAsObjects(table = null) {
   )
 }
 
+function rowsForColumns(tables = [], columnGroups = []) {
+  const groups = Array.isArray(columnGroups?.[0]) ? columnGroups : [columnGroups]
+  const table = groups
+    .map((columns) => firstTableWithColumns(tables, columns))
+    .find(Boolean)
+  return rowsAsObjects(table)
+}
+
+function stageTwoDocumentArtifact(markdown = '', pageInteractionDocument = {}, pages = []) {
+  const tables = parseMarkdownTables(markdown)
+  const overviewRows = rowsForColumns(tables, [
+    ['编号', '页面名称', '类型', '所属模块', '核心职责'],
+    ['页面编号', '页面名称', '页面类型', '核心职责']
+  ])
+  const flowRows = rowsForColumns(tables, [
+    ['源页面', '目标页面', '触发操作', '流转类型'],
+    ['源页面', '目标页面', '触发动作', '流转类型']
+  ])
+  const dataFlowRows = rowsForColumns(tables, [
+    ['源页面', '目标页面', '传递数据', '触发动作']
+  ])
+  const entityRows = rowsForColumns(tables, [
+    ['信息实体', '核心属性', '关系/依赖', '状态/流转', '设计提示'],
+    ['实体', '核心属性', '关系/依赖', '状态流转', '设计提示']
+  ])
+  const mainFlowRows = rowsForColumns(tables, [
+    ['步骤', '名称', '用户行为', '系统响应', '页面'],
+    ['步骤编号', '步骤名称', '用户行为', '系统反馈', '关联页面']
+  ])
+  const stateRows = rowsForColumns(tables, [
+    ['当前状态', '触发事件', '目标状态', '页面表现', '数据变更']
+  ])
+  const modalRows = rowsForColumns(tables, [
+    ['编号', '名称', '触发动作', '关闭行为', '提交/取消去向', '关联页面'],
+    ['编号', '弹窗名称', '触发动作', '关闭行为', '去向', '关联页面']
+  ])
+  const breakpointRows = rowsForColumns(tables, [
+    ['断点节点', '断点风险', '优化动作', '覆盖路径'],
+    ['断点', '位置', '问题描述', '用户影响', '优化方案']
+  ])
+  const globalInteractionRows = rowsForColumns(tables, [
+    ['规范类型', '规则', '示例', '例外'],
+    ['类型', '规则', '示例', '例外']
+  ])
+  const planComparisonRows = rowsForColumns(tables, [
+    ['对比维度', '方案A', '方案B', '方案C'],
+    ['维度', '方案一', '方案二', '方案三']
+  ])
+  const fitRows = rowsForColumns(tables, [
+    ['核心问题', '对应方案', '匹配证据', '未匹配风险', '验证方式'],
+    ['问题', '方案', '证据', '风险', '验证']
+  ])
+  const deliveryRows = rowsForColumns(tables, [
+    ['产物', '状态', '说明'],
+    ['产物', '必须/可选', '工具', '输出格式']
+  ])
+  const analyzedPages = pages.filter((page) => page.analyzed !== false)
+  return {
+    version: 'advanced-ux-stage-two-detail/v1',
+    fileName: pageInteractionDocument.fileName || '',
+    stageId: 'interaction-lofi',
+    sourceArtifactType: 'advanced-ux-page-interaction-document',
+    overviewRows,
+    flowRows,
+    dataFlowRows,
+    entityRows,
+    mainFlowRows,
+    stateRows,
+    modalRows,
+    breakpointRows,
+    globalInteractionRows,
+    planComparisonRows,
+    fitRows,
+    deliveryRows,
+    stats: {
+      pageCount: pages.length,
+      analyzedCount: analyzedPages.length,
+      coverageRate: pages.length ? Math.round((analyzedPages.length / pages.length) * 100) : 0
+    }
+  }
+}
+
 function booleanFromText(value = '') {
   const text = cleanText(value).toLowerCase()
   if (!text) return false
@@ -260,6 +342,45 @@ function pageArtifacts(page = {}, globalRuleRows = []) {
   }
 }
 
+function pagePositionText(page = {}) {
+  const body = String(page.body || '')
+  const inline = body.match(/\*\*页面定位\*\*[：:]\s*(.+?)(?:\n|$)/)
+  if (inline?.[1]) return cleanText(inline[1])
+  const heading = body.match(/#{4,6}\s*页面定位\s*\n+([\s\S]*?)(?:\n#{1,6}\s|\n\*\*页面框架|$)/)
+  if (heading?.[1]) return cleanText(heading[1])
+  return cleanText(page.responsibility || '')
+}
+
+function pageDetailSections(page = {}, artifacts = {}, wireframe = '') {
+  return [
+    {
+      key: 'position',
+      title: '页面定位',
+      body: [pagePositionText(page)].filter(Boolean)
+    },
+    {
+      key: 'framework-table',
+      title: '页面框架表格',
+      rows: artifacts.frameRows || []
+    },
+    {
+      key: 'text-layout',
+      title: '文本布局图（ASCII）',
+      code: String(wireframe || '').trim()
+    },
+    {
+      key: 'interaction-rules',
+      title: '交互规则表格',
+      rows: artifacts.interactionRows || []
+    },
+    {
+      key: 'exception-states',
+      title: '异常状态表格',
+      rows: artifacts.stateMatrix || []
+    }
+  ]
+}
+
 function asciiWireframe(page = {}, frameRows = []) {
   const title = `${page.pageId || ''} ${page.pageName || page.title || '页面'}`.trim()
   const lines = [
@@ -306,6 +427,7 @@ export function advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageI
   const pages = documentPages(markdown)
   if (!pages.length) return null
   const globalRuleRows = ownProductRuleRows(markdown)
+  const documentArtifact = stageTwoDocumentArtifact(markdown, pageInteractionDocument, pages)
   const nodes = pages.map((page, index) => {
     const artifacts = pageArtifacts(page, globalRuleRows)
     const pageName = cleanText(page.pageName || page.title.replace(/^P\d{2}\s*/, '') || `页面 ${index + 1}`)
@@ -352,6 +474,8 @@ export function advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageI
         sourceFileName: pageInteractionDocument.fileName || '',
         asciiWireframe: wireframe,
         rawText: page.body || '',
+        pagePosition: pagePositionText(page),
+        detailSections: pageDetailSections(page, artifacts, wireframe),
         layout: {
           type: page.type || '',
           module: page.module || '',
@@ -383,6 +507,7 @@ export function advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageI
     summary: '由高级 UX 页面交互框架与说明 Markdown 自动导入。',
     canvasType: 'interaction-lofi-page-canvas',
     layoutRule: 'page-grid',
+    pageInteractionDocumentArtifact: documentArtifact,
     nodes,
     edges: [],
     orderedTabs: nodes.map((node) => ({ key: node.id, label: node.title }))

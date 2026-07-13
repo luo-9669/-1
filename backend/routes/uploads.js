@@ -15,6 +15,7 @@ import {
 } from '../services/page-layout-artifact-renderer.js'
 import { withWorkflowStageRuntime } from '../services/stage-runtime.js'
 import { buildAdvancedUxWebEvidencePack } from '../services/web-evidence-search.js'
+import { advancedUxInteractionLofiCanvasFromPageInteractionDocument as buildAdvancedUxInteractionLofiCanvasFromPageInteractionDocument } from '../services/advanced-ux-page-interaction.js'
 import { addModelCallLog, getModelSettingsRaw, getWorkflowRun, skillOrchestrationSettingsView, upsertWorkflowRun } from '../services/workspace-store.js'
 
 const DEFAULT_ANALYSIS_GENERATION_TIMEOUT_MS = 600000
@@ -179,6 +180,8 @@ export function uploadRoutes(options = {}) {
       '- 一级章节（H2）之间用 --- 分隔。',
       '- 单段文字不超过100字，超过则分段或转为表格。',
       '- 表格与文字比例约 6:4。',
+      '- 禁止裸编号引用：编号定义列可以只写 A1/O3/P01/M01；凡是来源、依据、关联、承接、去向、页面、状态、弹窗、风险、机会、HMW、步骤等引用字段，必须写成“编号 - 名称/说明”。',
+      '- 示例：不要写“A1”“O3, R2”“HMW5, R6, O7”“P01”“M03”；要写“A1 - 原始诉求：一键复刻爆款视频”“O3 - 本地上传兜底机会；R2 - 链接解析失败风险”“HMW5 - 降低版权误用；R6 - 新手无从开始；O7 - 引导式新手流程”“P01 - 爆款复刻首页”“M03 - 生成排队弹窗”。',
       '- 页面框架：≤3个区域用表格，>4个区域的核心页面必须出低保真线框图。',
       '- 步骤①“原始需求分析”必须包含 GWT 行为描述（Given / When / Then）和 5 Whys 根因追溯；5 Whys 至少 5 层，不得停留在表层需求。',
       '- 步骤①必须在“### 1. 原始诉求识别”之后、“### 2. 需求清晰度评分表”之前输出“### 2. 需求理解清单”；随后原“需求清晰度评分表”顺延为“### 3. 需求清晰度评分表”。',
@@ -197,15 +200,15 @@ export function uploadRoutes(options = {}) {
       '- 步骤⑤“设计机会”必须包含设计机会总表、优先 Top 3-5 机会、机会→步骤映射；设计机会总表表头覆盖机会描述、类型、上游依据、可承接步骤、预期价值、优先级。',
       '- 步骤⑤优先 Top 3-5 机会表头覆盖排序、机会编号、机会描述、优先理由、设计方向提示；机会→步骤映射表头覆盖机会编号、承接步骤、承接方式。',
       '- 步骤⑥必须包含入口定义表和主流程步骤表；主流程步骤表至少 6 步，表头覆盖步骤、用户行为、系统响应、产出、页面。',
-      '- 步骤⑥“整体交互链路”必须包含页面三件套：页面总览表、页面流转表、页面框架表；必须包含弹窗/抽屉定义表，字段覆盖编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
+      '- 步骤⑥“整体交互链路”必须包含页面三件套：页面总览表、页面流转表、页面框架表；必须包含弹窗/抽屉定义表，弹窗/抽屉编号使用 M01/M02/M03，字段覆盖编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
       '- 页面三件套必须分别给出表格：页面总览表至少 3 个页面/入口，页面流转表至少 3 条流转，页面框架表表头覆盖区域、内容、说明。',
       '- 步骤⑥必须包含信息架构实体表，字段覆盖信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站默认 10-14 个实体，若少于 10 个必须说明当前范围为何不适用。',
       '- 步骤⑥“整体交互链路”必须包含完整状态机：状态迁移表、状态迁移图（用 ```text 代码块表达 ST0→ST1 可视化流向）、独立迁移规则表。',
       '- 步骤⑥必须包含关键断点与优化节点表，至少 5 个断点，覆盖主路径、异常路径、回流路径；全局交互规范必须用表格覆盖类型、规则、示例、例外。',
       '- 步骤⑥或⑦必须实际输出至少 1 个关键页面 ASCII 低保真线框图，不得只写“需要生成”；线框图放在 ```text 代码块中，区域必须和页面框架表对应。',
       '- 图编号（如图1、图6）只能对应真实流程图、状态图或 ASCII 低保真代码块；不得把“当前仅输出 ASCII 文本布局 / 图片待后续生成 / Draw.io 待生成”当作图内容。',
-      '- 步骤⑦“三套设计方案”必须输出方案对比矩阵和三方案并排对比，至少覆盖目标用户/核心路径/页面组织/关键交互/异常处理/实现复杂度/体验风险/推荐条件。',
-      '- 步骤⑦“三套设计方案”必须输出关键节点低保真并排对比：选择三方案差异最大的 1 个关键节点，用 ```text 代码块并排展示方案一/方案二/方案三的 ASCII 线框差异。',
+      '- 步骤⑦“三套设计方案”必须输出方案对比矩阵，至少覆盖目标用户/核心路径/页面组织/关键交互/异常处理/实现复杂度/体验风险/推荐条件；矩阵可用 Markdown 表格横向比较方案一/方案二/方案三。',
+      '- 步骤⑦“三套设计方案”必须输出关键节点低保真分方案对比：选择三方案差异最大的 1 个关键节点，禁止把方案A/方案B/方案C挤在同一个 ASCII 代码块；每个方案单独一个 ```text 代码块，用四级标题“#### 方案A - 名称 / #### 方案B - 名称 / #### 方案C - 名称”垂直展示，最后追加差异表。',
       '- 步骤⑧“异常流补充”必须包含异常流表格，至少 8 种异常场景，覆盖输入、处理、网络、权限、超时、并发等类型。',
       '- 步骤⑨“推荐方案建议”必须包含 Problem-Solution Fit 验证、六顶思考帽评审和假设回检，再给推荐方案；不得直接跳到推荐结论。',
       '- “推荐方案建议”章节内必须出现三级标题“### 2. 六顶思考帽评审”，并覆盖白帽、红帽、黑帽、黄帽、绿帽、蓝帽；不能只在别的章节零散提到六帽。',
@@ -261,6 +264,8 @@ export function uploadRoutes(options = {}) {
       '- 一级章节（H2）之间用 --- 分隔。',
       '- 单段文字不超过100字，超过则分段或转为表格。',
       '- 表格与文字比例约 6:4。',
+      '- 禁止裸编号引用：编号定义列可以只写 A1/O3/P01/M01；凡是来源、依据、关联、承接、去向、页面、状态、弹窗、风险、机会、HMW、步骤等引用字段，必须写成“编号 - 名称/说明”。',
+      '- 修复已有 Markdown 时，必须把“A1”“O3, R2”“HMW5, R6, O7”“P01”“M03”这类裸编号补成“编号 - 名称/说明”，不得保留读者看不懂的暗号式引用。',
       '- 页面框架：≤3个区域用表格，>4个区域的核心页面必须出低保真线框图。',
       '- 必须补齐方法论骨架：原始需求分析含 GWT 和 5Whys，设计问题定义含 HMW，用户与场景含标准 Journey Map，假设与验证含假设分类/高风险假设/假设回检点，设计机会含机会总表/Top 机会/机会映射，推荐方案建议含 Problem-Solution Fit、六顶思考帽评审和假设回检，设计优先级与分阶段计划含优先级排序/分期计划/待确认决策。',
       '- 必须补齐细颗粒度验收项：需求理解清单至少 6 行且放在原始诉求识别之后、需求清晰度评分表之前；需求清晰度评分表至少 5 个维度；关键缺口清单至少 5 个缺口；追问清单至少 5 个追问；GWT 至少 3 条；5 Whys 至少 5 层；HMW 至少 3 条；Journey Map 至少 4 个阶段。',
@@ -268,7 +273,7 @@ export function uploadRoutes(options = {}) {
       '- 必须补齐链路评审产物：整体交互链路含页面三件套、弹窗/抽屉定义表、状态迁移图、迁移规则表和至少 1 个 ASCII 低保真线框图。',
       '- 页面三件套必须分别输出页面总览表、页面流转表、页面框架表；不要只写“如下”或把三者混成一个表。',
       '- 必须补齐信息架构实体表：字段覆盖信息实体、核心属性、关系/依赖、状态/流转、设计提示；全量小程序/App/网站默认 10-14 个实体，若少于 10 个必须说明当前范围为何不适用。',
-      '- 必须补齐方案对比力：三套设计方案下要有方案对比矩阵、三方案并排对比和关键节点低保真并排对比，不得只分别描述三个方案。',
+      '- 必须补齐方案对比力：三套设计方案下要有方案对比矩阵、三方案对比说明和关键节点低保真分方案对比，不得只分别描述三个方案。',
       '- 必须补齐推荐交付表：最终方案页面清单、假设回检表、数据埋点方案、竞品对标总结、设计原则、下一步行动。',
       '- 必须补齐可视化产出状态：整体交互链路中说明低保真线框图、Draw.io 主流程图、Draw.io 状态图的触发条件和当前产物状态；未真实生成 .drawio/.xml 时写待生成。',
       '- 必须输出状态机表格，表头语义必须覆盖：当前状态、触发事件、目标状态、页面表现、数据变更；状态超过 5 个或多分支交叉时，仍先给状态机表格，再说明需要 Draw.io 状态图承接。',
@@ -304,14 +309,14 @@ export function uploadRoutes(options = {}) {
       '- 在“整体交互链路 / 状态机表格”中，必须输出 Markdown 表格，表头包含当前状态、触发事件、目标状态、页面表现、数据变更；行内容由当前项目的真实对象生命周期反推，不写固定行业状态。',
       '- 在“整体交互链路 / 状态迁移图”中，必须用 ```text 代码块输出 ST0→ST1→ST2 形式的可视化流向，并补独立“迁移规则表”。',
       '- 在“整体交互链路 / 页面三件套”中，必须分别输出页面总览表、页面流转表、页面框架表；页面框架表必须和 ASCII 低保真区域一致。',
-      '- 在“整体交互链路 / 弹窗与抽屉定义表”中，必须包含编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
+      '- 在“整体交互链路 / 弹窗与抽屉定义表”中，必须包含编号、名称、触发动作、关闭行为、提交/取消去向、关联页面；弹窗/抽屉编号使用 M01/M02/M03。',
       '- 在“整体交互链路 / 低保真线框图”中，必须实际输出至少 1 个关键页面 ASCII 线框图，放入 ```text 代码块；不得只写后续生成。',
       '- 图编号（如图1、图6）必须指向真实图形内容或 ASCII 代码块；“待生成/触发条件/真实图片尚未生成/Draw.io 尚未生成”只能写在产物状态表中，不得作为图内容。',
       '- 在“整体交互链路 / 页面框架表格”或“三套设计方案 / 页面级方案”中，必须输出至少 1 个核心页面的页面框架表格，表头包含区域、内容、说明；页面区域由当前项目页面职责反推，不写固定行业区域。',
       '- 在“整体交互链路 / 关键断点与优化节点”中，节点不能只写页面名，必须写成“当前项目阶段-具体动作/场景”；全量小程序/App/网站默认输出 8-12 个断点节点，覆盖当前项目的主路径阶段、关键对象生命周期、异常路径、回流路径；不适用的路径类型要跳过。',
       '- 在“三套设计方案 / 关键交互流程（Top 3 优先机会）”中，每个 Top 必须用四级标题“#### Top N：当前项目方案名”，并为每个 Top 输出结构表，至少覆盖状态流转、界面/触点跳转、关键反馈、异常/回退路径、低保真描述；字段可按项目改名，但语义不能缺失。',
-      '- 在“三套设计方案 / 方案对比矩阵”中，必须把三套方案横向并排比较，表头至少包含维度、方案一、方案二、方案三、取舍说明；维度由当前项目动态生成，但必须覆盖效率、学习成本、异常恢复、实现复杂度、风险。',
-      '- 在“三套设计方案 / 关键节点低保真对比”中，必须用 ```text 代码块并排展示方案一/方案二/方案三在同一关键节点的线框差异。',
+      '- 在“三套设计方案 / 方案对比矩阵”中，必须用 Markdown 表格比较三套方案，表头至少包含维度、方案一、方案二、方案三、取舍说明；维度由当前项目动态生成，但必须覆盖效率、学习成本、异常恢复、实现复杂度、风险。',
+      '- 在“三套设计方案 / 关键节点低保真对比”中，禁止把方案A/方案B/方案C挤在同一个 ASCII 代码块；每个方案单独一个 ```text 代码块，用“#### 方案A - 名称 / #### 方案B - 名称 / #### 方案C - 名称”垂直展示，最后追加差异表。',
       '- 在“三套设计方案 / 六顶思考帽评审”中，必须按白帽/红帽/黑帽/黄帽/绿帽/蓝帽输出对三套方案的评审摘要和结论。',
       '- 在“三套设计方案 / 优先方案收敛（Top 3）”中，Top 字段不能只写 1/2/3，必须写成“Top 1：方案名称”；方案名称要和上方 Top 1/2/3 三级标题保持一致。',
       '- 在“推荐方案建议 / Problem-Solution Fit 验证”中，必须用表格说明核心问题、对应方案、匹配证据、未匹配风险、验证方式、置信度。',
@@ -568,7 +573,8 @@ export function uploadRoutes(options = {}) {
   }
   const advancedUxMethodologyReviewIssues = (text = '', tables = []) => {
     const issues = []
-    const hasTextCodeBlock = /```text[\s\S]*?```/i.test(text)
+    const textCodeBlocks = Array.from(text.matchAll(/```text\s*([\s\S]*?)```/gi), (match) => match[1] || '')
+    const hasTextCodeBlock = textCodeBlocks.length > 0
     if (!advancedUxHasTableWithAnyColumnGroup(tables, [
       ['需求要素', '理解转译', '置信度', '依据'],
       ['维度', '当前理解', '类型', '依据', '置信度'],
@@ -819,8 +825,13 @@ export function uploadRoutes(options = {}) {
     } else if (advancedUxMaxRowsForColumns(tables, ['维度', '方案一', '方案二', '方案三']) < 5) {
       issues.push('三方案横向对比矩阵至少需要 5 个维度，覆盖效率、学习成本、异常恢复、实现复杂度和风险')
     }
-    if (!/关键节点低保真对比|低保真并排对比|方案一[\s\S]{0,80}方案二[\s\S]{0,80}方案三/.test(text)) {
-      issues.push('缺少关键节点低保真并排对比')
+    const hasSeparatedSolutionWireframes = /关键节点低保真对比[\s\S]*####\s*方案(?:A|一)[^\n]*[\s\S]*```text[\s\S]*```[\s\S]*####\s*方案(?:B|二)[^\n]*[\s\S]*```text[\s\S]*```[\s\S]*####\s*方案(?:C|三)[^\n]*[\s\S]*```text[\s\S]*```/.test(text)
+    const hasSqueezedSolutionWireframe = textCodeBlocks.some((block) => /方案(?:A|一)[\s\S]{0,120}方案(?:B|二)[\s\S]{0,120}方案(?:C|三)/.test(block))
+    if (!hasSeparatedSolutionWireframes) {
+      issues.push('缺少关键节点低保真分方案对比：每个方案需单独标题和单独 text 代码块')
+    }
+    if (hasSqueezedSolutionWireframe) {
+      issues.push('关键节点低保真对比不可把方案A/方案B/方案C挤在同一个 ASCII 代码块')
     }
     const exceptionRows = advancedUxRowsForAnyColumnGroup(tables, [
       ['异常类型', '触发场景', '用户影响', '页面表现', '处理方式']
@@ -1433,11 +1444,13 @@ export function uploadRoutes(options = {}) {
       '- 页面总览必须使用表格，表头覆盖：编号、页面名称、类型、所属模块、入口来源、核心职责、角色权限、数据来源、权限规则、路由路径、analyzed。',
       '- 页面总览后必须输出“页面总览统计”，包含：总页面数、核心流程页面、已分析、未分析、覆盖率、页面类型分布；覆盖率低于 80% 必须说明原因。',
       '- 页面总览原则上覆盖当前产品完整页面，常规产品建议 8-15 个页面；范围较小时可少于 8 个，但必须解释范围边界，且页面总览中的每个 P 编号都必须有逐页说明。',
-      '- 页面流转总览必须包含“页面流转关系表”和“文本流程图”。流转关系表表头覆盖：源页面、源页面名称、目标页面、目标页面名称、触发操作、前置条件、流转类型、触发角色、跳转方式、备注。',
-      '- 页面流转总览必须额外包含“页面间数据流表”，表头覆盖：源页面、目标页面、传递数据、触发动作、数据用途、异常处理。',
+      '- 禁止裸编号引用：编号定义列可以只写 P01/M01/ST1/S1/IR1/E1；凡是来源、依据、关联、承接、去向、页面、状态、弹窗、规则、异常等引用字段，必须写成“编号 - 名称/说明”。',
+      '- 弹窗与抽屉编号使用 M01/M02/M03，不占用页面 P 编号；引用弹窗或抽屉时必须写成“编号 - 名称/说明”，例如“M03 - 生成排队弹窗”。',
+      '- 页面流转总览必须包含“页面流转关系表”和“文本流程图”。流转关系表表头覆盖：源页面编号、源页面名称、目标页面编号、目标页面名称、触发操作、前置条件、流转类型、触发角色、跳转方式、备注；不要输出空白 ID 列或只有编号没有名称的列。',
+      '- 页面流转总览必须额外包含“页面间数据流表”，表头覆盖：源页面编号、源页面名称、目标页面编号、目标页面名称、传递数据、触发动作、数据用途、异常处理。',
       '- 页面流转关系表必须覆盖页面总览中每个 analyzed=true 的页面；每个页面至少作为源页面或目标页面出现一次。',
       '- 页面流转关系表必须至少包含 1 行“主流程”，并至少包含 1 行“返回”或“异常流”。',
-      '- 必须使用 ```text 代码块输出页面流转文本流程图；流程图必须使用 P编号 页面名称，字符连线表达主流程、关键分支、异常流和返回路径。',
+      '- 必须使用 ```text 代码块输出页面流转文本流程图；流程图必须使用“P编号 - 页面名称”，字符连线表达主流程、关键分支、异常流和返回路径。',
       '- 信息架构实体表必须 5-10 行，表头覆盖：信息实体、核心属性、关系/依赖、状态/流转、设计提示。',
       '- 核心用户流程必须包含主流程步骤表，6-10 步，使用 S 编号并关联 P 页面编号。',
       '- 状态机必须使用表格，表头覆盖：当前状态、触发事件、目标状态、页面表现、数据变更。',
@@ -2281,7 +2294,7 @@ export function uploadRoutes(options = {}) {
       '关键断点与优化节点表格必须包含“节点、可能断点、用户影响、优化建议、置信度”五列；节点必须写成“当前项目阶段-具体动作/场景”，不能只写单点页面名、模块名或入口名；全量小程序/App/网站默认输出 8-12 个断点节点，并覆盖当前项目的主路径阶段、关键对象生命周期、异常路径、回流路径；不适用的路径类型要跳过。',
       '页面三件套必须分别输出页面总览表、页面流转表、页面框架表；弹窗与抽屉定义表必须覆盖编号、名称、触发动作、关闭行为、提交/取消去向、关联页面。',
       '状态迁移图必须用 ```text 代码块输出 ST0→ST1→ST2 形式；低保真线框图必须至少输出 1 个关键页面 ASCII 线框，不能只写“待生成”。',
-      '三套设计方案必须包含：### 1. 机会总览、### 2. 方案一、### 3. 方案二、### 4. 方案三、### 5. 方案对比矩阵、### 6. 三方案并排对比、### 7. 关键节点低保真对比、### 8. 关键交互流程（Top 3 优先机会）、### 9. 优先方案收敛（Top 3）。',
+      '三套设计方案必须包含：### 1. 机会总览、### 2. 方案一、### 3. 方案二、### 4. 方案三、### 5. 方案对比矩阵、### 6. 三方案对比说明、### 7. 关键节点低保真对比、### 8. 关键交互流程（Top 3 优先机会）、### 9. 优先方案收敛（Top 3）。关键节点低保真对比禁止把方案A/方案B/方案C挤在同一个 ASCII 代码块；每个方案单独一个 ```text 代码块，并在后面追加差异表。',
       '关键交互流程（Top 3 优先机会）必须包含 3 个四级标题：#### Top 1：当前项目方案名、#### Top 2：当前项目方案名、#### Top 3：当前项目方案名；每个 Top 下用表格表达状态流转、界面/触点跳转、关键反馈、异常/回退路径、低保真描述。字段名称可以根据项目调整，但这 5 类语义必须出现。',
       '优先方案收敛表格必须包含“Top、方案、理由、用户行为依据、建议落点、置信度”；Top 字段必须写成“Top 1：方案名称 / Top 2：方案名称 / Top 3：方案名称”，不要只写 1、2、3。',
       '异常流补充必须包含：### 1. 异常流总览、### 2. 失败路径、### 3. 空态/权限/网络/未保存返回、### 4. 恢复动作、### 5. 待确认风险。',
@@ -3051,79 +3064,7 @@ export function uploadRoutes(options = {}) {
     ].filter(Boolean)
   }
   const advancedUxInteractionLofiCanvasFromPageInteractionDocument = (pageInteractionDocument = null) => {
-    const markdown = String(pageInteractionDocument?.markdown || '').trim()
-    if (!markdown) return null
-    const pages = pageInteractionDocumentPages(markdown)
-    if (!pages.length) return null
-    const nodes = pages.map((page, index) => {
-      const artifacts = pageInteractionDocumentPageArtifacts(page)
-      const pageName = cleanMarkdownCell(page.pageName || page.title.replace(/^P\d{2}\s*/, '') || `页面 ${index + 1}`)
-      const areaNames = artifacts.frameRows.map((row) => cleanMarkdownCell(row['区域'] || '')).filter(Boolean)
-      const operationNames = artifacts.interactionRows.map((row) => cleanMarkdownCell(row.userAction || '')).filter(Boolean)
-      const stateNames = artifacts.stateMatrix.map((row) => cleanMarkdownCell(row.state || '')).filter(Boolean)
-      const asciiWireframe = pageInteractionAsciiLayoutFromBody(page.body) || pageInteractionAsciiWireframe({ ...page, pageName }, artifacts.frameRows)
-      return {
-        id: `advanced-ux-page-${String(page.pageId || index + 1).toLowerCase()}`,
-        stageId: 'interaction-lofi',
-        title: pageName,
-        summary: page.responsibility || `${pageName} 页面交互节点。`,
-        content: [
-          page.responsibility ? `页面职责：${page.responsibility}` : '',
-          areaNames.length ? `框架区域：${areaNames.join('、')}` : '',
-          operationNames.length ? `关键操作：${operationNames.slice(0, 5).join('、')}` : '',
-          stateNames.length ? `异常状态：${stateNames.join('、')}` : ''
-        ].filter(Boolean),
-        x: 120 + (index % 3) * 360,
-        y: 140 + Math.floor(index / 3) * 300,
-        width: 320,
-        height: 240,
-        loading: false,
-        artifactStatus: 'generated',
-        detailLayout: 'interaction-page-split',
-        quickActions: ['给布局方案', '补交互细节', '重生成本页'],
-        pageLayoutArtifact: {
-          title: '页面骨架',
-          version: 'advanced-ux-page-interaction/v1',
-          pageId: page.pageId,
-          pageName,
-          sourceFileName: pageInteractionDocument.fileName || '',
-          asciiWireframe,
-          rawText: page.body || '',
-          layout: {
-            type: page.type || '',
-            module: page.module || '',
-            responsibility: page.responsibility || '',
-            regions: artifacts.frameRows
-          },
-          layoutRegions: artifacts.frameRows,
-          layoutType: page.type || ''
-        },
-        interactionSpecArtifact: {
-          version: 'advanced-ux-page-interaction/v1',
-          pageId: page.pageId,
-          pageName,
-          snapshotRef: 'pageLayoutArtifact.asciiWireframe',
-          interactionRows: artifacts.interactionRows,
-          stateMatrix: artifacts.stateMatrix,
-          gestureNotes: pageInteractionGestureNotes(page, artifacts),
-          sourceFileName: pageInteractionDocument.fileName || ''
-        },
-        sourceArtifact: {
-          type: 'advanced-ux-page-interaction-document',
-          fileName: pageInteractionDocument.fileName || '',
-          pageId: page.pageId
-        }
-      }
-    })
-    return {
-      title: '页面交互低保画布',
-      summary: '由高级 UX 页面交互框架与说明 Markdown 自动导入。',
-      canvasType: 'interaction-lofi-page-canvas',
-      layoutRule: 'page-grid',
-      nodes,
-      edges: [],
-      orderedTabs: nodes.map((node) => ({ key: node.id, label: node.title }))
-    }
+    return buildAdvancedUxInteractionLofiCanvasFromPageInteractionDocument(pageInteractionDocument)
   }
   const totalDesignFlowWithAdvancedUxInteractionLofiCanvas = (totalDesignFlow = null, stageCanvas = null, stageId = 'interaction-lofi') => {
     if (!totalDesignFlow || !stageCanvas?.nodes?.length) return totalDesignFlow

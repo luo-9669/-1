@@ -194,7 +194,7 @@
                     <pre>{{ pageLayoutArtifact(node).asciiWireframe }}</pre>
                   </div>
                   <section v-else-if="isVisualGalleryDetail(node)" class="visual-canvas-card-preview">
-                    <div v-if="visualPreviewImage(node)" class="visual-canvas-card-image">
+                    <div v-if="visualPreviewImage(node)" class="visual-canvas-card-image" :class="visualCanvasSurfaceClass(node)">
                       <img :src="visualPreviewImage(node)" :alt="`${node.title} 高保真图`" @load="recordVisualImageNaturalRatio(node, $event)" />
                       <span v-if="visualImageAspectRatioLabel(node)" class="visual-image-ratio-badge">{{ visualImageAspectRatioLabel(node) }}</span>
                       <div v-if="isNodeActuallyLoading(node)" class="visual-image-generating-overlay">
@@ -213,7 +213,7 @@
                     <div v-else-if="isNodeActuallyLoading(node)" class="visual-canvas-card-placeholder is-generating visual-canvas-card-generating-image-placeholder">
                       <span class="loading-spinner-large"></span>
                       <strong>生图中</strong>
-                      <span>{{ visualPreview(node).imagePrompt || `为「${node.title || '当前页面'}」生成高保真 UI 视觉稿。` }}</span>
+                      <span>{{ visualCanvasPlaceholderDescription(node, 'generating') }}</span>
                     </div>
                     <div v-else-if="visualPreviewNeedsConfiguration(node)" class="visual-canvas-card-placeholder config-required">
                       <strong>待配置图片模型</strong>
@@ -225,7 +225,7 @@
                     </div>
                     <div v-else class="visual-canvas-card-placeholder">
                       <strong>待生成高保真图</strong>
-                      <span>{{ visualPreview(node).imagePrompt }}</span>
+                      <span>{{ visualCanvasPlaceholderDescription(node, 'pending') }}</span>
                     </div>
                   </section>
                   <section v-else-if="!isNodeActuallyLoading(node) && isPreviewCodeDetail(node)" class="preview-code-card-preview">
@@ -242,10 +242,21 @@
                       </div>
                     </div>
                   </section>
-                  <div v-else-if="!isNodeActuallyLoading(node) && isRequirementPipelineCanvasNode(node) && requirementCanvasPreviewItems(node).length" class="requirement-canvas-card-preview">
-                    <span v-for="item in requirementCanvasPreviewItems(node)" :key="`${node.id}-requirement-preview-${item}`">{{ item }}</span>
+                  <div v-else-if="!isNodeActuallyLoading(node) && isRequirementPipelineCanvasNode(node) && requirementCanvasPreviewTable(node)" class="requirement-canvas-card-table-preview">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th v-for="header in requirementPreviewTableHeaders(requirementCanvasPreviewTable(node))" :key="`${node.id}-requirement-preview-header-${header}`">{{ header }}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="row in requirementPreviewTableRows(requirementCanvasPreviewTable(node))" :key="`${node.id}-requirement-preview-row-${row.key}`">
+                          <td v-for="cell in row.cells" :key="`${node.id}-requirement-preview-${row.key}-${cell}`">{{ cell }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-                  <div v-else-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && compactNodeContent(node).length" class="canvas-node-content">
+                  <div v-else-if="!isNodeActuallyLoading(node) && !hasPageLayoutArtifact(node) && !isVisualGalleryDetail(node) && !isPreviewCodeDetail(node) && compactNodeContent(node).length" class="canvas-node-content">
                     <span v-for="item in compactNodeContent(node)" :key="`${node.id}-preview-${item}`">{{ item }}</span>
                   </div>
                 </div>
@@ -352,7 +363,14 @@
             </article>
             <div class="requirement-pipeline-document">
               <article v-if="shouldRenderAdvancedUxRequirementMarkdown(fullscreenNode)" class="requirement-advanced-ux-markdown-detail requirement-markdown-report-block">
-                <pre>{{ advancedUxRequirementNodeMarkdown(fullscreenNode) }}</pre>
+                <div class="requirement-markdown-message">
+                  <RequirementMarkdownBlock
+                    v-for="(block, blockIndex) in requirementMarkdownRenderableBlocks(advancedUxRequirementNodeMarkdown(fullscreenNode))"
+                    :key="`advanced-ux-markdown-${fullscreenNode.id}-${blockIndex}`"
+                    :block="block"
+                    :block-index="blockIndex"
+                  />
+                </div>
               </article>
               <template v-else>
                 <section
@@ -368,13 +386,21 @@
                       v-for="(block, blockIndex) in section.blocks"
                       :key="`${fullscreenNode.id}-pipeline-${block.id || block.sourceRef || block.title}`"
                       class="requirement-pipeline-block requirement-document-block"
-                      :class="[`layout-${requirementBlockType(block)}`]"
+                      :class="[`layout-${requirementBlockType(block)}`, { 'layout-advanced-ux-table': isAdvancedUxTablePreferredBlock(block, fullscreenNode) }]"
                     >
                     <header>
                       <h3>{{ requirementDocumentBlockHeading(section, block, blockIndex) }}</h3>
                       <small v-if="block.summary">{{ block.summary }}</small>
                     </header>
-                    <div v-if="isRequirementNavigationBlock(block)" class="requirement-navigation-map">
+                    <div v-if="isAdvancedUxTablePreferredBlock(block, fullscreenNode)" class="requirement-document-table-block requirement-detail-table">
+                      <article v-if="requirementBlockHeaders(block, fullscreenNode).length" class="head" :style="requirementBlockTableStyle(block, fullscreenNode)">
+                        <b v-for="header in requirementBlockHeaders(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-advanced-ux-header-${header}`">{{ header }}</b>
+                      </article>
+                      <article v-for="row in requirementBlockRows(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-advanced-ux-row-${row.key}`" :style="requirementBlockTableStyle(block, fullscreenNode)">
+                        <span v-for="cell in row.cells" :key="`${fullscreenNode.id}-${block.id}-advanced-ux-${row.key}-${cell}`">{{ cell }}</span>
+                      </article>
+                    </div>
+                    <div v-else-if="isRequirementNavigationBlock(block)" class="requirement-navigation-map">
                       <section class="requirement-navigation-entry-groups">
                         <article v-for="group in requirementNavigationVisualGroups(block, fullscreenNode)" :key="`${fullscreenNode.id}-${block.id}-nav-group-${group.title}`">
                           <b>{{ group.title }}</b>
@@ -597,7 +623,14 @@
                       </article>
                     </div>
                     <div v-else-if="requirementBlockType(block) === 'markdown'" class="requirement-markdown-report-block">
-                      <pre>{{ requirementDocumentBlockPlaintext(block, fullscreenNode) }}</pre>
+                      <div class="requirement-markdown-message">
+                        <RequirementMarkdownBlock
+                          v-for="(markdownBlock, markdownBlockIndex) in requirementMarkdownRenderableBlocks(requirementDocumentBlockPlaintext(block, fullscreenNode))"
+                          :key="`${fullscreenNode.id}-${block.id}-markdown-${markdownBlockIndex}`"
+                          :block="markdownBlock"
+                          :block-index="markdownBlockIndex"
+                        />
+                      </div>
                     </div>
                     <div v-else class="requirement-document-code-block">
                       <div class="requirement-document-block-label">
@@ -1002,9 +1035,51 @@
                   <article class="page-framework-section structure">
                     <header>
                       <span>3</span>
-                      <strong>框架图</strong>
+                      <strong>文本布局图（框架图）</strong>
                     </header>
                     <pre class="canvas-page-layout-panel wireframe-main page-framework-code-block">{{ pageLayoutArtifact(fullscreenNode).asciiWireframe }}</pre>
+                  </article>
+                  <article class="page-framework-section structure">
+                    <header>
+                      <span>4</span>
+                      <strong>交互规则表格</strong>
+                    </header>
+                    <div class="advanced-ux-page-table interaction">
+                      <article class="head">
+                        <b>编号</b>
+                        <b>用户操作</b>
+                        <b>系统反馈</b>
+                        <b>关联状态/弹窗</b>
+                        <b>备注</b>
+                      </article>
+                      <article v-for="row in advancedUxInteractionRuleRows(fullscreenNode)" :key="`${fullscreenNode.id}-wireframe-rule-row-${row.id}`">
+                        <span>{{ row.id }}</span>
+                        <span>{{ row.userAction }}</span>
+                        <span>{{ row.systemFeedback }}</span>
+                        <span>{{ row.relatedStateOrModal }}</span>
+                        <span>{{ row.remark }}</span>
+                      </article>
+                    </div>
+                  </article>
+                  <article class="page-framework-section state">
+                    <header>
+                      <span>5</span>
+                      <strong>异常状态表格</strong>
+                    </header>
+                    <div class="advanced-ux-page-table state">
+                      <article class="head">
+                        <b>编号</b>
+                        <b>状态</b>
+                        <b>表现</b>
+                        <b>处理方式</b>
+                      </article>
+                      <article v-for="row in advancedUxExceptionStateRows(fullscreenNode)" :key="`${fullscreenNode.id}-wireframe-state-row-${row.id}`">
+                        <span>{{ row.id }}</span>
+                        <span>{{ row.state }}</span>
+                        <span>{{ row.display }}</span>
+                        <span>{{ row.handling }}</span>
+                      </article>
+                    </div>
                   </article>
                 </template>
                 <template v-else>
@@ -1216,7 +1291,7 @@
                 <strong>高保真图片</strong>
                 <small>{{ artifactStatusLabel(fullscreenNode) }}</small>
               </header>
-              <div v-if="visualPreviewImage(fullscreenNode)" class="visual-image-result">
+              <div v-if="visualPreviewImage(fullscreenNode)" class="visual-image-result" :class="visualCanvasSurfaceClass(fullscreenNode)">
                 <img :src="visualPreviewImage(fullscreenNode)" :alt="`${fullscreenNode.title} 高保真图`" @load="recordVisualImageNaturalRatio(fullscreenNode, $event)" />
                 <span v-if="visualImageAspectRatioLabel(fullscreenNode)" class="visual-image-ratio-badge">{{ visualImageAspectRatioLabel(fullscreenNode) }}</span>
                 <div v-if="isNodeActuallyLoading(fullscreenNode)" class="visual-image-generating-overlay">
@@ -1235,7 +1310,7 @@
               </div>
               <div v-else-if="isNodeActuallyLoading(fullscreenNode)" class="visual-image-placeholder is-generating">
                 <span>生成中</span>
-                <p>{{ visualPreview(fullscreenNode).imagePrompt || `为「${fullscreenNode.title || '当前页面'}」生成高保真 UI 视觉稿。` }}</p>
+                <p>{{ visualCanvasPlaceholderDescription(fullscreenNode, 'generating') }}</p>
               </div>
               <div v-else-if="visualPreviewNeedsConfiguration(fullscreenNode)" class="visual-image-config-required">
                 <strong>需要配置图片生成模型</strong>
@@ -1243,7 +1318,7 @@
               </div>
               <div v-else class="visual-image-placeholder">
                 <span>待生成</span>
-                <p>{{ visualPreview(fullscreenNode).imagePrompt }}</p>
+                <p>{{ visualCanvasPlaceholderDescription(fullscreenNode, 'pending') }}</p>
               </div>
               <div v-if="generationActions(fullscreenNode).length" class="stage-detail-generation-actions">
                 <BaseButton
@@ -1579,7 +1654,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Bot, Download, Maximize2, X, ZoomIn, ZoomOut } from 'lucide-vue-next'
 import { BaseButton, BaseIconButton, BaseTabs, BaseTextarea } from '../../../components/base'
 
@@ -2340,6 +2415,8 @@ function hasNodeContent(node = {}) {
 
 function isNodeActuallyLoading(node = {}) {
   if (node.artifactStatus === 'failed') return false
+  const owningStageId = nodeWorkflowStageId(node)
+  if (owningStageId && stageStatus(owningStageId) === 'completed' && isAdvancedUxGeneratingNode(node)) return false
   return Boolean(
     node.refreshing ||
     isAdvancedUxGeneratingNode(node) ||
@@ -2347,6 +2424,19 @@ function isNodeActuallyLoading(node = {}) {
     visualPreview(node).imageStatus === 'generating' ||
     ((node.loading || node.contentLoading) && !hasNodeContent(node))
   )
+}
+
+function nodeWorkflowStageId(node = {}) {
+  const explicitStageId = String(node?.stageId || node?.sourceStageId || '').trim()
+  if (explicitStageId) return totalFlowStages.value.some((stage) => stage.id === explicitStageId) ? explicitStageId : ''
+  const nodeId = String(node?.id || node?.requirementPipelineTabId || '').trim()
+  const targetGenerator = String(node?.targetGenerator || '').trim().toLowerCase()
+  if (nodeId.startsWith('ux-') || node?.requirementPipelineTabId) return 'requirement-dissection'
+  if (nodeId.startsWith('ui-') || node?.visualPreview || node?.visualBrief) return 'ui-visual'
+  if (nodeId.startsWith('html-') || targetGenerator === 'html') return 'html-output'
+  if (nodeId.startsWith('vue-') || targetGenerator === 'vue') return 'vue-output'
+  if (node?.pageLayoutArtifact) return 'interaction-lofi'
+  return activeStageId.value || ''
 }
 
 function isAdvancedUxGeneratingNode(node = {}) {
@@ -2411,6 +2501,10 @@ function isCanvasConfirmAction(action = '') {
   return /确认/.test(String(action || ''))
 }
 
+function isRequirementStageAdvanceAction(action = '') {
+  return /进入交互低保|输出页面框架|页面框架|转低保真|生成低保真|低保真画布|低保真线框|进入低保/.test(String(action || '').trim())
+}
+
 const INTERACTION_LOFI_PAGE_TOOL_ACTIONS = ['给布局方案', '补交互细节', '重生成本页']
 
 function isInteractionLofiPageNode(node = {}) {
@@ -2424,8 +2518,9 @@ function visibleNodeQuickActions(node = {}) {
     .map((action) => String(action || '').trim())
     .filter((action) => action && !isCanvasConfirmAction(action))
   if (isRequirementPipelineCanvasNode(node)) {
+    const nodeScopedActions = actions.filter((action) => !isRequirementStageAdvanceAction(action))
     const recommendedActions = requirementCanvasRecommendedActions(node)
-    return actions.length ? actions.slice(0, 3) : recommendedActions
+    return nodeScopedActions.length ? nodeScopedActions.slice(0, 3) : recommendedActions
   }
   if (isVisualGalleryDetail(node) && generationActions(node).length) {
     const hasGenerationAction = actions.some((action) => visualQuickGenerationAction(node, action))
@@ -2703,7 +2798,7 @@ function isRequirementPipelineCanvasNode(node = {}) {
 
 function requirementCanvasRecommendedActions(node = {}) {
   if (!isRequirementPipelineCanvasNode(node)) return []
-  return ['补充细节', '列出风险', '进入交互低保']
+  return ['补充细节', '列出风险']
 }
 
 function requirementCanvasBlockPreview(block = {}, node = {}) {
@@ -2734,6 +2829,84 @@ function requirementCanvasPreviewItems(node = {}) {
   ]
   return filterDuplicateNodeDisplayItems(items, node, [])
     .slice(0, 4)
+}
+
+function requirementPreviewTableHeaders(table = {}) {
+  return (Array.isArray(table?.headers) && table.headers.length ? table.headers : ['内容'])
+    .map((header) => cleanNodeDisplayCopy(header))
+    .filter(Boolean)
+}
+
+function requirementPreviewTableRows(table = {}) {
+  const headers = requirementPreviewTableHeaders(table)
+  return (Array.isArray(table?.rows) ? table.rows : [])
+    .map((row, index) => {
+      const sourceCells = Array.isArray(row?.cells)
+        ? row.cells
+        : Array.isArray(row)
+          ? row
+          : [row]
+      const cells = sourceCells
+        .slice(0, headers.length)
+        .map((cell) => cleanNodeDisplayCopy(cell))
+      while (cells.length < headers.length) cells.push('')
+      return {
+        key: row?.key || `preview-row-${index + 1}`,
+        cells
+      }
+    })
+    .filter((row) => row.cells.some(Boolean))
+}
+
+function requirementMarkdownPreviewTable(markdown = '', maxRows = 3) {
+  const tableBlock = requirementMarkdownRenderableBlocks(markdown)
+    .find((block) => block?.type === 'table' && Array.isArray(block.table?.rows) && block.table.rows.length)
+  if (!tableBlock) return null
+  return {
+    headers: requirementPreviewTableHeaders(tableBlock.table),
+    rows: tableBlock.table.rows.slice(0, maxRows).map((cells, index) => ({
+      key: `markdown-row-${index + 1}`,
+      cells
+    }))
+  }
+}
+
+function requirementBlockPreviewTable(block = {}, node = {}, maxRows = 3) {
+  if (requirementBlockType(block) === 'markdown') {
+    return requirementMarkdownPreviewTable(requirementDocumentBlockPlaintext(block, node), maxRows)
+  }
+  const headers = requirementBlockHeaders(block, node)
+  const rows = requirementBlockRows(block, node)
+  if (!rows.length) return null
+  const normalizedHeaders = headers.length
+    ? headers
+    : Array.from(
+        { length: rows.reduce((count, row) => Math.max(count, Array.isArray(row?.cells) ? row.cells.length : 0), 1) },
+        (_, index) => (index === 0 ? '内容' : `字段 ${index + 1}`)
+      )
+  return {
+    headers: normalizedHeaders,
+    rows: rows.slice(0, maxRows)
+  }
+}
+
+function requirementCanvasPreviewTable(node = {}) {
+  if (!isRequirementPipelineCanvasNode(node)) return null
+  const markdownTable = requirementMarkdownPreviewTable(advancedUxRequirementNodeMarkdown(node), 3)
+  if (markdownTable) return markdownTable
+  const blockTable = requirementDetailBlocks(node)
+    .map((block) => requirementBlockPreviewTable(block, node, 3))
+    .find((table) => table && requirementPreviewTableRows(table).length)
+  if (blockTable) return blockTable
+  const items = requirementCanvasPreviewItems(node)
+  if (!items.length) return null
+  return {
+    headers: ['内容'],
+    rows: items.slice(0, 3).map((item, index) => ({
+      key: `item-${index + 1}`,
+      cells: [item]
+    }))
+  }
 }
 
 function requirementPipelineFailureMessages(node = {}) {
@@ -3022,6 +3195,9 @@ function requirementDocumentBlockHeading(section = {}, block = {}, blockIndex = 
 function isRequirementDocumentTableBlock(block = {}) {
   if (['table', 'priority-table', 'matrix', 'risk-matrix', 'relation-table', 'entity-table', 'question-list'].includes(requirementBlockType(block))) return true
   return [
+    'navigationStructure',
+    'pageHierarchyTree',
+    'userJourneyMap',
     'functionModuleMatrix',
     'pageCoverageMatrix',
     'personaScenarioMatrix',
@@ -3035,11 +3211,22 @@ function isRequirementDocumentTableBlock(block = {}) {
     'acceptanceBasis',
     'decisionPointMatrix',
     'exceptionRecoveryMatrix',
+    'dataFlowGraph',
+    'stateMachineMap',
+    'featureJumpGraph',
     'pageFrameContracts',
     'scopeBoundary',
     'dataSharingMechanism',
-    'designRequirementMap'
+    'designRequirementMap',
+    'competitiveAnalysis',
+    'downstreamHints'
   ].includes(block.sourceRef)
+}
+
+function isAdvancedUxTablePreferredBlock(block = {}, node = {}) {
+  if (!isAdvancedUxRequirementPipeline(node)) return false
+  if (requirementBlockType(block) === 'markdown') return false
+  return Boolean(requirementBlockPreviewTable(block, node, 1))
 }
 
 function isRequirementStructuredDetailBlock(block = {}) {
@@ -3130,6 +3317,182 @@ function requirementDocumentBlockPlaintext(block = {}, node = {}) {
   return requirementBlockItems(block, node).map((item) => line(item)).filter(Boolean).join('\n') || '待模型补充'
 }
 
+function normalizeRequirementMarkdownText(content = '') {
+  return String(content || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\s+(#{1,6})\s+/g, '\n\n$1 ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function isRequirementMarkdownTableDivider(line = '') {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(String(line || ''))
+}
+
+function splitRequirementMarkdownTableRow(line = '') {
+  return String(line || '')
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+function parseRequirementMarkdownTableBlock(lines = [], startIndex = 0) {
+  const headerLine = lines[startIndex]
+  const dividerLine = lines[startIndex + 1]
+  if (!/\|/.test(String(headerLine || '')) || !isRequirementMarkdownTableDivider(dividerLine)) return null
+  const headers = splitRequirementMarkdownTableRow(headerLine)
+  if (headers.length < 2 || headers.some((cell) => !cell)) return null
+  const rows = []
+  let index = startIndex + 2
+  while (index < lines.length && /\|/.test(String(lines[index] || '').trim())) {
+    const row = splitRequirementMarkdownTableRow(lines[index])
+    if (row.length < 2) break
+    while (row.length < headers.length) row.push('')
+    rows.push(row.slice(0, headers.length))
+    index += 1
+  }
+  return rows.length ? { table: { headers, rows }, nextIndex: index } : null
+}
+
+function isPlainTextRequirementCodeLanguage(language = '') {
+  const normalized = String(language || '').trim()
+  return !normalized || /^(text|txt|plain|plaintext|plain-text|ascii)$/i.test(normalized)
+}
+
+function requirementMarkdownRenderableBlocks(content = '') {
+  const text = normalizeRequirementMarkdownText(content)
+  if (!text) return []
+  const blocks = []
+  const lines = text.split('\n')
+  let paragraph = []
+  let listItems = []
+  let codeLines = []
+  let codeLanguage = ''
+  let inCode = false
+  const flushParagraph = () => {
+    const value = paragraph.join(' ').replace(/\s+/g, ' ').trim()
+    if (value) blocks.push({ type: 'p', text: value })
+    paragraph = []
+  }
+  const flushList = () => {
+    if (listItems.length) blocks.push({ type: 'ul', items: listItems })
+    listItems = []
+  }
+  const flushCode = () => {
+    const value = codeLines.join('\n').trim()
+    if (value) {
+      blocks.push({
+        type: isPlainTextRequirementCodeLanguage(codeLanguage) ? 'pre' : 'code',
+        text: value,
+        language: String(codeLanguage || '').trim()
+      })
+    }
+    codeLines = []
+    codeLanguage = ''
+  }
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const raw = String(lines[lineIndex] || '')
+    const codeFence = raw.trim().match(/^```([\w+-]*)/)
+    if (codeFence) {
+      if (inCode) {
+        flushCode()
+        inCode = false
+      } else {
+        flushParagraph()
+        flushList()
+        codeLanguage = codeFence[1] || ''
+        inCode = true
+      }
+      continue
+    }
+    if (inCode) {
+      codeLines.push(raw)
+      continue
+    }
+    const tableBlock = parseRequirementMarkdownTableBlock(lines, lineIndex)
+    if (tableBlock) {
+      flushParagraph()
+      flushList()
+      blocks.push({ type: 'table', table: tableBlock.table })
+      lineIndex = tableBlock.nextIndex - 1
+      continue
+    }
+    const heading = raw.match(/^(#{1,6})\s+(.+)$/)
+    if (heading) {
+      flushParagraph()
+      flushList()
+      blocks.push({ type: `h${heading[1].length}`, text: heading[2].trim() })
+      continue
+    }
+    const list = raw.match(/^\s*(?:[-*]|\d+[.)]|[（(]?\d+[）)]|·)\s+(.+)$/)
+    if (list) {
+      flushParagraph()
+      listItems.push(list[1].trim())
+      continue
+    }
+    if (!raw.trim()) {
+      flushParagraph()
+      flushList()
+      continue
+    }
+    paragraph.push(raw.trim())
+  }
+  if (inCode) flushCode()
+  flushParagraph()
+  flushList()
+  return blocks.length ? blocks : [{ type: 'p', text }]
+}
+
+function renderRequirementMarkdownBlock(block = {}) {
+  if (block.type === 'h1') return h('h1', String(block.text || ''))
+  if (block.type === 'h2') return h('h2', String(block.text || ''))
+  if (block.type === 'h3') return h('h3', String(block.text || ''))
+  if (block.type === 'h4') return h('h4', String(block.text || ''))
+  if (block.type === 'h5') return h('h5', String(block.text || ''))
+  if (block.type === 'h6') return h('h6', String(block.text || ''))
+  if (block.type === 'pre' || block.type === 'code') return h('pre', { class: 'requirement-markdown-pre' }, String(block.text || ''))
+  if (block.type === 'table') {
+    const headers = Array.isArray(block.table?.headers) ? block.table.headers : []
+    const rows = Array.isArray(block.table?.rows) ? block.table.rows : []
+    return h('div', { class: 'requirement-markdown-table-wrap' }, [
+      h('table', { class: 'requirement-markdown-table' }, [
+        headers.length
+          ? h('thead', [
+              h('tr', headers.map((header, index) =>
+                h('th', { key: `header-${index}` }, String(header || ''))
+              ))
+            ])
+          : null,
+        h('tbody', rows.map((row, rowIndex) =>
+          h('tr', { key: `row-${rowIndex}` }, (Array.isArray(row) ? row : []).map((cell, cellIndex) =>
+            h('td', { key: `cell-${rowIndex}-${cellIndex}` }, String(cell || ''))
+          ))
+        ))
+      ])
+    ])
+  }
+  if (block.type === 'ul') {
+    const items = Array.isArray(block.items) ? block.items : []
+    return h('ul', items.map((item, itemIndex) =>
+      h('li', { key: `item-${itemIndex}` }, String(item || ''))
+    ))
+  }
+  return h('p', String(block.text || ''))
+}
+
+const RequirementMarkdownBlock = {
+  name: 'RequirementMarkdownBlock',
+  props: {
+    block: { type: Object, default: () => ({}) },
+    blockIndex: { type: Number, default: 0 }
+  },
+  setup(componentProps) {
+    return () => renderRequirementMarkdownBlock(componentProps.block || {})
+  }
+}
+
 function requirementBlockHeaders(block = {}, node = {}) {
   if (Array.isArray(block.headers)) {
     return block.headers
@@ -3150,6 +3513,18 @@ function requirementBlockHeaders(block = {}, node = {}) {
       return ['优先级', '风险/假设', '触发路径/影响', '预案/置信度']
     case 'personaScenarioMatrix':
       return ['角色', '场景', '任务', '入口/成功信号']
+    case 'navigationStructure':
+      return ['导航/入口', '目标页面', '展示规则', '权限/说明']
+    case 'pageHierarchyTree':
+      return ['层级', '页面/节点', '父级', '页面类型']
+    case 'userJourneyMap':
+      return ['路径类型', '步骤/页面', '用户动作', '目标/流转']
+    case 'dataFlowGraph':
+      return ['页面/节点', '读取数据', '写入/下游', '流转关系']
+    case 'stateMachineMap':
+      return ['页面/范围', '当前状态', '触发事件', '目标状态/表现']
+    case 'featureJumpGraph':
+      return ['来源', '动作', '目标', '说明']
     case 'functionModuleMatrix':
       return ['层级', '模块', '页面', '入口/用户']
     case 'designRequirementMap':
@@ -3176,6 +3551,10 @@ function requirementBlockHeaders(block = {}, node = {}) {
       return ['优先级', '内容', '说明', '处理方式']
     case 'dataSharingMechanism':
       return ['资源', '创建/存储', '使用方', '共享方式']
+    case 'competitiveAnalysis':
+      return ['维度', '内容', '证据状态', '建议动作']
+    case 'downstreamHints':
+      return ['下游阶段', '生成依据', '用途', '继承方式']
     default:
       return []
   }
@@ -3366,6 +3745,69 @@ function requirementBlockRows(block = {}, node = {}) {
     }))
   }
   switch (block.sourceRef) {
+    case 'navigationStructure':
+      return [
+        ...requirementNavigationVisualRows(block, node).map((row) => ({
+          key: row.key,
+          cells: [
+            row.label,
+            row.targetPageId,
+            [`activeState：${row.activeState}`, `visibilityRule：${row.visibilityRule}`].join('；'),
+            row.permissionRule
+          ]
+        })),
+        ...requirementNavigationVisualGroups(block, node).map((group, index) => ({
+          key: `navigation-group-${index + 1}`,
+          cells: [
+            group.title,
+            requirementDetailItems(group.items, '目标页面待确认', 4).join('、'),
+            '入口分组',
+            '来自导航结构'
+          ]
+        }))
+      ]
+    case 'pageHierarchyTree':
+      return requirementPageHierarchyVisualRows(block, node).map((row) => ({
+        key: row.key,
+        cells: [
+          `L${row.level}`,
+          row.label,
+          row.parentId,
+          [row.pageType, row.pageId].filter(Boolean).join('；')
+        ]
+      }))
+    case 'userJourneyMap':
+      return requirementJourneyVisualRows(block, node).map((row) => ({
+        key: row.key,
+        cells: [
+          row.pathType,
+          [`#${row.stepIndex}`, row.pageName || row.title].filter(Boolean).join(' '),
+          row.userAction,
+          [`目标：${row.goal}`, `流转：${row.transition}`].join('；')
+        ]
+      }))
+    case 'dataFlowGraph':
+      return requirementDataFlowVisualRows(block, node).map((row) => ({
+        key: row.key,
+        cells: [
+          `${row.pageName}（${row.pageId}）`,
+          row.reads.join('、'),
+          [...row.writes, ...row.downstream].join('、'),
+          row.edges.join('；')
+        ]
+      }))
+    case 'stateMachineMap':
+      return requirementStateMachineVisualRows(block, node).flatMap((row) =>
+        row.transitions.map((transition, transitionIndex) => ({
+          key: `${row.key}-${transition.key || transitionIndex + 1}`,
+          cells: [
+            `${row.pageName}（${row.pageId}）`,
+            transition.from,
+            transition.event,
+            transition.to
+          ]
+        }))
+      )
     case 'gapConfirmation':
       return requirementGapConfirmationRows(node)
     case 'riskAssessment':
@@ -3394,22 +3836,28 @@ function requirementBlockRows(block = {}, node = {}) {
       return requirementPriorityRows(node)
     case 'acceptanceBasis':
       return requirementAcceptanceBasisRows(node)
-    case 'dataFlowGraph':
-      return rowsFromTextItems(requirementDataFlowItems(node), 'data-flow')
+    case 'competitiveAnalysis':
+      return [
+        { key: 'competitive-evidence', cells: ['证据状态', resolveRequirementSourceRef(block.sourceRef, node)?.evidenceNotice || requirementCompetitiveMode(node), '待补充/待确认', '可让 Agent 找竞品或上传参考'] },
+        ...requirementDetailItems(resolveRequirementSourceRef(block.sourceRef, node)?.comparisonDimensions, '对比维度待确认', 4).map((item, index) => ({
+          key: `competitive-dimension-${index + 1}`,
+          cells: ['对比维度', item, '推断', '用于后续设计机会收敛']
+        })),
+        ...requirementCompetitiveItems(node).map((item, index) => ({
+          key: `competitive-item-${index + 1}`,
+          cells: ['参考启发', item, '推断', '不直接照搬']
+        }))
+      ]
+    case 'downstreamHints':
+      return [
+        { key: 'downstream-interaction', cells: ['交互低保', requirementDetailItems(resolveRequirementSourceRef(block.sourceRef, node)?.interactionLofi, '待补充', 5).join('、'), '页面链路/状态', '继承阶段一结论'] },
+        { key: 'downstream-ui', cells: ['UI 视觉', requirementDetailItems(resolveRequirementSourceRef(block.sourceRef, node)?.uiVisual, '待补充', 5).join('、'), '视觉生成依据', '继承页面和场景'] },
+        { key: 'downstream-handoff', cells: ['前后端', requirementDetailItems(resolveRequirementSourceRef(block.sourceRef, node)?.frontendBackend, '待补充', 5).join('、'), '接口/验收', '继承数据状态和规则'] }
+      ]
     case 'featureJumpGraph':
       return requirementJumpRows(node)
     case 'dataSharingMechanism':
       return requirementSharingRows(node)
-    case 'stateMachineMap':
-      return (Array.isArray(source?.globalStates) ? source.globalStates : []).map((row, index) => ({
-        key: row?.id || `state-${index + 1}`,
-        cells: [
-          row?.state || '状态待确认',
-          row?.trigger || '触发待确认',
-          row?.display || '展示待确认',
-          row?.recovery || '恢复待确认'
-        ]
-      }))
     case 'pageFrameContracts':
       return (Array.isArray(source) ? source : []).map((contract, index) => ({
         key: contract?.pageId || `frame-${index + 1}`,
@@ -3546,7 +3994,7 @@ function isRequirementBoundaryConditionBlock(block = {}) {
 }
 
 function isRequirementOpportunityPriorityBlock(block = {}) {
-  return ['designOpportunityMatrix', 'priorityRoadmap', 'acceptanceBasis'].includes(block?.sourceRef)
+  return ['priorityRoadmap', 'acceptanceBasis'].includes(block?.sourceRef)
 }
 
 function requirementVisualText(value = '', fallback = '待确认') {
@@ -5659,6 +6107,30 @@ function visualPreviewImage(node = {}) {
   return String(preview.imageDataUrl || preview.imageUrl || node.artifact?.imageDataUrl || node.artifact?.imageUrl || '').trim()
 }
 
+function visualTargetLogicalWidth(node = {}) {
+  const preview = visualPreview(node)
+  const targetImageSize = preview.targetImageSize && typeof preview.targetImageSize === 'object'
+    ? preview.targetImageSize
+    : node.artifact?.targetImageSize && typeof node.artifact?.targetImageSize === 'object'
+      ? node.artifact.targetImageSize
+      : null
+  const width = Number(targetImageSize?.width)
+  if (Number.isFinite(width) && width > 0) return Math.round(width)
+  const text = [
+    node.title,
+    node.summary,
+    preview.imagePrompt,
+    node.visualBrief?.pageTitle,
+    node.visualBrief?.goal
+  ].map((item) => String(item || '')).join(' ')
+  if (/web|网页|后台|管理端|PC|桌面|dashboard|admin/i.test(text) && !/小程序|移动端|手机|app|mobile/i.test(text)) return 1920
+  return 375
+}
+
+function visualCanvasSurfaceClass(node = {}) {
+  return visualTargetLogicalWidth(node) >= 1440 ? 'visual-surface-web' : 'visual-surface-app'
+}
+
 function greatestCommonDivisor(first = 0, second = 0) {
   let a = Math.abs(Math.round(Number(first) || 0))
   let b = Math.abs(Math.round(Number(second) || 0))
@@ -5773,6 +6245,14 @@ function visualPreviewNeedsConfiguration(node = {}) {
 
 function visualPreviewGenerationFailed(node = {}) {
   return visualPreview(node).imageStatus === 'failed' || node.artifact?.imageStatus === 'failed' || node.artifactStatus === 'failed'
+}
+
+function visualCanvasPlaceholderDescription(node = {}, status = 'pending') {
+  const title = String(node.title || visualBrief(node).pageTitle || '当前页面').replace(/\s*UI视觉\s*$/i, '').trim() || '当前页面'
+  if (status === 'generating') {
+    return `正在为「${title}」生成高保真图，完成后会回填到画布。`
+  }
+  return `已继承上一阶段交互低保与页面骨架，等待生成「${title}」高保真图。`
 }
 
 function visualBrief(node = {}) {
@@ -6498,13 +6978,15 @@ function canOpenStage(stageId = '') {
   if (!stageId) return false
   const index = totalFlowStages.value.findIndex((stage) => stage.id === stageId)
   if (index <= 0) return true
-  const runtime = stageRuntime(stageId)
-  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
   if (stageId === activeStageId.value) return true
   if (index < activeStageIndex.value) return true
+  if (['generating', 'paused'].includes(stageStatus(stageId))) return true
+  if (loadedStageIds.value.has(stageId)) return true
   if (stageConfirmation(stageId)) return true
   const previousStageId = previousStageIdForCanvasStage(stageId)
   if (previousStageId && stageConfirmation(previousStageId)) return true
+  const runtime = stageRuntime(stageId)
+  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
   return false
 }
 

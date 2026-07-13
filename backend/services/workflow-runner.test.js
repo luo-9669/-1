@@ -2629,7 +2629,7 @@ test('canvas artifact generation normalizes guidance on legacy total flow withou
   assert.doesNotMatch(JSON.stringify(result.run.referenceFiles), /product-contracts|docs\/skills|superpowers\/specs/)
 })
 
-test('canvas artifact generation infers app and web target image sizes when ratio is absent', async () => {
+test('canvas artifact generation infers app and web target widths when ratio is absent', async () => {
   const runWithNode = (id, input, nodeTitle) => ({
     id,
     workflowId: 'total-design-flow',
@@ -2709,16 +2709,82 @@ test('canvas artifact generation infers app and web target image sizes when rati
   const mobile = seen.find((item) => item.runId === 'mobile-target-run')
   const web = seen.find((item) => item.runId === 'web-target-run')
   assert.deepEqual(mobile.targetImageSize, { width: 375 })
-  assert.equal(mobile.aspectRatio, '375:812')
+  assert.equal(mobile.aspectRatio, '')
   assert.match(mobile.prompt, /目标图片宽度：375px，高度按内容比例自适应/)
+  assert.match(mobile.prompt, /移动端.*375px.*逻辑宽度|375px.*移动端.*逻辑宽度/)
+  assert.match(mobile.prompt, /不要固定高度|不固定高度/)
+  assert.match(mobile.prompt, /不要拉伸|禁止拉伸|不拉伸/)
+  assert.doesNotMatch(mobile.prompt, /目标图片比例：/)
   assert.doesNotMatch(mobile.prompt, /目标图片尺寸：375x812/)
   assert.deepEqual(web.targetImageSize, { width: 1920 })
-  assert.equal(web.aspectRatio, '1920:1080')
+  assert.equal(web.aspectRatio, '')
   assert.match(web.prompt, /目标图片宽度：1920px，高度按内容比例自适应/)
+  assert.match(web.prompt, /Web.*1920px.*逻辑宽度|1920px.*Web.*逻辑宽度/)
+  assert.match(web.prompt, /不要固定高度|不固定高度/)
+  assert.match(web.prompt, /不要拉伸|禁止拉伸|不拉伸/)
+  assert.doesNotMatch(web.prompt, /目标图片比例：/)
   assert.doesNotMatch(web.prompt, /目标图片尺寸：1920x1080/)
 })
 
-test('HTML canvas artifact renders UI context and interaction hooks from upstream stages', async () => {
+test('HTML canvas artifact stays pending when no real code provider is configured', async () => {
+  const store = createWorkflowRunnerStore({
+    runs: [
+      {
+        id: 'stage-canvas-html-no-provider-run',
+        workflowId: 'total-design-flow',
+        skillId: 'total-design-flow',
+        workflowName: '后台管理 Web',
+        input: '做一个后台管理 Web 页面',
+        currentStepId: 'html-output',
+        model: 'gpt-5.5',
+        steps: [],
+        documentAnalysis: {
+          canvas: { nodes: [], edges: [] },
+          totalDesignFlow: {
+            currentStage: 'html-output',
+            stages: [{ id: 'html-output', name: 'HTML' }],
+            stageCanvases: {
+              'html-output': {
+                nodes: [
+                  {
+                    id: 'html-page-dashboard',
+                    pageId: 'dashboard',
+                    stageId: 'html-output',
+                    title: '运营看板 HTML',
+                    targetGenerator: 'html',
+                    artifactStatus: 'pending',
+                    generationActions: [{ id: 'generate-html-dashboard', label: '生成 HTML', targetGenerator: 'html' }],
+                    codePreview: { previewTitle: '运营看板 HTML 运行预览', previewSummary: '生成后预览页面。', codeLanguage: 'html', code: '' }
+                  }
+                ],
+                edges: [],
+                orderedTabs: ['html-page-dashboard']
+              }
+            }
+          }
+        },
+        agentSessions: {},
+        referenceFiles: {}
+      }
+    ]
+  })
+
+  const result = await generateRunCanvasNodeArtifact(store, {
+    runId: 'stage-canvas-html-no-provider-run',
+    nodeId: 'html-page-dashboard',
+    generationAction: { id: 'generate-html-dashboard', label: '生成 HTML', targetGenerator: 'html' },
+    targetGenerator: 'html'
+  })
+
+  const stageNode = result.analysis.totalDesignFlow.stageCanvases['html-output'].nodes[0]
+  assert.equal(stageNode.artifactStatus, 'pending')
+  assert.equal(stageNode.artifact.codeStatus, 'configuration-required')
+  assert.equal(stageNode.codePreview.code, '')
+  assert.match(stageNode.codePreview.previewSummary, /HTML 生成模型未配置/)
+  assert.doesNotMatch(JSON.stringify(stageNode.artifact), /mobile-screen|data-html-preview|会员中心/)
+})
+
+test('HTML canvas artifact uses the model provider and carries upstream context', async () => {
   const store = createWorkflowRunnerStore({
     runs: [
       {
@@ -2817,30 +2883,42 @@ test('HTML canvas artifact renders UI context and interaction hooks from upstrea
     ]
   })
 
+  const generatedHtml = '<!doctype html><html><body><main><h1>点单首页模型生成 HTML</h1><button>去结算</button></main></body></html>'
+  const seenContexts = []
+  const agentProvider = {
+    name: 'html-model-provider',
+    async generate(context) {
+      seenContexts.push(context)
+      return {
+        content: `下面是产物：\n\`\`\`html\n${generatedHtml}\n\`\`\``,
+        provider: 'html-model-provider',
+        model: 'gpt-5.5'
+      }
+    }
+  }
+
   const result = await generateRunCanvasNodeArtifact(store, {
     runId: 'stage-canvas-html-runtime-run',
     nodeId: 'html-page-p1',
     generationAction: { id: 'generate-html-p1', label: '生成 HTML', targetGenerator: 'html' },
     targetGenerator: 'html'
-  })
+  }, { agentProvider })
 
   const stageNode = result.analysis.totalDesignFlow.stageCanvases['html-output'].nodes[0]
   const html = stageNode.artifact.html
   assert.equal(stageNode.artifactStatus, 'generated')
+  assert.equal(stageNode.artifact.codeStatus, 'generated')
   assert.equal(stageNode.codePreview.code, html)
-  assert.match(html, /data-html-preview="mobile-page"/)
-  assert.match(html, /class="mobile-screen"/)
-  assert.match(html, /class="app-card"/)
-  assert.match(html, /门店搜索栏/)
-  assert.match(html, /底部购物车/)
-  assert.match(html, /智能推荐商品卡/)
-  assert.match(html, /浅色品牌底/)
-  assert.match(html, /下拉刷新触发菜单接口刷新/)
-  assert.match(html, /data-state-target="demo-state"/)
-  assert.match(html, /data-html-demo-action="toggle-loading"/)
-  assert.match(html, /data-html-demo-action="toggle-empty"/)
-  assert.match(html, /addEventListener\('click'/)
-  assert.doesNotMatch(html, /页面结构<\/h2>[\s\S]*视觉组件<\/h2>/)
+  assert.equal(html, generatedHtml)
+  assert.equal(seenContexts.length, 1)
+  assert.equal(seenContexts[0].mode, 'workflow-html-artifact-generation')
+  assert.match(seenContexts[0].userPrompt, /门店搜索栏/)
+  assert.match(seenContexts[0].userPrompt, /底部购物车/)
+  assert.match(seenContexts[0].userPrompt, /智能推荐商品卡/)
+  assert.match(seenContexts[0].userPrompt, /浅色品牌底/)
+  assert.match(seenContexts[0].userPrompt, /下拉刷新触发菜单接口刷新/)
+  assert.match(seenContexts[0].userPrompt, /移动端.*375px|375px.*移动端/)
+  assert.doesNotMatch(html, /mobile-screen|会员中心/)
 })
 
 test('canvas artifact generation stores image provider failures on the stage node', async () => {

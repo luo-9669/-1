@@ -173,6 +173,41 @@ test('openai compatible image provider maps workflow target image size into gene
   assert.equal(capturedBodies[1].size, '1920x1088')
 })
 
+test('openai compatible image provider falls back to curl transport after fetch certificate failure', async () => {
+  let fallbackCalled = false
+  let capturedFallbackBody = null
+  const provider = createOpenAICompatibleImageProvider({
+    apiKey: 'test-key',
+    baseUrl: 'https://model.local/v1',
+    defaultModel: 'gpt-image-2',
+    fetchImpl: async () => {
+      const error = new Error('fetch failed')
+      error.cause = {
+        code: 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+        message: 'unable to get local issuer certificate'
+      }
+      throw error
+    },
+    curlPostJsonImpl: async ({ body }) => {
+      fallbackCalled = true
+      capturedFallbackBody = body
+      return {
+        data: [{ b64_json: 'Y3VybC1pbWFnZQ==' }]
+      }
+    }
+  })
+
+  const result = await provider.generate({
+    prompt: '生成移动端高保真图',
+    targetGenerator: 'gpt-image-2'
+  })
+
+  assert.equal(fallbackCalled, true)
+  assert.equal(capturedFallbackBody.model, 'gpt-image-2')
+  assert.equal(capturedFallbackBody.prompt, '生成移动端高保真图')
+  assert.equal(result.imageDataUrl, 'data:image/png;base64,Y3VybC1pbWFnZQ==')
+})
+
 test('openai compatible image provider sends reference images through edits endpoint', async () => {
   let capturedUrl = ''
   let capturedBody = null

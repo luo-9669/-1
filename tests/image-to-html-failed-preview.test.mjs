@@ -308,6 +308,19 @@ test('image-to-html frontend does not overwrite previewable html with the later 
   assert.match(generateSource, /previewRenderedGeneratedHtml = true/)
 })
 
+test('image-to-html frontend failure page preserves network error detail and timeout context', async () => {
+  const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
+  const generateStart = appSource.indexOf('async function generateFromImage')
+  const generateEnd = appSource.indexOf('function openCurrentCaptureRestoredPage', generateStart)
+  const generateSource = appSource.slice(generateStart, generateEnd)
+
+  assert.match(generateSource, /const failureMessage = imageToHtmlExceptionMessage\(error\)/)
+  assert.match(generateSource, /renderStaticHtmlPreview\(buildStaticHtmlFailurePage\('生成异常', failureMessage\)\)/)
+  assert.match(appSource, /function imageToHtmlExceptionMessage\(error = {}\)/)
+  assert.match(appSource, /原始错误/)
+  assert.match(appSource, /不是前端等待超时/)
+})
+
 test('image-to-html real asset route reloads the document after replacing a document-written preview hash', async () => {
   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
   const helperStart = appSource.indexOf('function replaceStaticHtmlPreviewRoute')
@@ -663,6 +676,10 @@ test('image-to-html enhanced prompts require usable responsive web and app pages
   assert.match(capturedPrompt, /向下适配.*1440.*768.*390|从.*1920.*适配.*390/)
   assert.match(capturedPrompt, /不要.*1440.*居中|1440.*内容岛.*居中|中间窄岛/)
   assert.match(capturedPrompt, /1920.*铺满|宽屏.*展开|利用宽屏/)
+  assert.match(capturedPrompt, /Web.*1920px.*逻辑宽度|1920px.*Web.*逻辑宽度/)
+  assert.match(capturedPrompt, /移动端.*375px.*逻辑宽度|375px.*移动端.*逻辑宽度/)
+  assert.match(capturedPrompt, /页面高度.*内容.*自然增长|高度.*自适应|不要固定高度/)
+  assert.match(capturedPrompt, /图片.*不要拉伸|不要拉伸.*图片|object-fit.*contain|object-fit.*cover/)
   assert.match(capturedPrompt, /正文.*14px|14px.*正文/)
   assert.match(capturedPrompt, /4px.*基础网格|基础网格.*4px/)
   assert.match(capturedPrompt, /间距.*4px.*倍数|4px.*倍数.*间距/)
@@ -729,6 +746,10 @@ test('image-to-html enhanced prompts require usable responsive web and app pages
   assert.match(ruleSource, /向下适配.*1440.*768.*390|从.*1920.*适配.*390/)
   assert.match(ruleSource, /不要.*1440.*居中|1440.*内容岛.*居中|中间窄岛/)
   assert.match(ruleSource, /1920.*铺满|宽屏.*展开|利用宽屏/)
+  assert.match(ruleSource, /Web.*1920px.*逻辑宽度|1920px.*Web.*逻辑宽度/)
+  assert.match(ruleSource, /移动端.*375px.*逻辑宽度|375px.*移动端.*逻辑宽度/)
+  assert.match(ruleSource, /页面高度.*内容.*自然增长|高度.*自适应|不要固定高度/)
+  assert.match(ruleSource, /图片.*不要拉伸|不要拉伸.*图片|object-fit.*contain|object-fit.*cover/)
   assert.match(ruleSource, /正文.*14px|14px.*正文/)
   assert.match(ruleSource, /4px.*基础网格|基础网格.*4px/)
   assert.match(ruleSource, /间距.*4px.*倍数|4px.*倍数.*间距/)

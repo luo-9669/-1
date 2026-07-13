@@ -1732,6 +1732,160 @@ npm run dev
   }
 }
 
+function isDeterministicProvider(provider = {}) {
+  return /deterministic/i.test(String(provider?.name || provider?.provider || '').trim())
+}
+
+function htmlTargetLogicalWidth(node = {}, run = {}) {
+  const text = [
+    node?.title,
+    node?.summary,
+    node?.codePreview?.previewSummary,
+    run?.input,
+    run?.workflowName
+  ].map((item) => String(item || '')).join(' ')
+  if (/web|网页|后台|管理端|PC|桌面|dashboard|admin/i.test(text) && !/小程序|移动端|手机|app|mobile|h5/i.test(text)) {
+    return 1920
+  }
+  return 375
+}
+
+function extractGeneratedHtml(value = '') {
+  const source = String(value || '').trim()
+  if (!source) return ''
+  const fenced = source.match(/```(?:html)?\s*([\s\S]*?)```/i)
+  const candidate = fenced?.[1]?.trim() || source
+  const doctype = candidate.match(/<!doctype[\s\S]*<\/html>/i)
+  if (doctype?.[0]) return doctype[0].trim()
+  const html = candidate.match(/<html[\s\S]*<\/html>/i)
+  if (html?.[0]) return html[0].trim()
+  return ''
+}
+
+function providerHtmlContent(result = {}) {
+  const candidates = [
+    result?.html,
+    result?.code,
+    result?.content,
+    result?.raw?.html,
+    result?.raw?.output_text
+  ]
+  for (const candidate of candidates) {
+    const html = extractGeneratedHtml(candidate)
+    if (html) return html
+  }
+  return ''
+}
+
+function htmlArtifactModelContext(node = {}, payload = {}, run = {}) {
+  const context = htmlCanvasArtifactContext(node, run)
+  const logicalWidth = htmlTargetLogicalWidth(node, run)
+  const surfaceLabel = logicalWidth >= 1440 ? 'Web/桌面' : '移动端/H5'
+  const layoutItems = context.layoutItems.length ? context.layoutItems : context.fallbackItems
+  const upstream = [
+    `页面：${context.pageTitle || node.title || '当前页面'}`,
+    context.summary ? `页面摘要：${context.summary}` : '',
+    `目标端：${surfaceLabel}`,
+    `目标逻辑宽度：${logicalWidth}px；高度必须随内容自然增长，不要固定页面高度，不要 transform/zoom 缩放整页。`,
+    context.wireframe ? `交互低保 ASCII 框架：\n${compactPromptText(context.wireframe, 1800)}` : '',
+    layoutItems.length ? `布局/区域要点：${layoutItems.join('；')}` : '',
+    context.interactionDetails ? `交互说明：${compactPromptText(context.interactionDetails, 900)}` : '',
+    context.stateItems.length ? `状态覆盖：${context.stateItems.join('；')}` : '',
+    context.gestureItems.length ? `手势/动作：${context.gestureItems.join('；')}` : '',
+    context.componentItems.length ? `UI 组件清单：${context.componentItems.join('；')}` : '',
+    context.visualFocus ? `视觉方向：${context.visualFocus}` : '',
+    context.visualPrompt ? `上游视觉提示词：${compactPromptText(context.visualPrompt, 1200)}` : ''
+  ].filter(Boolean).join('\n')
+  return {
+    mode: 'workflow-html-artifact-generation',
+    actionType: 'html-generation',
+    node,
+    run,
+    model: payload.model || run.model || 'gpt-5.5',
+    timeoutMs: payload.timeoutMs,
+    maxOutputTokens: 12000,
+    systemPrompt: [
+      '你是资深前端工程师和产品 UI 还原专家。只输出一个可直接运行的单文件 HTML，不要输出 Markdown 解释。',
+      '必须严格基于上游交互低保、UI视觉说明和状态说明生成；不要编造无关业务页面，不要使用会员中心、余额、积分、优惠券等通用兜底内容，除非上游明确要求。',
+      'HTML 必须包含完整 <!doctype html>、<html>、<head>、<body>、CSS 和必要 JS。'
+    ].join('\n'),
+    userPrompt: [
+      upstream,
+      '',
+      '生成约束：',
+      `- ${surfaceLabel} 页面按 ${logicalWidth}px 逻辑宽度优先设计。`,
+      '- 页面高度按内容自然增长；图片、截图、媒体区域保持比例，使用 width/max-width/aspect-ratio/object-fit，不要拉伸或压扁。',
+      '- Web/后台页面需要利用 1920 宽屏空间；移动端/H5 页面需要按 375 宽度组织信息，不要把桌面侧边栏硬塞进移动端。',
+      '- 使用语义化结构、真实可点击状态、可读字号、4px 栅格、紧凑控件、清晰 hover/focus/disabled/loading/empty/error 状态。',
+      '- 只返回完整 HTML 代码。'
+    ].filter(Boolean).join('\n')
+  }
+}
+
+async function buildHtmlModelCanvasArtifact(node = {}, payload = {}, run = {}, options = {}) {
+  const now = new Date().toISOString()
+  const provider = options.htmlProvider || options.codeProvider || options.agentProvider
+  const basePreview = {
+    ...(node.codePreview || {}),
+    previewTitle: node.codePreview?.previewTitle || 'HTML 运行预览',
+    codeLanguage: 'html',
+    code: ''
+  }
+  if (!provider || typeof provider.generate !== 'function' || isDeterministicProvider(provider)) {
+    const message = 'HTML 生成模型未配置：请配置可用的大模型/代码生成服务后再生成 HTML。'
+    return {
+      kind: 'html',
+      generatedAt: now,
+      codeStatus: 'configuration-required',
+      contentStatus: 'model-pending',
+      configurationMessage: message,
+      html: '',
+      codePreview: {
+        ...basePreview,
+        previewSummary: message,
+        code: ''
+      }
+    }
+  }
+  const context = htmlArtifactModelContext(node, payload, run)
+  try {
+    const result = await provider.generate(context)
+    const html = providerHtmlContent(result)
+    if (!html) throw new Error('模型未返回完整 HTML 文档')
+    return {
+      kind: 'html',
+      generatedAt: now,
+      codeStatus: 'generated',
+      contentStatus: 'model-generated',
+      html,
+      provider: result?.provider || provider.name || 'code-provider',
+      model: result?.model || context.model,
+      codePreview: {
+        ...basePreview,
+        previewSummary: '已由模型根据当前画布节点生成可打开的 HTML 预览。',
+        code: html
+      }
+    }
+  } catch (error) {
+    const message = error?.message || 'HTML 生成失败，请检查模型配置后重试。'
+    return {
+      kind: 'html',
+      generatedAt: now,
+      codeStatus: 'failed',
+      contentStatus: 'model-failed',
+      failureMessage: message,
+      error: message,
+      provider: provider.name || 'code-provider',
+      html: '',
+      codePreview: {
+        ...basePreview,
+        previewSummary: `HTML 生成失败：${message}`,
+        code: ''
+      }
+    }
+  }
+}
+
 function compactPromptText(value = '', limit = 1800) {
   const text = String(value || '')
     .replace(/\r/g, '')
@@ -1823,17 +1977,22 @@ function normalizeVisualTargetImageSize(node = {}, payload = {}, run = {}) {
 }
 
 function visualTargetAspectRatio(node = {}, payload = {}, run = {}) {
-  const explicit = normalizeVisualAspectRatio(node, payload)
-  if (explicit) return explicit
-  const size = normalizeVisualTargetImageSize(node, payload, run)
-  return size.width === 1920 ? '1920:1080' : '375:812'
+  return normalizeVisualAspectRatio(node, payload)
 }
 
 function visualTargetWidthPrompt(targetImageSize = null) {
   const width = Number(targetImageSize?.width)
-  return Number.isFinite(width) && width > 0
-    ? `目标图片宽度：${Math.round(width)}px，高度按内容比例自适应`
-    : ''
+  if (!Number.isFinite(width) || width <= 0) return ''
+  const roundedWidth = Math.round(width)
+  const surfaceLabel = roundedWidth >= 1440
+    ? 'Web/桌面'
+    : roundedWidth <= 430
+      ? '移动端'
+      : '当前页面'
+  return [
+    `目标图片宽度：${roundedWidth}px，高度按内容比例自适应`,
+    `${surfaceLabel}按 ${roundedWidth}px 逻辑宽度设计；不要固定高度，画布高度随页面内容自然增长；不要拉伸、压扁或裁切 UI 截图。`
+  ].join('\n')
 }
 
 function normalizeProjectVisualContext(payload = {}, run = {}) {
@@ -2125,18 +2284,7 @@ async function buildCanvasNodeArtifact(node = {}, payload = {}, run = {}, option
     }
   }
   if (target === 'html') {
-    const code = buildHtmlCanvasArtifact(node, run)
-    return {
-      kind: 'html',
-      generatedAt: now,
-      html: code,
-      codePreview: {
-        previewTitle: 'HTML 运行预览',
-        previewSummary: '已根据当前画布节点生成可打开的 HTML 预览。',
-        codeLanguage: 'html',
-        code
-      }
-    }
+    return buildHtmlModelCanvasArtifact(node, payload, run, options)
   }
   return buildVisualCanvasArtifact(node, payload, run, options)
 }
@@ -2144,12 +2292,13 @@ async function buildCanvasNodeArtifact(node = {}, payload = {}, run = {}, option
 async function patchGeneratedArtifactOnNode(node = {}, payload = {}, run = {}, options = {}) {
   const artifact = await buildCanvasNodeArtifact(node, payload, run, options)
   const actionId = payload.generationAction?.id || payload.generationAction?.label || ''
-  const nextArtifactStatus = artifact.imageStatus === 'configuration-required'
+  const generationStatus = artifact.imageStatus || artifact.codeStatus || ''
+  const nextArtifactStatus = generationStatus === 'configuration-required'
     ? 'pending'
-    : artifact.imageStatus === 'failed'
+    : generationStatus === 'failed'
       ? 'failed'
       : 'generated'
-  const nextActionStatus = artifact.imageStatus === 'configuration-required'
+  const nextActionStatus = generationStatus === 'configuration-required'
     ? 'configuration-required'
     : nextArtifactStatus
   const nextActions = Array.isArray(node.generationActions)
@@ -2169,6 +2318,7 @@ async function patchGeneratedArtifactOnNode(node = {}, payload = {}, run = {}, o
     artifact,
     generationActions: nextActions,
     contentStatusLabel: nextArtifactStatus === 'generated' ? '已生成' : nextArtifactStatus === 'failed' ? '生成失败' : '待配置',
+    ...(artifact.contentStatus ? { contentStatus: artifact.contentStatus } : {}),
     ...(artifact.codePreview ? { codePreview: artifact.codePreview } : {}),
     ...(artifact.visualPreview ? { visualPreview: artifact.visualPreview } : {})
   }

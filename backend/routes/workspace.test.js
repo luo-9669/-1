@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 
 import { createWorkspaceWorkflowRun } from '../models/workspace.js'
 import { analyzeRequirementDocuments } from '../services/document-parser.js'
-import { buildTotalDesignFlow } from '../services/total-design-flow.js'
+import { buildAdvancedUxMarkdownReport, buildTotalDesignFlow } from '../services/total-design-flow.js'
 import { createWorkspaceStore, listMaterials, listParseJobs, modelSettingsView, saveModelSettings, upsertWorkflowRun } from '../services/workspace-store.js'
 import { workspaceRoutes } from './workspace.js'
 
@@ -202,6 +202,68 @@ test('workspace store allows failed advanced UX runs to be overwritten by a fres
   assert.equal(store.workflowRuns[0].documentAnalysis.status, 'streaming')
   assert.equal(store.workflowRuns[0].documentAnalysis.advancedUxReport.status, 'generating')
   assert.equal(store.workflowRuns[0].documentAnalysis.advancedUxReport.fileName, '高级UX需求分析-新.md')
+})
+
+test('workspace route restores advanced UX markdown from Agent file card when totalFlow lost it', async () => {
+  const analysis = analyzeRequirementDocuments({
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    skillSelectionMode: 'auto',
+    demandScope: 'project',
+    input: '做一个AI生成视频拥有爆款复刻功能的web工具',
+    documents: []
+  })
+  const totalFlow = buildTotalDesignFlow(analysis)
+  const report = buildAdvancedUxMarkdownReport(analysis)
+  const run = createWorkspaceWorkflowRun({
+    id: 'advanced-ux-agent-markdown-recovery-run',
+    workflowId: 'advanced-ux-requirement-analysis',
+    workflowName: '高级 UX 需求分析',
+    assetType: '高级 UX 需求分析',
+    input: analysis.input,
+    documentAnalysis: {
+      ...analysis,
+      advancedUxReport: {
+        status: 'generating',
+        fileName: report.fileName,
+        markdown: ''
+      },
+      totalDesignFlow: {
+        ...totalFlow,
+        advancedUxReport: {
+          ...(totalFlow.advancedUxReport || {}),
+          status: 'generating',
+          markdown: ''
+        }
+      }
+    },
+    agentSessions: {
+      'requirement-dissection': [{
+        id: 'advanced-ux-agent-markdown-recovery-run-report',
+        role: 'assistant',
+        content: '高级 UX Markdown 文件已生成',
+        meta: {
+          action: 'advanced-ux-markdown-report',
+          fileName: report.fileName,
+          status: 'success',
+          markdown: report.markdown
+        }
+      }]
+    }
+  })
+  const store = createWorkspaceStore({ workflowRuns: [run] })
+  const routes = workspaceRoutes(store)
+
+  const result = await routes['GET /api/workspace/workflow-runs/:id']({ id: run.id })
+  const flow = result.run.documentAnalysis.totalDesignFlow
+  const nodes = flow.stageCanvases['requirement-dissection'].nodes
+
+  assert.equal(flow.advancedUxReport.status, 'imported')
+  assert.equal(flow.advancedUxReport.markdown, report.markdown)
+  assert.equal(result.run.documentAnalysis.advancedUxReport.markdown, report.markdown)
+  assert.ok(nodes.every((node) => node.artifactStatus === 'generated'))
+  assert.ok(nodes.every((node) => String(node.markdown || '').includes('AI生成视频')))
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.advancedUxReport.markdown, report.markdown)
 })
 
 test('workspace route hydrates legacy total-flow run details with stage canvases', async () => {

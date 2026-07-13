@@ -381,6 +381,20 @@ function isTimeoutLikeProviderError(error = {}) {
   return /AbortError|aborted|timeout|timed?\s*out|超时|取消/i.test(`${error?.name || ''} ${message}`)
 }
 
+function isFetchTransportProviderError(error = {}) {
+  const details = providerErrorCauseDetails(error)
+  const source = [
+    error?.name,
+    error?.code,
+    providerErrorMessage(error),
+    details.causeName,
+    details.causeCode,
+    details.causeMessage
+  ].filter(Boolean).join(' ')
+  return isTimeoutLikeProviderError(error) ||
+    /UNABLE_TO_GET_ISSUER_CERT_LOCALLY|SELF_SIGNED_CERT|CERT_HAS_EXPIRED|DEPTH_ZERO_SELF_SIGNED_CERT|certificate|issuer cert|fetch failed/i.test(source)
+}
+
 export function normalizeModelProviderError(error = {}, context = {}) {
   const sourceMessage = providerErrorMessage(error)
   const status = error?.status || error?.response?.status || context.status
@@ -623,7 +637,7 @@ async function postJson({ fetchImpl, url, apiKey, timeoutMs, body, provider, mod
     }
     return data
   } catch (error) {
-    if (allowCurlFallback && isTimeoutLikeProviderError(error)) {
+    if (allowCurlFallback && isFetchTransportProviderError(error)) {
       const fallback = curlPostJsonImpl || postJsonWithCurl
       try {
         return await fallback({ url, apiKey, timeoutMs, body, provider, model, apiSurface, spawnImpl })
@@ -1251,7 +1265,9 @@ export function createOpenAICompatibleImageProvider(options = {}) {
             },
             provider: 'openai-compatible-image',
             model,
-            apiSurface: 'images.generations'
+            apiSurface: 'images.generations',
+            curlPostJsonImpl: options.curlPostJsonImpl,
+            spawnImpl: options.spawnImpl
           })
       }
       const firstImage = Array.isArray(raw.data) ? raw.data[0] || {} : {}

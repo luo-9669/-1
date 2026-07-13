@@ -51,6 +51,7 @@ import { analyzeRequirementDocumentsWithGeneration } from '../services/document-
 import {
   buildTotalDesignFlow,
   failAdvancedUxMarkdownGenerationInTotalFlow,
+  importAdvancedUxMarkdownReportToTotalFlow,
   withDownstreamStageArtifactContext
 } from '../services/total-design-flow.js'
 import {
@@ -1701,6 +1702,40 @@ function hydrateAdvancedUxFailedRequirementCanvas(totalFlow = {}, run = {}) {
   }
 }
 
+function advancedUxMarkdownReportFromAgentSessions(run = {}) {
+  const sessions = run.agentSessions && typeof run.agentSessions === 'object' && !Array.isArray(run.agentSessions)
+    ? run.agentSessions
+    : {}
+  const candidates = Object.values(sessions)
+    .flatMap((session) => Array.isArray(session) ? session : [])
+    .filter((message) => message?.role === 'assistant')
+    .map((message) => {
+      const meta = message.meta && typeof message.meta === 'object' ? message.meta : {}
+      const nestedReport = meta.advancedUxReport && typeof meta.advancedUxReport === 'object' ? meta.advancedUxReport : {}
+      const markdown = String(meta.markdown || nestedReport.markdown || '').trim()
+      if (!markdown) return null
+      return {
+        ...nestedReport,
+        ...meta,
+        markdown,
+        fileName: meta.fileName || nestedReport.fileName || '高级UX需求分析.md',
+        status: meta.status || nestedReport.status || 'generated',
+        createdAt: message.createdAt || meta.createdAt || nestedReport.createdAt || ''
+      }
+    })
+    .filter(Boolean)
+    .filter((report) => String(report.action || report.artifactType || '').includes('advanced-ux') || /##\s*节点\s*0?1|##\s*原始需求分析/.test(report.markdown))
+  return candidates[candidates.length - 1] || null
+}
+
+function recoverAdvancedUxMarkdownReportFromAgentSessions(totalFlow = {}, run = {}) {
+  if (!isAdvancedUxWorkflowRunForHydration(run, totalFlow)) return totalFlow
+  if (String(totalFlow?.advancedUxReport?.markdown || run.documentAnalysis?.advancedUxReport?.markdown || '').trim()) return totalFlow
+  const report = advancedUxMarkdownReportFromAgentSessions(run)
+  if (!report?.markdown) return totalFlow
+  return importAdvancedUxMarkdownReportToTotalFlow(totalFlow, report)
+}
+
 function analysisForTotalFlowHydration(analysis = {}, previousTotalFlow = {}, run = {}) {
   const baseAnalysis = normalizeTotalFlowHydrationAnalysisIdentity(analysis, previousTotalFlow, run)
   if (!previousTotalFlow || typeof previousTotalFlow !== 'object' || !Object.keys(previousTotalFlow).length) return baseAnalysis
@@ -1744,7 +1779,8 @@ async function hydrateWorkflowRunDetail(store, run = {}, options = {}) {
     sourceTotalFlow,
     previousTotalFlow
   )
-  const recoveredTotalFlow = await recoverGeneratedVisualArtifactsFromFiles(baseTotalFlow, run, options)
+  const markdownRecoveredTotalFlow = recoverAdvancedUxMarkdownReportFromAgentSessions(baseTotalFlow, run)
+  const recoveredTotalFlow = await recoverGeneratedVisualArtifactsFromFiles(markdownRecoveredTotalFlow, run, options)
   const normalizedVisualFailureTotalFlow = normalizeFailedUiVisualImageArtifacts(recoveredTotalFlow)
   const failureHydratedTotalFlow = hydrateAdvancedUxFailedRequirementCanvas(normalizedVisualFailureTotalFlow, run)
   const sourceGatedTotalFlow = suppressAdvancedUxPendingInteractionFallbackCanvas(

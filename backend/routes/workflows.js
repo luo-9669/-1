@@ -621,6 +621,7 @@ export function workflowRoutes(store = createWorkflowRunnerStore(), options = {}
       runId: payload.runId || payload.id,
       nodeId: payload.nodeId
     }, {
+      agentProvider: await resolveAgentProvider(options),
       imageProvider: resolveImageProvider(store, options),
       timeoutMs: payload.timeoutMs ?? options.timeoutMs,
       resolveImageReference: (url, page) => resolveWorkspaceImageReference(url, page, options)

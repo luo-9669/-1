@@ -763,7 +763,7 @@ test('stage confirmation persists the confirmed next stage as current stage', ()
   )
 })
 
-test('future workflow stages stay locked until sequentially reached or confirmed', () => {
+test('workflow stages with real rendered canvas content stay selectable after refresh', () => {
   const canSelectSource = appVue.slice(
     appVue.indexOf("function canSelectWorkflowStage(stageId = '')"),
     appVue.indexOf("function canAutoGenerateWorkflowStage(stageId = '')")
@@ -773,15 +773,50 @@ test('future workflow stages stay locked until sequentially reached or confirmed
     canvasVue.indexOf('function layoutCanvasNodes')
   )
 
-  assert.doesNotMatch(
+  assert.match(
     canSelectSource,
-    /workflowStageCanvasHasGeneratedContent/,
-    'future stages should not become selectable only because stale or fallback stage canvas nodes exist'
+    /workflowStageCanvasHasRenderedContent\(workflowTotalDesignFlow\.value\?\.stageCanvases\?\.\[normalizedStageId\],\s*normalizedStageId\)/,
+    'restored stages with backend-owned renderable canvas nodes should remain selectable even without a stage confirmation record'
   )
-  assert.doesNotMatch(
+  assert.match(
     canOpenSource,
     /loadedStageIds\.value\.has\(stageId\)/,
-    'future stage chips should not unlock from historical/stale rendered nodes'
+    'stage chips should unlock from loadedStageIds, which filters out loading/model-pending placeholder nodes'
+  )
+})
+
+test('workflow stage selectors ignore stale runtime locks for reached stages', () => {
+  const canSelectSource = appVue.slice(
+    appVue.indexOf("function canSelectWorkflowStage(stageId = '')"),
+    appVue.indexOf("function canAutoGenerateWorkflowStage(stageId = '')")
+  )
+  const canOpenSource = canvasVue.slice(
+    canvasVue.indexOf("function canOpenStage(stageId = '')"),
+    canvasVue.indexOf('function layoutCanvasNodes')
+  )
+
+  assert.match(
+    canSelectSource,
+    /const currentIndex = workflowStageIndexById\(workflowCurrentStageId\.value\)[\s\S]*if \(currentIndex >= 0 && targetIndex <= currentIndex\) return true[\s\S]*const runtime = workflowStageRuntime\(normalizedStageId\)/,
+    'outer stage selection should allow already reached stages before consulting stale persisted runtime locks'
+  )
+  assert.match(
+    canOpenSource,
+    /if \(stageId === activeStageId\.value\) return true[\s\S]*if \(index < activeStageIndex\.value\) return true[\s\S]*const runtime = stageRuntime\(stageId\)/,
+    'canvas stage chips should allow active and previous reached stages before consulting stale persisted runtime locks'
+  )
+})
+
+test('workflow canvas suppresses stale node generating state after stage completion', () => {
+  const loadingSource = canvasVue.slice(
+    canvasVue.indexOf("function isNodeActuallyLoading(node = {})"),
+    canvasVue.indexOf("function canvasNodeSummary(node = {})")
+  )
+
+  assert.match(
+    loadingSource,
+    /const owningStageId = nodeWorkflowStageId\(node\)[\s\S]*if \(owningStageId && stageStatus\(owningStageId\) === 'completed' && isAdvancedUxGeneratingNode\(node\)\) return false/,
+    'completed requirement-analysis stages should stop stale advanced-UX placeholders from spinning forever'
   )
 })
 
@@ -1357,8 +1392,8 @@ test('workflow stage strip keeps all stage entries and disables unreached future
 
   assert.match(
     canvasVue,
-    /function canOpenStage\(stageId = ''\)[\s\S]*const runtime = stageRuntime\(stageId\)[\s\S]*if \(runtime && typeof runtime\.canOpen === 'boolean'\) return runtime\.canOpen === true[\s\S]*const previousStageId = previousStageIdForCanvasStage\(stageId\)[\s\S]*if \(previousStageId && stageConfirmation\(previousStageId\)\) return true[\s\S]*return false/,
-    'stage tabs should obey backend stageRuntime before falling back to sequential confirmed-stage guards'
+    /function canOpenStage\(stageId = ''\)[\s\S]*if \(index < activeStageIndex\.value\) return true[\s\S]*const previousStageId = previousStageIdForCanvasStage\(stageId\)[\s\S]*if \(previousStageId && stageConfirmation\(previousStageId\)\) return true[\s\S]*const runtime = stageRuntime\(stageId\)[\s\S]*if \(runtime && typeof runtime\.canOpen === 'boolean'\) return runtime\.canOpen === true[\s\S]*return false/,
+    'stage tabs should allow reached and sequentially confirmed stages before falling back to backend runtime'
   )
 
   assert.doesNotMatch(
@@ -1375,8 +1410,8 @@ test('workflow stage strip keeps all stage entries and disables unreached future
 
   assert.match(
     appVue,
-    /function canSelectWorkflowStage\(stageId = ''\)[\s\S]*const previousStageId = stageIds\[targetIndex - 1\][\s\S]*if \(!previousStageId \|\| !workflowStageConfirmation\(previousStageId\)\) return false/,
-    'App-level stage guard should unlock future stages only through sequential previous-stage confirmation'
+    /function canSelectWorkflowStage\(stageId = ''\)[\s\S]*if \(currentIndex >= 0 && targetIndex <= currentIndex\) return true[\s\S]*if \(\['generating', 'paused'\]\.includes\(targetStatus\)\) return true[\s\S]*const previousStageId = stageIds\[targetIndex - 1\][\s\S]*if \(previousStageId && workflowStageConfirmation\(previousStageId\)\) return true[\s\S]*const runtime = workflowStageRuntime\(normalizedStageId\)/,
+    'App-level stage guard should unlock reached or actively generating stages before checking sequential confirmation and runtime fallback'
   )
 })
 
@@ -1543,7 +1578,7 @@ test('stage-level next refreshes the confirmed next stage canvas from current to
   )
 })
 
-test('workflow stage tabs use backend stageRuntime instead of scaffold nodes to unlock stages', () => {
+test('workflow stage tabs use backend stageRuntime without letting stale locks override reached stages', () => {
   const canOpenStart = canvasVue.indexOf("function canOpenStage(stageId = '')")
   const canOpenEnd = canvasVue.indexOf('function layoutCanvasNodes', canOpenStart)
   const canOpenSource = canvasVue.slice(canOpenStart, canOpenEnd)
@@ -1553,8 +1588,8 @@ test('workflow stage tabs use backend stageRuntime instead of scaffold nodes to 
 
   assert.match(
     canOpenSource,
-    /const runtime = stageRuntime\(stageId\)[\s\S]*if \(runtime && typeof runtime\.canOpen === 'boolean'\) return runtime\.canOpen === true/,
-    'stage tab clickability should obey backend-owned stageRuntime.canOpen'
+    /if \(index < activeStageIndex\.value\) return true[\s\S]*const runtime = stageRuntime\(stageId\)[\s\S]*if \(runtime && typeof runtime\.canOpen === 'boolean'\) return runtime\.canOpen === true/,
+    'stage tab clickability should use backend runtime only after reached-stage guards'
   )
 
   assert.match(
@@ -1594,6 +1629,12 @@ test('UI visual canvas cards render image canvas without duplicate inline genera
   const cardStart = canvasVue.indexOf('<article\n              v-for="node in displayNodes"')
   const cardEnd = canvasVue.indexOf('<div v-if="shouldRenderCanvasBoard" class="workflow-canvas-zoom-controls"', cardStart)
   const cardSource = canvasVue.slice(cardStart, cardEnd)
+  const visualCardStart = canvasVue.indexOf('<section v-else-if="isVisualGalleryDetail(node)" class="visual-canvas-card-preview">')
+  const visualCardEnd = canvasVue.indexOf('<section v-else-if="!isNodeActuallyLoading(node) && isPreviewCodeDetail(node)"', visualCardStart)
+  const visualCardSource = canvasVue.slice(visualCardStart, visualCardEnd)
+  const fullscreenStart = canvasVue.indexOf('<div v-else-if="isVisualGalleryDetail(fullscreenNode)"')
+  const fullscreenEnd = canvasVue.indexOf('<div v-else-if="isPreviewCodeDetail(fullscreenNode)"', fullscreenStart)
+  const fullscreenSource = canvasVue.slice(fullscreenStart, fullscreenEnd)
 
   assert.match(
     cardSource,
@@ -1605,6 +1646,36 @@ test('UI visual canvas cards render image canvas without duplicate inline genera
     cardSource,
     /class="visual-canvas-card-actions"[\s\S]*variant="primary"[\s\S]*runCanvasGenerationAction\(node, action\)/,
     'UI visual cards should not show a duplicate black generate button above the fixed page action row'
+  )
+
+  assert.match(
+    visualCardSource,
+    /visualCanvasPlaceholderDescription\(node, 'pending'\)/,
+    'pending UI visual cards should show a concise status placeholder instead of the generation prompt'
+  )
+
+  assert.match(
+    visualCardSource,
+    /visualCanvasPlaceholderDescription\(node, 'generating'\)/,
+    'generating UI visual cards should show a concise status placeholder instead of the generation prompt'
+  )
+
+  assert.doesNotMatch(
+    visualCardSource,
+    /\{\{\s*visualPreview\(node\)\.imagePrompt\s*\}\}/,
+    'UI visual cards should not dump imagePrompt/screen-contract text into the canvas card body'
+  )
+
+  assert.match(
+    fullscreenSource,
+    /visualCanvasPlaceholderDescription\(fullscreenNode, 'pending'\)/,
+    'fullscreen pending UI visual detail should use the same concise placeholder'
+  )
+
+  assert.doesNotMatch(
+    fullscreenSource,
+    /\{\{\s*visualPreview\(fullscreenNode\)\.imagePrompt\s*\}\}/,
+    'fullscreen UI visual detail should not dump imagePrompt/screen-contract text as the default body'
   )
 
   assert.match(
@@ -1835,10 +1906,47 @@ test('generated visual images expose download and fullscreen preview tools', () 
 })
 
 test('generated visual image tools are hover revealed and images keep aspect ratio', () => {
+  const visualCardStart = canvasVue.indexOf('<section v-else-if="isVisualGalleryDetail(node)" class="visual-canvas-card-preview">')
+  const visualCardEnd = canvasVue.indexOf('<section v-else-if="!isNodeActuallyLoading(node) && isPreviewCodeDetail(node)"', visualCardStart)
+  const visualCardSource = canvasVue.slice(visualCardStart, visualCardEnd)
+  const fullscreenStart = canvasVue.indexOf('<div v-else-if="isVisualGalleryDetail(fullscreenNode)"')
+  const fullscreenEnd = canvasVue.indexOf('<div v-else-if="isPreviewCodeDetail(fullscreenNode)"', fullscreenStart)
+  const fullscreenSource = canvasVue.slice(fullscreenStart, fullscreenEnd)
+
+  assert.match(
+    visualCardSource,
+    /class="visual-canvas-card-image"\s*:class="visualCanvasSurfaceClass\(node\)"/,
+    'canvas visual image viewport should carry a web/app surface class derived from generation metadata'
+  )
+  assert.match(
+    fullscreenSource,
+    /class="visual-image-result"\s*:class="visualCanvasSurfaceClass\(fullscreenNode\)"/,
+    'fullscreen visual image viewport should carry the same web/app surface class'
+  )
+  assert.match(
+    canvasVue,
+    /function visualTargetLogicalWidth\(node = \{\}\)[\s\S]*targetImageSize[\s\S]*artifact\?\.targetImageSize[\s\S]*1920[\s\S]*375/,
+    'visual display should infer web/app from targetImageSize first and then from node text'
+  )
+  assert.match(
+    canvasVue,
+    /function visualCanvasSurfaceClass\(node = \{\}\)[\s\S]*visualTargetLogicalWidth\(node\)[\s\S]*visual-surface-web[\s\S]*visual-surface-app/,
+    'visual display should expose stable surface classes for web and app image viewports'
+  )
   assert.match(
     stylesSource,
-    /\.visual-canvas-card-image img[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;[\s\S]*height:\s*auto;[\s\S]*max-height:\s*none;[\s\S]*object-fit:\s*contain;/,
-    'canvas visual cards should fix display width only and let generated image height follow the natural ratio'
+    /\.visual-canvas-card-image\s*\{[\s\S]*height:\s*230px;[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/,
+    'canvas visual images should live inside a fixed-height viewport that scrolls vertically'
+  )
+  assert.match(
+    stylesSource,
+    /\.visual-canvas-card-image\.visual-surface-app[\s\S]*width:\s*min\(180px,\s*100%\);[\s\S]*height:\s*300px;/,
+    'app visual images should use a fixed phone-like canvas viewport'
+  )
+  assert.match(
+    stylesSource,
+    /\.visual-canvas-card-image img[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;[\s\S]*height:\s*auto;[\s\S]*max-height:\s*none;/,
+    'canvas visual cards should fit viewport width only and let generated image height follow the natural ratio'
   )
   assert.match(
     stylesSource,
@@ -1857,8 +1965,18 @@ test('generated visual image tools are hover revealed and images keep aspect rat
   )
   assert.match(
     stylesSource,
-    /\.visual-image-result img[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;[\s\S]*height:\s*auto;[\s\S]*max-height:\s*none;[\s\S]*object-fit:\s*contain;/,
-    'fullscreen detail generated images should fix width only and let height follow the natural ratio'
+    /\.visual-image-result\s*\{[\s\S]*height:\s*min\(72vh,\s*760px\);[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/,
+    'fullscreen generated images should live inside a fixed viewport that scrolls vertically'
+  )
+  assert.match(
+    stylesSource,
+    /\.visual-image-result\.visual-surface-app[\s\S]*width:\s*min\(375px,\s*100%\);/,
+    'fullscreen app generated images should render in a fixed 375-style viewport'
+  )
+  assert.match(
+    stylesSource,
+    /\.visual-image-result img[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;[\s\S]*height:\s*auto;[\s\S]*max-height:\s*none;/,
+    'fullscreen detail generated images should fit width only and let height follow the natural ratio'
   )
 
   assert.match(
@@ -1986,7 +2104,7 @@ test('UI visual artifact generation appends image result into the same Agent con
 
   assert.match(
     appVue,
-    /function appendWorkflowVisualArtifactAgentMessage\(node = \{\}, generationAction = \{\}\)/,
+    /function appendWorkflowVisualArtifactAgentMessage\(node = \{\}, generationAction = \{\}, options = \{\}\)/,
     'frontend should centralize the generated-image assistant message write-back'
   )
   assert.match(
@@ -2023,6 +2141,42 @@ test('UI visual artifact generation appends image result into the same Agent con
   )
 })
 
+test('UI visual artifact generation writes request and result messages to the visible Agent scope', () => {
+  const generationStart = appVue.indexOf('async function runWorkflowGenerationAction')
+  const generationEnd = appVue.indexOf('async function applyWorkflowAgentSupplement', generationStart)
+  const generationSource = appVue.slice(generationStart, generationEnd)
+
+  assert.match(
+    appVue,
+    /function isWorkflowAgentWorkbenchStageId\(stageId = ''\)[\s\S]*'ui-visual'/,
+    'UI visual canvas actions should use the visible stage Agent session instead of a hidden node-scoped session'
+  )
+
+  assert.match(
+    appVue,
+    /function workflowGenerationAgentScopeId\(nodeId = ''\)[\s\S]*workflowUsesStageAgentScope\.value[\s\S]*workflowCurrentStageId\.value/,
+    'generation messages should resolve to the visible stage Agent session when the canvas is in a stage workbench scope'
+  )
+
+  assert.match(
+    generationSource,
+    /const agentScopeId = workflowGenerationAgentScopeId\(nodeId\)/,
+    'generation should not write user and pending messages directly to the canvas node session when the drawer is showing a stage session'
+  )
+
+  assert.match(
+    generationSource,
+    /appendWorkflowVisualArtifactAgentMessage\(generatedNode, generationAction, \{ scopeId: agentScopeId \}\)/,
+    'successful image generation should append the image card into the same visible Agent session as the request and pending status'
+  )
+
+  assert.match(
+    appVue,
+    /function appendWorkflowVisualArtifactAgentMessage\(node = \{\}, generationAction = \{\}, options = \{\}\)[\s\S]*const scopeId = options\.scopeId \|\| node\.id[\s\S]*removeWorkflowAgentBusyMessages\(scopeId\)[\s\S]*scopeId,/,
+    'visual artifact message helper should support writing to a stage-scoped Agent session while keeping the node artifact metadata'
+  )
+})
+
 test('UI visual artifact generation keeps backend failure status instead of overwriting it as generated', () => {
   const generationStart = appVue.indexOf('async function runWorkflowGenerationAction')
   const generationEnd = appVue.indexOf('async function applyWorkflowAgentSupplement', generationStart)
@@ -2052,14 +2206,14 @@ test('opening a generated UI visual node repairs empty Agent image artifact mess
 
   assert.match(
     appVue,
-    /function ensureWorkflowAgentVisualArtifactMessage\(nodeId = ''\)[\s\S]*const node = canvasNodeById\(nodeId\)[\s\S]*const visualArtifact = workflowVisualArtifactMessagePayload\(node\)[\s\S]*syncWorkflowAgentSessionChange\(node\.id, nextSession\)/,
-    'opening a generated visual node should repair persisted visual artifact messages that have an empty imageUrl'
+    /function ensureWorkflowAgentVisualArtifactMessage\(nodeId = '', options = \{\}\)[\s\S]*const scopeId = options\.scopeId \|\| node\.id[\s\S]*ensureWorkflowAgentSession\(scopeId\)[\s\S]*syncWorkflowAgentSessionChange\(scopeId, nextSession\)/,
+    'opening a generated visual node should repair persisted visual artifact messages in the visible Agent scope when that scope differs from the node id'
   )
 
   assert.match(
     appVue,
-    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId\)[\s\S]*ensureWorkflowAgentVisualArtifactMessage\(targetNodeId\)[\s\S]*openWorkflowAgent\(\)/,
-    'node Agent entry should sync generated code and visual artifacts from the same canvas node source'
+    /function openWorkflowAgentForNode\(nodeId\) \{[\s\S]*const artifactScopeId = workflowGenerationAgentScopeId\(targetNodeId\)[\s\S]*ensureWorkflowAgentCodeArtifactMessage\(targetNodeId\)[\s\S]*ensureWorkflowAgentVisualArtifactMessage\(targetNodeId, \{ scopeId: artifactScopeId \}\)[\s\S]*openWorkflowAgent\(\)/,
+    'node Agent entry should sync generated visual artifacts into the visible stage Agent session'
   )
 })
 
@@ -2084,7 +2238,7 @@ test('HTML and Vue artifact generation appends code result into the same Agent c
 
   assert.match(
     appVue,
-    /function appendWorkflowGeneratedCodeAgentMessage\(node = \{\}, generationAction = \{\}\)/,
+    /function appendWorkflowGeneratedCodeAgentMessage\(node = \{\}, generationAction = \{\}, options = \{\}\)/,
     'frontend should centralize generated HTML/Vue assistant message write-back'
   )
 
@@ -2126,7 +2280,7 @@ test('HTML and Vue artifact generation appends code result into the same Agent c
 
   assert.match(
     generationSource,
-    /const generatedNode = workflowAgentGeneratedArtifactNode\(data, nodeId\)[\s\S]*if \(workflowCodeArtifactSource\(generatedNode\)\)[\s\S]*appendWorkflowGeneratedCodeAgentMessage\(generatedNode,[\s\S]*generationAction[\s\S]*else[\s\S]*appendWorkflowVisualArtifactAgentMessage\(generatedNode,[\s\S]*generationAction/,
+    /const generatedNode = workflowAgentGeneratedArtifactNode\(data, nodeId\)[\s\S]*if \(workflowCodeArtifactSource\(generatedNode\)\)[\s\S]*appendWorkflowGeneratedCodeAgentMessage\(generatedNode,[\s\S]*generationAction,[\s\S]*\{ scopeId: agentScopeId \}[\s\S]*else[\s\S]*appendWorkflowVisualArtifactAgentMessage\(generatedNode,[\s\S]*generationAction,[\s\S]*\{ scopeId: agentScopeId \}/,
     'successful generation should append code artifacts through the existing Agent code-card renderer and keep image artifacts on the visual path'
   )
 
@@ -2226,6 +2380,10 @@ test('project-scoped UI visual generation sends project visual context and targe
 })
 
 test('UI visual generation uses app and web target dimensions when no explicit ratio exists', () => {
+  const contextStart = appVue.indexOf('function workflowVisualGenerationContext')
+  const contextEnd = appVue.indexOf('function appendWorkflowGeneratedCodeAgentMessage', contextStart)
+  const contextSource = appVue.slice(contextStart, contextEnd)
+
   assert.match(
     appVue,
     /function workflowVisualTargetPreset\(node = \{\}\)[\s\S]*width:\s*1920[\s\S]*surface:\s*'web'[\s\S]*width:\s*375[\s\S]*surface:\s*'app'/,
@@ -2248,6 +2406,18 @@ test('UI visual generation uses app and web target dimensions when no explicit r
     appVue,
     /targetImageSize:\s*\{\s*width:\s*targetPreset\.width\s*\}/,
     'frontend should send only the target image width so height can follow the generated image ratio'
+  )
+
+  assert.match(
+    contextSource,
+    /const targetAspectRatio = workflowVisualAspectRatioLabel\(node\)/,
+    'frontend should send explicit ratio metadata only when the backend/model supplied it on the node'
+  )
+
+  assert.doesNotMatch(
+    contextSource,
+    /targetPreset\.aspectRatio/,
+    'frontend should not inject a default 1920:1080 or 375:812 ratio when the generation contract is width-only'
   )
 })
 
@@ -4605,6 +4775,16 @@ test('requirement dissection detail absorbs PDF-style stage tabs and hides noisy
     /isRequirementOpportunityPriorityBlock\(block\)[\s\S]*requirement-opportunity-priority/,
     'design opportunities and priority should have a dedicated comparison/roadmap renderer'
   )
+  assert.match(
+    canvasVue,
+    /function isRequirementOpportunityPriorityBlock\(block = \{\}\)[\s\S]*return \['priorityRoadmap', 'acceptanceBasis'\]\.includes\(block\?\.sourceRef\)/,
+    'design opportunity detail should use the same unified table layout as the stage-one markdown card instead of vertical opportunity cards'
+  )
+  assert.match(
+    canvasVue,
+    /isRequirementDocumentTableBlock\(block\)[\s\S]*class="requirement-document-table-block requirement-detail-table"[\s\S]*requirementBlockHeaders\(block, fullscreenNode\)[\s\S]*requirementBlockRows\(block, fullscreenNode\)/,
+    'designOpportunityMatrix should fall through to the unified table renderer with headers and grid rows'
+  )
   assert.doesNotMatch(
     canvasVue,
     /artifact\.businessRules|const business = artifact\.businessRules/,
@@ -4749,8 +4929,8 @@ test('workflow requirement agent summary acts as a canvas navigator without fixe
 test('requirement dissection pipeline detail uses mixed layouts for absorbed structures', () => {
   assert.match(
     canvasVue,
-    /:class="\[`layout-\$\{requirementBlockType\(block\)\}`\]"/,
-    'requirement pipeline blocks should expose a layout class so trees, timelines, graphs, state machines, relations, and risks can render differently'
+    /:class="\[`layout-\$\{requirementBlockType\(block\)\}`, \{ 'layout-advanced-ux-table': isAdvancedUxTablePreferredBlock\(block, fullscreenNode\) \}\]"/,
+    'requirement pipeline blocks should expose layout classes so trees, timelines, graphs, state machines, relations, risks, and advanced UX tables can render differently'
   )
   assert.match(
     canvasVue,
@@ -4940,18 +5120,23 @@ test('requirement dissection canvas cards show artifact previews and recommended
 
   assert.match(
     cardTemplate,
-    /isRequirementPipelineCanvasNode\(node\)[\s\S]*class="requirement-canvas-card-preview"[\s\S]*requirementCanvasPreviewItems\(node\)/,
-    'requirement dissection canvas cards should render compact previews derived from backend artifact blocks'
+    /isRequirementPipelineCanvasNode\(node\)[\s\S]*class="requirement-canvas-card-table-preview"[\s\S]*requirementPreviewTableRows\(requirementCanvasPreviewTable\(node\)\)/,
+    'requirement dissection canvas cards should render compact table previews derived from backend artifact blocks'
   )
   assert.match(
     canvasVue,
-    /function requirementCanvasPreviewItems\(node = \{\}\)[\s\S]*requirementPipelineTab\(node\)[\s\S]*requirementDetailBlocks\(node\)[\s\S]*requirementCanvasBlockPreview/,
-    'requirement canvas previews should derive from the active pipeline tab and canonical detailBlocks'
+    /function requirementCanvasPreviewTable\(node = \{\}\)[\s\S]*requirementMarkdownPreviewTable\(advancedUxRequirementNodeMarkdown\(node\), 3\)[\s\S]*requirementDetailBlocks\(node\)[\s\S]*requirementBlockPreviewTable/,
+    'requirement canvas table previews should prefer markdown tables and then derive from canonical detailBlocks'
   )
   assert.match(
     canvasVue,
-    /function requirementCanvasRecommendedActions\(node = \{\}\)[\s\S]*补充细节[\s\S]*列出风险[\s\S]*进入交互低保/,
-    'requirement canvas cards should expose recommended Agent capability entries when backend quickActions are absent'
+    /function requirementCanvasRecommendedActions\(node = \{\}\)[\s\S]*return \['补充细节', '列出风险'\]/,
+    'requirement canvas cards should keep node-scoped Agent actions only when backend quickActions are absent'
+  )
+  assert.doesNotMatch(
+    canvasVue,
+    /function requirementCanvasRecommendedActions\(node = \{\}\)[\s\S]*进入交互低保/,
+    'requirement canvas cards should not show a per-card stage advance button'
   )
   assert.match(
     canvasVue,
@@ -4960,8 +5145,8 @@ test('requirement dissection canvas cards show artifact previews and recommended
   )
   assert.match(
     stylesSource,
-    /\.requirement-canvas-card-preview[\s\S]*display:\s*grid;[\s\S]*\.requirement-canvas-card-preview span/,
-    'requirement canvas previews should have dedicated compact card styling'
+    /\.requirement-canvas-card-preview[\s\S]*max-height:\s*100%;[\s\S]*overflow-y:\s*auto;[\s\S]*\.requirement-canvas-card-preview span[\s\S]*border-left:\s*4px solid #222529;[\s\S]*background:\s*#f8fafc;/,
+    'requirement canvas previews should match the detail block style and scroll within the card body'
   )
 })
 
@@ -5027,6 +5212,34 @@ test('advanced UX markdown report sections render as markdown instead of page la
     drawerVue,
     /function markdownBlocksShouldUsePageLayoutArtifact\(blocks = \[\], title = ''\)[\s\S]*isAdvancedUxMarkdownReportTitle\(titleText\)[\s\S]*return false/,
     'agent markdown renderer should not convert advanced UX report chapters into page-layout artifacts'
+  )
+})
+
+test('advanced UX stage-one fullscreen markdown details use the same markdown block style as file cards', () => {
+  assert.match(
+    canvasVue,
+    /function requirementMarkdownRenderableBlocks\(content = ''\)/,
+    'stage-one fullscreen details should parse Markdown blocks instead of dumping raw markdown'
+  )
+  assert.match(
+    canvasVue,
+    /function renderRequirementMarkdownBlock\(block = \{\}\)/,
+    'stage-one fullscreen details should render headings, tables, lists, and text code blocks'
+  )
+  assert.match(
+    canvasVue,
+    /shouldRenderAdvancedUxRequirementMarkdown\(fullscreenNode\)[\s\S]*requirementMarkdownRenderableBlocks\(advancedUxRequirementNodeMarkdown\(fullscreenNode\)\)[\s\S]*renderRequirementMarkdownBlock/,
+    'advanced UX raw section fallback should use the parsed markdown renderer used by md file cards'
+  )
+  assert.match(
+    canvasVue,
+    /requirementBlockType\(block\) === 'markdown'[\s\S]*requirementMarkdownRenderableBlocks\(requirementDocumentBlockPlaintext\(block, fullscreenNode\)\)[\s\S]*renderRequirementMarkdownBlock/,
+    'advanced UX markdown detail blocks should render parsed markdown instead of raw pre text'
+  )
+  assert.doesNotMatch(
+    canvasVue,
+    /requirementBlockType\(block\) === 'markdown'[\s\S]{0,180}<pre>\{\{ requirementDocumentBlockPlaintext\(block, fullscreenNode\) \}\}<\/pre>/,
+    'markdown blocks in stage-one details should no longer use raw pre output'
   )
 })
 
@@ -5131,7 +5344,7 @@ test('advanced UX generating canvas nodes show loading state until markdown impo
   )
   assert.match(
     canvasVue,
-    /<div v-else-if="!isNodeActuallyLoading\(node\) && !hasPageLayoutArtifact\(node\) && compactNodeContent\(node\)\.length" class="canvas-node-content">/,
+    /<div v-else-if="!isNodeActuallyLoading\(node\) && !hasPageLayoutArtifact\(node\) && !isVisualGalleryDetail\(node\) && !isPreviewCodeDetail\(node\) && compactNodeContent\(node\)\.length" class="canvas-node-content">/,
     'generating advanced UX cards should not render compact content chips below the loading row'
   )
 })
@@ -6815,8 +7028,8 @@ test('advanced UX next stage bypasses generic Agent summary and old page-layout 
 
   assert.match(
     appVue,
-    /function isWorkflowAgentWorkbenchStageId\(stageId = ''\)[\s\S]*\['requirement-dissection',\s*'interaction-lofi'\]/,
-    'interaction-lofi must use the stage Agent scope so entering the next stage creates stage artifacts instead of a page-layout chat reply'
+    /function isWorkflowAgentWorkbenchStageId\(stageId = ''\)[\s\S]*\['requirement-dissection',\s*'interaction-lofi',\s*'ui-visual'\]/,
+    'interaction-lofi and UI visual must use the stage Agent scope so canvas actions stay visible in the shared stage conversation'
   )
 })
 

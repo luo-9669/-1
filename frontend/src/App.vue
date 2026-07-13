@@ -5273,6 +5273,8 @@ function imageAdvancedMarkdownRules() {
     '- 桌面 Web / SaaS / 后台必须先做 1920px 宽屏布局，再向下适配 1440px / 768px / 390px；不要先做 1440px 内容岛再居中放到 1920px。',
     '- 1920px 预览要利用宽屏展开内容：后台/工具页可增加列数、拉开主内容、扩展表格/卡片/素材网格、保留侧边栏和工具栏节奏；不要出现 1440 内容岛居中或中间窄岛。',
     '- 官网/落地页即使有 max-width，也要用 full-width band、背景层、分栏或内容延展处理 1920px，不能让中间区域孤立悬在大空白里。',
+    '- Web/桌面按 1920px 逻辑宽度设计，移动端按 375px 逻辑宽度设计；页面高度随内容自然增长，高度自适应，不要固定高度去凑截图比例。',
+    '- 图片区域可以固定比例容器，但图片本身不要拉伸变形；必须使用 object-fit: contain 或 object-fit: cover 并配合 aspect-ratio、max-width、max-height 保持原始比例。',
     '- 优先使用 flex、grid、minmax、max-width、min-width: 0、aspect-ratio、object-fit、gap 等稳定布局能力。',
     '- 固定宽度内容要有 max-width 和 overflow 兜底；卡片、表格、工具栏、图片区域在窄屏下自然换行或堆叠。',
     '- 首屏不能因视口变化出现文字压扁、按钮挤出、图片遮挡、卡片重叠或横向不可控溢出。',
@@ -5528,9 +5530,10 @@ async function generateFromImage(options = {}) {
       }))
     }
   } catch (error) {
+    const failureMessage = imageToHtmlExceptionMessage(error)
     setStatus(imageCodeStatus, 'failed', `图片转代码异常：${error.message || '未知错误'}`)
-    setStatus(pageGenerationStatus, 'failed', '图片转代码未生成真实 HTML：后端视觉生成服务异常。')
-    renderStaticHtmlPreview(buildStaticHtmlFailurePage('生成异常', pageGenerationStatus.value.message))
+    setStatus(pageGenerationStatus, 'failed', failureMessage)
+    renderStaticHtmlPreview(buildStaticHtmlFailurePage('生成异常', failureMessage))
     if (!standalonePreview && !reusePreviewWindow) updateStaticHtmlPreviewUrl(previewWindow, clientTaskId)
     updateFactoryTask(task.id, {
       status: 'failed',
@@ -5538,6 +5541,21 @@ async function generateFromImage(options = {}) {
       failureReason: imageCodeStatus.value.message
     })
   }
+}
+
+function imageToHtmlExceptionMessage(error = {}) {
+  const message = String(error?.message || error || '未知错误').trim()
+  if (/network error|failed to fetch|networkerror|load failed/i.test(message)) {
+    return [
+      '图片转代码未生成真实 HTML：浏览器到后端的生成连接中断，或后端到模型 provider 的响应体读取失败。',
+      `原始错误：${message}`,
+      '当前图片转 HTML 请求不是前端等待超时；临时预览页会持续等待后端保存结果，但模型/provider 网络断开仍需要重新生成或切换模型配置。'
+    ].join('\n')
+  }
+  return [
+    '图片转代码未生成真实 HTML：后端视觉生成服务异常。',
+    `原始错误：${message}`
+  ].join('\n')
 }
 
 function openCurrentCaptureRestoredPage() {
@@ -7509,6 +7527,21 @@ function workflowStageCanvasHasGeneratedContent(stageCanvas = null, stageId = ''
   })
 }
 
+function workflowStageCanvasHasRenderedContent(stageCanvas = null, stageId = '') {
+  const nodes = Array.isArray(stageCanvas?.nodes) ? stageCanvas.nodes : []
+  if (!nodes.length) return false
+  return nodes.some((node) => {
+    const nodeId = String(node?.id || '').trim()
+    const contentStatus = String(node?.contentStatus || '').trim()
+    const contentSource = String(node?.contentSource || '').trim()
+    if (!node || node.loading === true) return false
+    if (nodeId === `${stageId}-loading` || nodeId === 'model-generating') return false
+    return contentStatus !== 'model-pending' &&
+      contentStatus !== 'waiting-model' &&
+      contentSource !== 'model-pending'
+  })
+}
+
 function inferredWorkflowStageStatuses(totalFlow = null, fallbackStatus = 'waiting') {
   const stageCanvases = totalFlow?.stageCanvases || {}
   return Object.fromEntries(workflowStageIdsFromTotalFlow(totalFlow).map((stageId) => [
@@ -8444,7 +8477,7 @@ function finalWorkflowStageStatuses(totalFlow = null) {
 }
 
 function isWorkflowAgentWorkbenchStageId(stageId = '') {
-  return ['requirement-dissection', 'interaction-lofi']
+  return ['requirement-dissection', 'interaction-lofi', 'ui-visual']
     .includes(String(stageId || '').trim())
 }
 
@@ -14827,18 +14860,20 @@ function workflowStageRuntime(stageId = '') {
 function canSelectWorkflowStage(stageId = '') {
   const normalizedStageId = normalizeWorkflowStageId(stageId)
   if (!normalizedStageId || normalizedStageId === 'requirement-dissection') return true
-  const runtime = workflowStageRuntime(normalizedStageId)
-  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
   const targetIndex = workflowStageIndexById(normalizedStageId)
   if (targetIndex < 0) return false
   const stageIds = workflowStageIdsFromTotalFlow(workflowTotalDesignFlow.value)
   const currentIndex = workflowStageIndexById(workflowCurrentStageId.value)
   if (currentIndex >= 0 && targetIndex <= currentIndex) return true
-  const previousStageId = stageIds[targetIndex - 1]
-  if (!previousStageId || !workflowStageConfirmation(previousStageId)) return false
   const targetStatus = workflowStageStatusMap.value?.[normalizedStageId]?.status || workflowTotalDesignFlow.value?.stageStatuses?.[normalizedStageId]?.status || ''
   if (['generating', 'paused'].includes(targetStatus)) return true
-  return true
+  if (workflowStageCanvasHasRenderedContent(workflowTotalDesignFlow.value?.stageCanvases?.[normalizedStageId], normalizedStageId)) return true
+  if (workflowStageConfirmation(normalizedStageId)) return true
+  const previousStageId = stageIds[targetIndex - 1]
+  if (previousStageId && workflowStageConfirmation(previousStageId)) return true
+  const runtime = workflowStageRuntime(normalizedStageId)
+  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
+  return false
 }
 
 function canAutoGenerateWorkflowStage(stageId = '') {
@@ -15903,14 +15938,14 @@ function workflowVisualTargetPreset(node = {}) {
     state.activeWorkflowRun?.workflowName
   ].map((item) => String(item || '')).join(' ')
   if (/web|网页|后台|管理端|PC|桌面|dashboard|admin/i.test(text) && !/小程序|移动端|手机|app|mobile/i.test(text)) {
-    return { width: 1920, aspectRatio: '1920:1080', surface: 'web' }
+    return { width: 1920, surface: 'web' }
   }
-  return { width: 375, aspectRatio: '375:812', surface: 'app' }
+  return { width: 375, surface: 'app' }
 }
 
 function workflowVisualGenerationContext(node = {}) {
   const targetPreset = workflowVisualTargetPreset(node)
-  const targetAspectRatio = workflowVisualAspectRatioLabel(node) || targetPreset.aspectRatio
+  const targetAspectRatio = workflowVisualAspectRatioLabel(node)
   if (!workflowAgentAllowsProjectKnowledge()) {
     return { targetAspectRatio, targetImageSize: { width: targetPreset.width }, projectVisualContext: null }
   }
@@ -15932,15 +15967,17 @@ function workflowVisualGenerationContext(node = {}) {
   }
 }
 
-function appendWorkflowGeneratedCodeAgentMessage(node = {}, generationAction = {}) {
+function appendWorkflowGeneratedCodeAgentMessage(node = {}, generationAction = {}, options = {}) {
   const source = workflowCodeArtifactSource(node)
   if (!node?.id || !source) return ''
   const language = workflowCodeArtifactLanguage(node) || workflowCodeGenerationLanguage(node, generationAction) || 'html'
   const label = language === 'vue' ? 'Vue 代码' : 'HTML 代码'
-  removeWorkflowAgentBusyMessages(node.id)
+  const scopeId = options.scopeId || node.id
+  removeWorkflowAgentBusyMessages(scopeId)
   return appendWorkflowAgentMessage('assistant', `已生成「${node.title || '当前页面'}」${label}。\n\n\`\`\`${language}\n${source}\n\`\`\``, {
-    scopeId: node.id,
+    scopeId,
     meta: {
+      nodeId: node.id,
       action: 'generated-code',
       hideStatus: true,
       generatedCodeSignature: workflowCodeArtifactSignature(node),
@@ -15979,13 +16016,15 @@ function workflowVisualArtifactMessagePayload(node = {}, generationAction = {}) 
   }
 }
 
-function appendWorkflowVisualArtifactAgentMessage(node = {}, generationAction = {}) {
+function appendWorkflowVisualArtifactAgentMessage(node = {}, generationAction = {}, options = {}) {
   const visualArtifact = workflowVisualArtifactMessagePayload(node, generationAction)
   if (!node?.id || !visualArtifact) return ''
-  removeWorkflowAgentBusyMessages(node.id)
+  const scopeId = options.scopeId || node.id
+  removeWorkflowAgentBusyMessages(scopeId)
   return appendWorkflowAgentMessage('assistant', `已生成「${node.title || '当前页面'}」高保真图。`, {
-    scopeId: node.id,
+    scopeId,
     meta: {
+      nodeId: node.id,
       action: 'visual-artifact-generated',
       hideStatus: true,
       visualArtifact
@@ -15993,11 +16032,12 @@ function appendWorkflowVisualArtifactAgentMessage(node = {}, generationAction = 
   })
 }
 
-function ensureWorkflowAgentVisualArtifactMessage(nodeId = '') {
+function ensureWorkflowAgentVisualArtifactMessage(nodeId = '', options = {}) {
   const node = canvasNodeById(nodeId)
   const visualArtifact = workflowVisualArtifactMessagePayload(node)
   if (!node?.id || !visualArtifact) return ''
-  const session = ensureWorkflowAgentSession(node.id)
+  const scopeId = options.scopeId || node.id
+  const session = ensureWorkflowAgentSession(scopeId)
   const hasVisualArtifact = session.some((message) =>
     message?.role === 'assistant' &&
     message?.meta?.action === 'visual-artifact-generated' &&
@@ -16024,14 +16064,14 @@ function ensureWorkflowAgentVisualArtifactMessage(nodeId = '') {
         }
       }
     }
-    syncWorkflowAgentSessionChange(node.id, nextSession)
+    syncWorkflowAgentSessionChange(scopeId, nextSession)
     if (state.activeWorkflowRun) {
       saveState(state)
       api.workspace.createWorkflowRun(state.apiConfig, state.activeWorkflowRun).catch(() => {})
     }
     return nextSession[emptyIndex].id || ''
   }
-  const messageId = appendWorkflowVisualArtifactAgentMessage(node)
+  const messageId = appendWorkflowVisualArtifactAgentMessage(node, {}, { scopeId })
   if (messageId && state.activeWorkflowRun) {
     saveState(state)
     api.workspace.createWorkflowRun(state.apiConfig, state.activeWorkflowRun).catch(() => {})
@@ -16048,6 +16088,14 @@ function workflowAgentGeneratedArtifactNode(data = {}, nodeId = '') {
   if (workflowCodeArtifactSource(currentNode)) return currentNode
   if (workflowVisualPreviewImage(currentNode) && !workflowVisualPreviewImage(returnedNode)) return currentNode
   return returnedNode || currentNode || {}
+}
+
+function workflowGenerationAgentScopeId(nodeId = '') {
+  const fallbackScopeId = nodeId || workflowAgentScopeId()
+  if (workflowUsesStageAgentScope.value) {
+    return workflowCurrentStageId.value || fallbackScopeId
+  }
+  return fallbackScopeId
 }
 
 function workflowGeneratedArtifactFailed(node = {}) {
@@ -16079,7 +16127,7 @@ async function runWorkflowGenerationAction(payload = {}) {
   }
   if (nodeId) selectWorkflowCanvasNode(nodeId)
   openWorkflowAgent()
-  const agentScopeId = nodeId || workflowAgentScopeId()
+  const agentScopeId = workflowGenerationAgentScopeId(nodeId)
   const visualGenerationSourceNode = canvasNodeById(nodeId) || {}
   const visualGenerationContext = workflowVisualGenerationContext(visualGenerationSourceNode)
   const codeGenerationLanguage = workflowCodeGenerationLanguage(visualGenerationSourceNode, generationAction, payload)
@@ -16176,9 +16224,9 @@ async function runWorkflowGenerationAction(payload = {}) {
       contentStatusLabel: '已生成'
     })
     if (workflowCodeArtifactSource(generatedNode)) {
-      appendWorkflowGeneratedCodeAgentMessage(generatedNode, generationAction)
+      appendWorkflowGeneratedCodeAgentMessage(generatedNode, generationAction, { scopeId: agentScopeId })
     } else {
-      appendWorkflowVisualArtifactAgentMessage(generatedNode, generationAction)
+      appendWorkflowVisualArtifactAgentMessage(generatedNode, generationAction, { scopeId: agentScopeId })
     }
     if (state.activeWorkflowRun) {
       saveState(state)
@@ -16628,8 +16676,9 @@ function ensureActiveWorkflowRunForAgent() {
 function openWorkflowAgentForNode(nodeId) {
   const targetNodeId = workflowCanvasResolvableNodeId(nodeId)
   workflowAgentNodeId.value = targetNodeId
+  const artifactScopeId = workflowGenerationAgentScopeId(targetNodeId)
   ensureWorkflowAgentCodeArtifactMessage(targetNodeId)
-  ensureWorkflowAgentVisualArtifactMessage(targetNodeId)
+  ensureWorkflowAgentVisualArtifactMessage(targetNodeId, { scopeId: artifactScopeId })
   openWorkflowAgent()
 }
 
