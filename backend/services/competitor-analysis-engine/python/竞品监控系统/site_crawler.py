@@ -71,13 +71,13 @@ class CrawlResult:
         return {
             "base_url": self.base_url,
             "total_pages": self.total_pages,
-            "pages": {url: p.to_dict() for url, p in list(self.pages.items())[:50]},
+            "pages": {url: p.to_dict() for url, p in list(self.pages.items())[:180]},
             "navigation_tree": self.navigation_tree,
-            "features": self.features[:80],
-            "sitemap_navigation": self.sitemap_navigation[:80],
+            "features": self.features[:200],
+            "sitemap_navigation": self.sitemap_navigation[:200],
             "all_links_count": len(self.all_links),
             "sitemap_urls_count": len(self.sitemap_urls),
-            "sitemap_urls": self.sitemap_urls[:80],
+            "sitemap_urls": self.sitemap_urls[:200],
             "errors": self.errors[:10],
         }
 
@@ -610,7 +610,7 @@ def _humanize_path_segment(segment: str) -> str:
     return cleaned[:1].upper() + cleaned[1:]
 
 
-def infer_sitemap_navigation(sitemap_urls: List[str], base_url: str, limit: int = 80) -> List[Dict]:
+def infer_sitemap_navigation(sitemap_urls: List[str], base_url: str, limit: int = 200) -> List[Dict]:
     """
     从 sitemap URL 推断导航/功能入口。
 
@@ -675,7 +675,6 @@ def infer_sitemap_navigation(sitemap_urls: List[str], base_url: str, limit: int 
     navigation = []
     for item in groups.values():
         item.pop("_child_urls", None)
-        item["children"] = item["children"][:12]
         navigation.append(item)
     return navigation[:limit]
 
@@ -745,7 +744,7 @@ def deep_crawl_product(product_url: str, product_name: str = "") -> CrawlResult:
                      and _is_valid_crawl_url(u, product_url)]
 
         # 限制补充爬取数量
-        extra_urls = new_urls[:20]
+        extra_urls = new_urls[:60]
         if extra_urls:
             logger.info(f"从 sitemap 补充爬取 {len(extra_urls)} 个页面")
             extra_pages = crawl_page_tree(extra_urls, product_url, max_depth=1)

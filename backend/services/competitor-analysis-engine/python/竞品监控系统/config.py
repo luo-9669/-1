@@ -78,10 +78,10 @@ REQUEST_DELAY: float = 1.0
 # =============================================================================
 
 # 最大爬取页面数
-MAX_CRAWL_PAGES: int = int(os.environ.get("MAX_CRAWL_PAGES", "50"))
+MAX_CRAWL_PAGES: int = int(os.environ.get("MAX_CRAWL_PAGES", "120"))
 
 # 最大爬取深度
-MAX_CRAWL_DEPTH: int = int(os.environ.get("MAX_CRAWL_DEPTH", "3"))
+MAX_CRAWL_DEPTH: int = int(os.environ.get("MAX_CRAWL_DEPTH", "4"))
 
 
 # =============================================================================

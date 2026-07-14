@@ -64,30 +64,52 @@ test('competitor analysis list does not auto-restore stale latest temp reports i
   assert.doesNotMatch(pageSource, /const canConfirmAnalysis = computed/)
 })
 
-test('competitor analysis restores primary tabs with competitor table first', async () => {
+test('competitor analysis uses two-level tabs with monitor reports under competitor monitor', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const backendServiceSource = await readFile(backendServiceUrl, 'utf8')
   const primaryTabsRule = cssRule(pageSource, '.competitor-analysis-primary-tabs')
+  const secondaryTabsRule = cssRule(pageSource, '.competitor-analysis-secondary-tabs')
   const primaryTabsStart = pageSource.indexOf('const primaryTabs = [')
   const primaryTabsEnd = pageSource.indexOf(']', primaryTabsStart)
   const primaryTabsSource = pageSource.slice(primaryTabsStart, primaryTabsEnd)
+  const monitorTabsStart = pageSource.indexOf('const monitorTabs = [')
+  const monitorTabsEnd = pageSource.indexOf(']', monitorTabsStart)
+  const monitorTabsSource = pageSource.slice(monitorTabsStart, monitorTabsEnd)
 
   assert.match(pageSource, /BaseTabs/)
+  assert.match(pageSource, /BaseSecondaryTabs/)
   assert.match(pageSource, /class="competitor-analysis-primary-tabs"/)
-  assert.match(pageSource, /label="竞品分析"/)
-  assert.match(pageSource, /@change="setActiveKind"/)
+  assert.match(pageSource, /label="竞品分析一级分类"/)
+  assert.match(pageSource, /@change="setActivePrimaryTab"/)
   assert.match(pageSource, /const primaryTabs = \[/)
-  assert.match(pageSource, /\{ value: 'competitors', label: '竞品表' \}/)
-  assert.match(pageSource, /\{ value: 'daily', label: '每日生成' \}/)
+  assert.match(pageSource, /\{ value: 'monitor', label: '竞品监控' \}/)
+  assert.match(pageSource, /\{ value: 'gap', label: '机会点分析' \}/)
+  assert.match(pageSource, /const monitorTabs = \[/)
+  assert.match(pageSource, /class="competitor-analysis-secondary-tabs"/)
+  assert.match(pageSource, /<div[\s\S]*class="competitor-analysis-secondary-tabs"[\s\S]*<BaseSecondaryTabs/)
+  assert.match(pageSource, /v-if="activePrimaryTab === 'monitor'"/)
+  assert.match(pageSource, /:items="monitorTabs"/)
+  assert.match(pageSource, /label="竞品监控二级分类"/)
+  assert.match(monitorTabsSource, /\{ value: 'competitors', label: '竞品表' \}/)
+  assert.match(monitorTabsSource, /\{ value: 'daily', label: '每日生成' \}/)
   assert.ok(
-    primaryTabsSource.indexOf("value: 'competitors'") < primaryTabsSource.indexOf("value: 'daily'") &&
-    primaryTabsSource.indexOf("value: 'daily'") < primaryTabsSource.indexOf("value: 'weekly'") &&
-    primaryTabsSource.indexOf("value: 'weekly'") < primaryTabsSource.indexOf("value: 'flow'") &&
-    primaryTabsSource.indexOf("value: 'flow'") < primaryTabsSource.indexOf("value: 'framework'") &&
-    primaryTabsSource.indexOf("value: 'framework'") < primaryTabsSource.indexOf("value: 'gap'"),
-    'primary tabs should be competitor table, daily, weekly, flow, framework, gap'
+    primaryTabsSource.indexOf("value: 'monitor'") < primaryTabsSource.indexOf("value: 'gap'"),
+    'primary tabs should be competitor monitor before opportunity analysis'
   )
+  assert.ok(
+    monitorTabsSource.indexOf("value: 'competitors'") < monitorTabsSource.indexOf("value: 'daily'") &&
+    monitorTabsSource.indexOf("value: 'daily'") < monitorTabsSource.indexOf("value: 'weekly'") &&
+    monitorTabsSource.indexOf("value: 'weekly'") < monitorTabsSource.indexOf("value: 'flow'") &&
+    monitorTabsSource.indexOf("value: 'flow'") < monitorTabsSource.indexOf("value: 'framework'"),
+    'monitor secondary tabs should be competitor table, daily, weekly, flow, framework'
+  )
+  assert.doesNotMatch(primaryTabsSource, /value: 'competitors'/)
+  assert.doesNotMatch(primaryTabsSource, /value: 'daily'/)
+  assert.doesNotMatch(primaryTabsSource, /value: 'weekly'/)
+  assert.doesNotMatch(primaryTabsSource, /value: 'flow'/)
+  assert.doesNotMatch(primaryTabsSource, /value: 'framework'/)
   assert.match(pageSource, /const activeKind = ref\('competitors'\)/)
+  assert.match(pageSource, /const activePrimaryTab = ref\('monitor'\)/)
   assert.match(pageSource, /kind: 'daily'/)
   assert.match(pageSource, /record\.kind !== activeKind\.value/)
   assert.match(pageSource, /if \(\['daily', 'weekly'\]\.includes\(record\.kind\)\) return '全部功能'/)
@@ -96,8 +118,13 @@ test('competitor analysis restores primary tabs with competitor table first', as
   assert.match(pageSource, /<ElOption v-for="item in analysisTabs"/)
   assert.doesNotMatch(pageSource, /<ElOption[^>]+label="竞品表"/)
   assert.match(primaryTabsRule, /display:\s*flex/)
-  assert.match(primaryTabsRule, /gap:\s*28px/)
+  assert.match(primaryTabsRule, /gap:\s*24px/)
   assert.match(primaryTabsRule, /min-height:\s*44px/)
+  assert.match(secondaryTabsRule, /display:\s*flex/)
+  assert.match(secondaryTabsRule, /overflow-x:\s*auto/)
+  assert.match(pageSource, /\.competitor-analysis-secondary-tabs\s+:deep\(\.ui-secondary-tabs\)/)
+  assert.match(pageSource, /width:\s*max-content/)
+  assert.doesNotMatch(pageSource, /\.competitor-analysis-secondary-tabs\s+:deep\(\.ui-tab\)/)
   assert.doesNotMatch(primaryTabsRule, /display:\s*block/)
   assert.doesNotMatch(pageSource, /\.competitor-analysis-primary-tabs\s+:deep\(\.ui-tabs\)/)
   assert.match(backendServiceSource, /return '每日生成'/)
@@ -520,6 +547,32 @@ test('competitor analysis refreshes backend data when switching primary tabs', a
   assert.match(pageSource, /\}, \{ immediate: true \}\)/)
 })
 
+test('deleting a competitor refreshes competitor-derived filters and analysis selector', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const deleteStart = pageSource.indexOf('async function deleteCompetitor')
+  const deleteEnd = pageSource.indexOf('function detailMarkdownForRecord', deleteStart)
+  const deleteSource = pageSource.slice(deleteStart, deleteEnd)
+  const optionsStart = pageSource.indexOf('const analysisCompetitorOptions = computed')
+  const optionsEnd = pageSource.indexOf('const analysisRequiresScopeFields', optionsStart)
+  const optionsSource = pageSource.slice(optionsStart, optionsEnd)
+  const filterOptionsStart = pageSource.indexOf('const competitorFilterOptions = computed')
+  const filterOptionsEnd = pageSource.indexOf('const hasActiveListFilters', filterOptionsStart)
+  const filterOptionsSource = pageSource.slice(filterOptionsStart, filterOptionsEnd)
+
+  assert.ok(deleteStart >= 0 && deleteEnd > deleteStart, 'deleteCompetitor should be present')
+  assert.match(deleteSource, /const deletedOptionIds = competitorOptionIdsForItem\(competitor\)/)
+  assert.match(deleteSource, /pruneDeletedCompetitorReferences\(competitor, deletedOptionIds\)/)
+  assert.match(deleteSource, /await refreshPageData\(\)/)
+  assert.match(deleteSource, /if \(listFilters\.competitor === competitor\.name\) listFilters\.competitor = 'all'/)
+  assert.match(deleteSource, /analysisForm\.competitorIds = analysisForm\.competitorIds\.filter\(\(id\) => !deletedOptionIds\.includes\(id\)\)/)
+  assert.match(pageSource, /function competitorOptionIdsForItem/)
+  assert.match(pageSource, /function pruneDeletedCompetitorReferences/)
+  assert.match(filterOptionsSource, /for \(const competitor of competitors\.value\)/)
+  assert.doesNotMatch(filterOptionsSource, /for \(const record of analysisRecords\.value\)/)
+  assert.match(optionsSource, /for \(const competitor of competitors\.value\) addAnalysisCompetitorOption\(byKey, competitor\)/)
+  assert.doesNotMatch(optionsSource, /for \(const record of analysisRecords\.value\)/)
+})
+
 test('competitor analysis uses the account-bound project id before the route fallback for backend reads', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
 
@@ -617,6 +670,7 @@ test('competitor analysis page adds figma-matched search and filters below the t
   assert.match(pageSource, /var\(--color-n2\)/)
   assert.match(pageRule, /--el-color-primary:\s*var\(--color-primary\)/)
   assert.match(pageRule, /--el-border-radius-base:\s*var\(--radius-small\)/)
+  assert.match(pageRule, /padding:\s*0/)
   assert.match(filterSearchRule, /--el-input-border-radius:\s*var\(--radius-small\)/)
   assert.match(filterFieldRule, /--el-border-radius-base:\s*var\(--radius-small\)/)
   assert.match(filterPopperRule, /border-radius:\s*var\(--radius-middle\)/)
@@ -659,13 +713,17 @@ test('competitor analysis record detail opens as a modal over the list', async (
 
 test('competitor analysis detail does not show competitor switch tabs', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
+  const detailStart = pageSource.indexOf('class="competitor-analysis-dialog competitor-analysis-report-dialog"')
+  const detailEnd = pageSource.indexOf('<div v-if="showAnalysisDialog"', detailStart)
+  const detailSource = pageSource.slice(detailStart, detailEnd)
 
   assert.doesNotMatch(pageSource, /competitor-analysis-report-meta/)
   assert.doesNotMatch(pageSource, /const detailTabs = \[/)
   assert.doesNotMatch(pageSource, /activeDetailTab/)
   assert.doesNotMatch(pageSource, /competitorTabsForSelectedRecord/)
-  assert.doesNotMatch(pageSource, /competitor-analysis-secondary-tabs/)
-  assert.doesNotMatch(pageSource, /role="tablist" aria-label="分析竞品"/)
+  assert.ok(detailStart >= 0 && detailEnd > detailStart, 'detail modal source should be present')
+  assert.doesNotMatch(detailSource, /competitor-analysis-secondary-tabs/)
+  assert.doesNotMatch(detailSource, /role="tablist" aria-label="分析竞品"/)
   assert.doesNotMatch(pageSource, /selectedDetailCompetitorName/)
   assert.doesNotMatch(pageSource, /selectCompetitorTab\(item\)/)
   assert.doesNotMatch(pageSource, /markdownForCompetitorName/)

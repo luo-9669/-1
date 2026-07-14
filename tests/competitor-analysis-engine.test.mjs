@@ -686,6 +686,413 @@ test('framework evidence_quality none does not call backend model or show fabric
   assert.doesNotMatch(response.markdown, /核心页面、关键任务链路、信息架构/)
 })
 
+test('framework model receives the complete visible page inventory and strict output contract', async () => {
+  let capturedPrompt = ''
+  const pageEvidence = Array.from({ length: 95 }, (_, index) => ({
+    title: `页面 ${index + 1}`,
+    url: `https://example.com/page-${index + 1}`,
+    content: `页面 ${index + 1} 的公开功能说明`,
+    features: [{ name: `功能 ${index + 1}` }]
+  }))
+  const sitemapOnlyPages = Array.from({ length: 300 }, (_, index) => ({
+    title: `Sitemap 独有页 ${index + 1}`,
+    url: `https://example.com/sitemap-only-${index + 1}`
+  }))
+  const completeReport = [
+    '# 示例产品完整流程框架',
+    '## 零、产品定位与分析边界',
+    '示例产品面向公开网站访客，分析范围为本次采集到的页面和导航证据。',
+    '## 一、产品整体信息架构',
+    '### 1.1 导航结构',
+    '公开导航包含产品、解决方案和帮助栏目。',
+    '### 1.2 功能模块划分',
+    '| 模块 | 目的 | 置信度 |\n|---|---|---|\n| 创建工具 | 完成内容创建 | full |',
+    '### 1.3 完整页面清单与站点地图',
+    '| 页面 | URL | 层级 | 目的 | 置信度 |\n|---|---|---|---|---|',
+    ...pageEvidence.map((page) => `| ${page.title} | ${page.url} | L2 | 公开功能页 | full |`),
+    ...sitemapOnlyPages.map((page) => `| ${page.title} | ${page.url} | L2 | 待继续抓取 | partial |`),
+    '## 二、用户角色与使用场景',
+    '| 角色 | 目标 | 场景 |\n|---|---|---|\n| 内容创建者 | 完成创建任务 | 从官网进入工具 |',
+    '## 三、完整用户旅程',
+    '### 主路径',
+    '进入工具 → 配置内容 → 预览 → 完成。',
+    '### 分支路径',
+    '选择模板 → 修改模板 → 回到预览。',
+    '### 异常路径',
+    '生成失败 → 查看原因 → 重试。',
+    '## 四、关键决策点',
+    '| 决策 | 选项 | 依据 |\n|---|---|---|\n| 创建方式 | 模板/空白 | 任务效率 |',
+    '## 五、状态与异常',
+    '| 当前状态 | 目标状态 | 条件 |\n|---|---|---|\n| 编辑中 | 已完成 | 提交成功 |',
+    '## 六、跨功能关联',
+    '| 来源 | 去向 | 关系 |\n|---|---|---|\n| 模板 | 编辑器 | 数据共享 |',
+    '## 七、可复用 UX 洞察',
+    '保留任务上下文可降低跨页面操作成本。',
+    '## 八、证据与待补采',
+    '证据来源为页面清单中的公开 URL；登录后页面待补采。'
+  ].join('\n\n')
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async (payload = {}) => {
+        capturedPrompt = payload.userPrompt
+        return { content: completeReport }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python framework result')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '示例产品',
+        product_url: 'https://example.com',
+        evidence_quality: 'full',
+        evidence_count: pageEvidence.length,
+        sources: pageEvidence.map(({ title, url, content }) => ({ title, url, snippet: content })),
+        page_evidence: pageEvidence,
+        crawler_features: pageEvidence.map((page, index) => ({ name: `功能 ${index + 1}`, url: page.url })),
+        sitemap_navigation: [
+          ...pageEvidence.map((page, index) => ({ name: `栏目 ${index + 1}`, url: page.url, children: [] })),
+          ...sitemapOnlyPages.map((page) => ({ name: page.title, url: page.url, children: [] }))
+        ]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-complete-evidence-regression',
+    kind: 'framework',
+    productName: '示例产品',
+    productUrl: 'https://example.com'
+  })
+
+  assert.equal(response.ok, true)
+  assert.match(capturedPrompt, /完整站点页面清单|完整页面清单/)
+  assert.match(capturedPrompt, /不得只列核心页面/)
+  assert.match(capturedPrompt, /主路径/)
+  assert.match(capturedPrompt, /分支路径/)
+  assert.match(capturedPrompt, /异常路径/)
+  assert.match(capturedPrompt, /页面 95/)
+  assert.match(capturedPrompt, /https:\/\/example\.com\/page-95/)
+  assert.match(capturedPrompt, /https:\/\/example\.com\/sitemap-only-300/)
+  assert.ok(capturedPrompt.length < 120000)
+})
+
+test('framework quality gate repairs an incomplete model report once', async () => {
+  const prompts = []
+  const completeReport = [
+    '# 示例产品完整流程框架',
+    '## 零、产品定位与分析边界',
+    '示例产品定位和本次公开证据分析边界。',
+    '## 一、产品整体信息架构',
+    '### 完整页面清单与页面层级关系',
+    '| 页面 | URL | 目的 |\n|---|---|---|\n| 首页 | https://example.com | 产品入口 |',
+    '## 二、用户角色与使用场景',
+    '公开访客在官网了解产品并进入创建工具。',
+    '## 三、完整用户旅程',
+    '### 主路径',
+    '首页 → 创建 → 预览 → 完成。',
+    '### 分支路径',
+    '选择模板 → 修改 → 返回预览。',
+    '### 异常路径',
+    '提交失败 → 提示原因 → 重试。',
+    '## 四、关键决策点',
+    '用户需要在模板创建和空白创建之间选择。',
+    '## 五、状态与异常',
+    '编辑中 → 生成中 → 已完成或失败。',
+    '## 六、跨功能关联',
+    '模板数据会传入编辑器并继续复用。',
+    '## 七、可复用 UX 洞察',
+    '连续保留编辑上下文可减少重复操作。',
+    '## 八、证据与待补采',
+    '证据来源为官网首页，登录后页面待补采。'
+  ].join('\n\n')
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async (payload = {}) => {
+        prompts.push(payload.userPrompt)
+        return { content: prompts.length === 1 ? '# 完整框架\n\n## 核心页面\n\n仅列出首页。' : completeReport }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python framework result')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '示例产品',
+        product_url: 'https://example.com',
+        evidence_quality: 'full',
+        evidence_count: 1,
+        page_evidence: [{ title: '首页', url: 'https://example.com', content: '首页公开信息' }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-quality-repair-regression',
+    kind: 'framework',
+    productName: '示例产品',
+    productUrl: 'https://example.com'
+  })
+
+  assert.equal(prompts.length, 2)
+  assert.match(prompts[1], /质量门禁未通过/)
+  assert.match(prompts[1], /缺失章节/)
+  assert.ok(prompts[1].length <= 100000)
+  assert.match(response.markdown, /完整页面清单/)
+  assert.match(response.markdown, /分支路径/)
+  assert.match(response.markdown, /异常路径/)
+})
+
+test('framework quality gate rejects empty headings after one repair and keeps evidence report visible', async () => {
+  let providerCalls = 0
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({ enabled: true, provider: 'codex-cli', defaultModel: 'gpt-5.5', timeoutMs: 0 }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async () => {
+        providerCalls += 1
+        return {
+          content: '# 空报告\n\n## 产品定位\n\n## 信息架构\n\n## 完整页面清单\n\n## 用户角色\n\n## 用户旅程\n\n### 主路径\n\n### 分支路径\n\n### 异常路径\n\n## 决策点\n\n## 状态流转\n\n## 跨功能关联\n\n## 可复用 UX 洞察\n\n## 待补采'
+        }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python 证据报告\n\n## 已采集页面\n\n- 首页：https://example.com')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '示例产品',
+        product_url: 'https://example.com',
+        evidence_quality: 'full',
+        evidence_count: 1,
+        page_evidence: [{ title: '首页', url: 'https://example.com', content: '公开首页' }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-quality-failed-regression',
+    kind: 'framework',
+    productName: '示例产品',
+    productUrl: 'https://example.com'
+  })
+  const listed = await service.listRecords({ projectId: 'competitor-analysis-framework-quality-failed-regression' })
+
+  assert.equal(providerCalls, 2)
+  assert.equal(response.ok, false)
+  assert.equal(response.statusLabel, '质量未通过')
+  assert.match(response.summary, /质量门禁未通过/)
+  assert.match(response.markdown, /Python 证据报告/)
+  assert.equal(response.failureType, 'quality_failed')
+  assert.ok(response.qualityIssues.length > 0)
+  assert.equal(listed.records[0].failureType, 'quality_failed')
+  assert.deepEqual(listed.records[0].qualityIssues, response.qualityIssues)
+})
+
+test('framework quality gate treats a repair request exception as quality_failed', async () => {
+  let providerCalls = 0
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({ enabled: true, provider: 'codex-cli', defaultModel: 'gpt-5.5', timeoutMs: 0 }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async () => {
+        providerCalls += 1
+        if (providerCalls === 2) throw new Error('repair timeout')
+        return { content: '# 不完整框架\n\n## 核心页面\n\n只有首页。' }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python 证据报告\n\n- 首页：https://example.com')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '示例产品',
+        product_url: 'https://example.com',
+        evidence_quality: 'full',
+        evidence_count: 1,
+        page_evidence: [{ title: '首页', url: 'https://example.com', content: '公开首页' }],
+        sitemap_navigation: [{ name: '创建工具', url: 'https://example.com/create', children: [] }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-repair-exception-regression',
+    kind: 'framework',
+    productName: '示例产品',
+    productUrl: 'https://example.com'
+  })
+
+  assert.equal(providerCalls, 2)
+  assert.equal(response.ok, false)
+  assert.equal(response.failureType, 'quality_failed')
+  assert.match(response.summary, /二次修复调用失败|质量门禁未通过/)
+})
+
+test('python framework pipeline preserves broad page and sitemap evidence', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+import config
+from analyzer import analyze_product_framework, _build_page_evidence, _build_framework_material, _ensure_framework_modules_from_evidence, _rule_based_information_architecture, _analyze_user_journeys, _normalize_navigation_evidence
+from models import ProductFramework, FeatureModule
+from site_crawler import CrawlResult, PageData, infer_sitemap_navigation
+
+pages = {
+    f'https://example.com/page-{index}': {
+        'title': f'页面 {index}',
+        'content': f'页面 {index} 的公开功能说明',
+        'features': [{'name': f'功能 {index}'}],
+    }
+    for index in range(95)
+}
+sitemap = [
+    {'name': f'栏目 {index}', 'url': f'https://example.com/nav-{index}', 'children': []}
+    for index in range(60)
+]
+features = [
+    {'name': f'功能 {index}', 'url': f'https://example.com/tool-{index}', 'description': '公开工具入口'}
+    for index in range(25)
+]
+evidence = _build_page_evidence(pages)
+material = _build_framework_material(pages, [], [], sitemap)
+huge_sitemap = [
+    {
+        'name': ('超长栏目' + str(index)) * 80,
+        'url': f'https://example.com/huge-{index}',
+        'children': [{'name': ('超长子页' + str(child)) * 40, 'url': f'https://example.com/huge-{index}-{child}'} for child in range(20)],
+    }
+    for index in range(200)
+]
+budget_material = _build_framework_material(pages, [], [], huge_sitemap)
+framework = ProductFramework(product_name='示例产品', product_url='https://example.com')
+framework.feature_modules.append(FeatureModule(module_id='M01', name='已有模块', level='L1', purpose='已有模块'))
+_ensure_framework_modules_from_evidence(framework, [], sitemap, pages)
+rule_framework = ProductFramework(product_name='规则产品', product_url='https://example.com')
+_rule_based_information_architecture(rule_framework, [], features, sitemap, pages)
+_analyze_user_journeys(rule_framework, material)
+inferred_navigation = infer_sitemap_navigation(
+    [f'https://example.com/tools/tool-{index}' for index in range(150)],
+    'https://example.com',
+)
+normalized_navigation = _normalize_navigation_evidence(inferred_navigation)
+coverage_framework = analyze_product_framework('覆盖测试', 'https://example.com', {
+    'pages': {'https://example.com': {'title': '首页', 'content': '公开首页'}},
+    'features': [{'name': '创建工具', 'url': 'https://example.com/create'}],
+    'sitemap_navigation': inferred_navigation,
+    'sitemap_urls_count': 150,
+    'total_pages': 1,
+})
+crawl = CrawlResult('https://example.com')
+for index in range(125):
+    url = f'https://example.com/crawl-{index}'
+    crawl.pages[url] = PageData(url=url, title=f'爬取页面 {index}')
+crawl.sitemap_navigation = sitemap
+crawl.sitemap_urls = [f'https://example.com/sitemap-{index}' for index in range(150)]
+serialized = crawl.to_dict()
+print(json.dumps({
+    'max_pages': config.MAX_CRAWL_PAGES,
+    'max_depth': config.MAX_CRAWL_DEPTH,
+    'evidence_count': len(evidence),
+    'has_late_page': '页面 94' in material,
+    'has_late_sitemap': '栏目 59' in material,
+    'has_merged_sitemap_module': any(item.name == '栏目 59' for item in framework.feature_modules),
+    'material_length': len(material),
+    'budget_material_length': len(budget_material),
+    'budget_has_late_page': '页面 94' in budget_material,
+    'rule_navigation_count': len(rule_framework.navigation_tree),
+    'rule_journey_count': len(rule_framework.user_journeys),
+    'inferred_navigation_nodes': sum(1 + len(item.get('children', [])) for item in inferred_navigation),
+    'normalized_navigation_nodes': sum(1 + len(item.get('children', [])) for item in normalized_navigation),
+    'coverage_quality': coverage_framework.evidence_quality,
+    'coverage_gaps': coverage_framework.structured_data.get('data_gaps', []),
+    'serialized_pages': len(serialized['pages']),
+    'serialized_sitemap_navigation': len(serialized['sitemap_navigation']),
+    'serialized_sitemap_urls': len(serialized['sitemap_urls']),
+}))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const data = JSON.parse(result.stdout)
+  assert.ok(data.max_pages >= 120)
+  assert.ok(data.max_depth >= 4)
+  assert.equal(data.evidence_count, 95)
+  assert.equal(data.has_late_page, true)
+  assert.equal(data.has_late_sitemap, true)
+  assert.equal(data.has_merged_sitemap_module, false)
+  assert.ok(data.material_length <= 80000)
+  assert.ok(data.budget_material_length <= 80000)
+  assert.equal(data.budget_has_late_page, true)
+  assert.equal(data.rule_navigation_count, 60)
+  assert.equal(data.rule_journey_count, 20)
+  assert.equal(data.inferred_navigation_nodes, 151)
+  assert.equal(data.normalized_navigation_nodes, 151)
+  assert.equal(data.coverage_quality, 'partial')
+  assert.match(data.coverage_gaps.join('\n'), /Sitemap.*未抓取|站点地图.*待补采/)
+  assert.equal(data.serialized_pages, 125)
+  assert.equal(data.serialized_sitemap_navigation, 60)
+  assert.equal(data.serialized_sitemap_urls, 150)
+})
+
+test('python framework report preserves confidence evidence and branch paths', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+from models import ProductFramework, FeatureModule, UserJourney, UserJourneyStep
+from reporter import _render_chapter1_information_architecture, _render_chapter2_user_journeys
+
+framework = ProductFramework(product_name='示例产品', product_url='https://example.com')
+module = FeatureModule(module_id='M01', name='视频生成', level='L1', purpose='生成视频')
+module.structured_data = {'confidence': 'full', 'data_sources': ['官网导航']}
+framework.feature_modules.append(module)
+framework.page_evidence.append({'title': '创建页', 'url': 'https://example.com/create', 'content': '创建入口'})
+journey = UserJourney(feature_name='视频生成', entry_point='/create', normal_flow=['S1', 'S2'], exception_flows=['生成失败 → 重试'])
+journey.structured_data = {
+    'journey_id': 'J01',
+    'journey_confidence': 'partial',
+    'branch_flows': ['选择模板 → 模板编辑 → 回到预览'],
+}
+step = UserJourneyStep(step_id='S1', description='进入创建页')
+step.structured_data = {'confidence': 'full', 'evidence': '官网创建入口'}
+journey.steps.append(step)
+framework.user_journeys.append(journey)
+markdown = []
+_render_chapter1_information_architecture(markdown, framework)
+_render_chapter2_user_journeys(markdown, framework)
+serialized = framework.to_dict()
+print(json.dumps({
+    'module_structured': serialized['feature_modules'][0].get('structured_data'),
+    'journey_structured': serialized['user_journeys'][0].get('structured_data'),
+    'step_structured': serialized['user_journeys'][0]['steps'][0].get('structured_data'),
+    'markdown': '\\n'.join(markdown),
+}))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const data = JSON.parse(result.stdout)
+  assert.equal(data.module_structured.confidence, 'full')
+  assert.equal(data.journey_structured.journey_confidence, 'partial')
+  assert.equal(data.step_structured.evidence, '官网创建入口')
+  assert.match(data.markdown, /分支路径/)
+  assert.match(data.markdown, /选择模板 → 模板编辑 → 回到预览/)
+  assert.match(data.markdown, /完整页面清单/)
+  assert.match(data.markdown, /https:\/\/example\.com\/create/)
+})
+
 test('gap analysis requires source report content before any runner work', async () => {
   let pythonCalled = false
   const service = createCompetitorAnalysisEngineService({
@@ -921,6 +1328,113 @@ print(_judge_flow_feature_evidence('稿定设计', '生成视频', entries)['sta
 
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.stdout.trim(), 'exact')
+})
+
+test('python flow evidence normalizes generation aliases into stable feature intents', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+from analyzer import _normalize_feature_intent
+
+aliases = {
+    '生视频': _normalize_feature_intent('生视频'),
+    'AI 生成视频': _normalize_feature_intent('AI 生成视频'),
+    '文生视频': _normalize_feature_intent('文生视频'),
+    '图生视频': _normalize_feature_intent('图生视频'),
+    '图片转视频': _normalize_feature_intent('图片转视频'),
+    '生图': _normalize_feature_intent('生图'),
+    '文生图': _normalize_feature_intent('文生图'),
+}
+print(json.dumps(aliases, ensure_ascii=False))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const aliases = JSON.parse(result.stdout)
+  assert.equal(aliases['生视频'], 'video_generation')
+  assert.equal(aliases['AI 生成视频'], 'video_generation')
+  assert.equal(aliases['文生视频'], 'text_to_video')
+  assert.equal(aliases['图生视频'], 'image_to_video')
+  assert.equal(aliases['图片转视频'], 'image_to_video')
+  assert.equal(aliases['生图'], 'image_generation')
+  assert.equal(aliases['文生图'], 'text_to_image')
+})
+
+test('python flow evidence treats cross-page image generation and video workflow as analyzable composite evidence', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+from analyzer import _judge_flow_feature_evidence, extract_interaction_flow
+from models import SearchEntry
+
+entries = [
+    SearchEntry(
+        title='AI 一键生成图片',
+        url='https://example.com/ai-image',
+        snippet='输入文案即可智能生成商品图片。'
+    ),
+    SearchEntry(
+        title='在线视频剪辑与视频模板',
+        url='https://example.com/video-editor',
+        snippet='选择视频模板，在线剪辑后导出视频。'
+    )
+]
+evidence = _judge_flow_feature_evidence('示例产品', 'AI 生视频', entries)
+flow = extract_interaction_flow('示例产品', 'AI 生视频', entries)
+print(json.dumps({
+    'status': evidence['status'],
+    'normalized_feature': evidence['normalized_feature'],
+    'evidence_mode': evidence['evidence_mode'],
+    'confidence': evidence['confidence'],
+    'analysis_allowed': evidence['analysis_allowed'],
+    'reason': evidence['reason'],
+    'source_count': flow.evidence_count,
+    'step_count': len(flow.steps),
+    'flow_structured': flow.structured_data,
+}, ensure_ascii=False))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const data = JSON.parse(result.stdout)
+  assert.equal(data.status, 'similar')
+  assert.equal(data.normalized_feature, 'video_generation')
+  assert.equal(data.evidence_mode, 'composite')
+  assert.equal(data.confidence, 'high')
+  assert.equal(data.analysis_allowed, true)
+  assert.match(data.reason, /组合证据/)
+  assert.ok(data.source_count >= 2)
+  assert.ok(data.step_count >= 2)
+  assert.equal(data.flow_structured.analysis_allowed, true)
+  assert.equal(data.flow_structured.evidence_mode, 'composite')
+})
+
+test('python flow evidence does not upgrade a lone video template page to exact video generation', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+from analyzer import _judge_flow_feature_evidence
+from models import SearchEntry
+
+evidence = _judge_flow_feature_evidence('示例产品', '生成视频', [
+    SearchEntry(
+        title='视频模板素材库',
+        url='https://example.com/templates',
+        snippet='提供丰富的视频模板素材下载。'
+    )
+])
+print(json.dumps(evidence, ensure_ascii=False, default=str))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const data = JSON.parse(result.stdout)
+  assert.equal(data.status, 'similar')
+  assert.notEqual(data.evidence_mode, 'direct')
+  assert.equal(data.analysis_allowed, false)
 })
 
 test('python daily scan only marks today-dated entries as new features', () => {

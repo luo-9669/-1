@@ -609,24 +609,32 @@ def extract_interaction_flow(
     flow.evidence_reason = evidence["reason"]
     flow.similar_features = evidence["similar_features"]
     flow.evidence_quality = _evidence_quality_from_status(flow.evidence_status)
-    matched_entries = _matching_flow_entries(feature, entries) if flow.evidence_status == "exact" else []
+    analysis_allowed = bool(evidence.get("analysis_allowed", flow.evidence_status == "exact"))
+    matched_entries = _matching_flow_entries(feature, entries) if flow.evidence_status == "exact" else list(evidence.get("supporting_entries", []))
     if flow.evidence_status == "exact" and not matched_entries:
         matched_entries = entries[:5]
-    if flow.evidence_status == "similar":
+    if flow.evidence_status == "similar" and analysis_allowed:
+        flow.sources = _entry_sources(matched_entries, "composite")
+    elif flow.evidence_status == "similar":
         flow.sources = _similar_feature_sources(flow.similar_features)
     else:
         flow.sources = _entry_sources(matched_entries, "exact")
     flow.evidence_count = len(flow.sources)
-    flow.raw_data = _raw_entry_data(matched_entries) if flow.evidence_status == "exact" else _raw_similar_data(flow.similar_features)
+    flow.raw_data = _raw_entry_data(matched_entries) if analysis_allowed else _raw_similar_data(flow.similar_features)
     flow.structured_data = {
         "evidence_status": flow.evidence_status,
         "evidence_reason": flow.evidence_reason,
         "source_urls": flow.source_urls,
         "sources": flow.sources,
         "similar_features": flow.similar_features,
+        "normalized_feature": evidence.get("normalized_feature", "unknown"),
+        "evidence_mode": evidence.get("evidence_mode", "none"),
+        "evidence_confidence": evidence.get("confidence", "none"),
+        "analysis_allowed": analysis_allowed,
+        "capability_signals": evidence.get("capability_signals", []),
         "steps": [],
     }
-    if flow.evidence_status != "exact":
+    if not analysis_allowed:
         if flow.evidence_status == "similar":
             names = "、".join([item.get("name", "") for item in flow.similar_features[:5] if item.get("name")])
             flow.flow_description = f"未找到「{competitor_name}」明确提供「{feature}」功能的证据；仅发现相似功能线索：{names or '待补采'}。"
@@ -799,8 +807,9 @@ def extract_interaction_flow(
                 logger.error(f"解析交互流程失败: {e}")
     else:
         # 降级：简单整理
-        flow.flow_description = f"（LLM 不可用，以下为搜索结果原始信息）"
-        for i, entry in enumerate(entries[:5], 1):
+        prefix = f"{flow.evidence_reason} " if evidence.get("evidence_mode") == "composite" else ""
+        flow.flow_description = f"{prefix}（LLM 不可用，以下为证据原始信息）"
+        for i, entry in enumerate(matched_entries[:5] or entries[:5], 1):
             flow.steps.append(InteractionStep(
                 step_number=i,
                 description=entry.title,
@@ -817,6 +826,50 @@ def _normalize_evidence_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").lower()).strip()
 
 
+FEATURE_INTENT_PATTERNS = [
+    ("text_to_video", re.compile(r"(文生视频|文字(?:生成|转|变成)视频|文本(?:生成|转|变成)视频|text[ -]?to[ -]?video)", re.I)),
+    ("image_to_video", re.compile(r"(图生视频|图片(?:生成|转|变成|做成)视频|照片(?:生成|转|变成|做成)视频|image[ -]?to[ -]?video)", re.I)),
+    ("text_to_image", re.compile(r"(文生图|文字(?:生成|转)图片|文本(?:生成|转)图片|text[ -]?to[ -]?image)", re.I)),
+    ("image_to_image", re.compile(r"(图生图|图片(?:生成|转)图片|image[ -]?to[ -]?image)", re.I)),
+    ("video_generation", re.compile(r"(生视频|生成视频|视频生成|ai.{0,4}视频(?:生成|制作)|视频制作)", re.I)),
+    ("image_generation", re.compile(r"(生图|生成图片|图片生成|生成图像|图像生成|ai绘图|智能绘图)", re.I)),
+]
+
+
+def _normalize_feature_intent(feature: str) -> str:
+    """把用户侧近义功能词归一为稳定意图，不绑定具体竞品文案。"""
+    text = _normalize_evidence_text(feature)
+    for intent, pattern in FEATURE_INTENT_PATTERNS:
+        if pattern.search(text):
+            return intent
+    return "unknown"
+
+
+def _evidence_capability_signals(text: str) -> set:
+    evidence_text = _normalize_evidence_text(text)
+    signals = set()
+    if not evidence_text:
+        return signals
+
+    if FEATURE_INTENT_PATTERNS[0][1].search(evidence_text):
+        signals.update({"text_to_video", "video_generation_direct"})
+    if FEATURE_INTENT_PATTERNS[1][1].search(evidence_text):
+        signals.update({"image_to_video", "video_generation_direct"})
+    if FEATURE_INTENT_PATTERNS[2][1].search(evidence_text):
+        signals.update({"text_to_image", "image_generation"})
+    if FEATURE_INTENT_PATTERNS[3][1].search(evidence_text):
+        signals.update({"image_to_image", "image_generation"})
+    if re.search(r"(生成.{0,8}视频|视频.{0,8}生成|一键成片|自动成片|智能成片)", evidence_text, re.I):
+        signals.add("video_generation_direct")
+    if re.search(r"(生成.{0,8}(图片|图像|图)|图片.{0,8}生成|图像.{0,8}生成|ai绘图|智能绘图)", evidence_text, re.I):
+        signals.add("image_generation")
+    if re.search(r"(视频剪辑|视频在线剪辑|视频编辑|在线编辑.{0,4}视频|剪辑.{0,4}视频)", evidence_text, re.I):
+        signals.add("video_editing")
+    if re.search(r"(视频模板|模板.{0,6}视频)", evidence_text, re.I):
+        signals.add("video_template")
+    return signals
+
+
 def _feature_tokens(feature: str) -> List[str]:
     tokens = re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]{2,}", str(feature or "").lower())
     return [token for token in tokens if token not in {"ai", "the", "and", "功能"}]
@@ -829,19 +882,17 @@ def _has_semantic_feature_evidence(feature: str, text: str) -> bool:
     if not feature_text or not evidence_text:
         return False
 
-    if "视频" in feature_text and ("生成" in feature_text or "制作" in feature_text):
-        return bool(re.search(
-            r"(生成.{0,8}视频|视频.{0,8}生成|制作.{0,8}视频|视频.{0,8}制作|"
-            r"视频剪辑|视频在线剪辑|视频模板|图片做成视频|生成图片视频)",
-            evidence_text,
-        ))
-
-    if ("图片" in feature_text or "图像" in feature_text) and ("生成" in feature_text or "绘" in feature_text):
-        return bool(re.search(
-            r"(生成.{0,8}(图片|图像|图)|图片.{0,8}生成|图像.{0,8}生成|"
-            r"文生图|图生图|ai绘图|智能绘图)",
-            evidence_text,
-        ))
+    intent = _normalize_feature_intent(feature_text)
+    signals = _evidence_capability_signals(evidence_text)
+    if intent == "video_generation":
+        return "video_generation_direct" in signals
+    if intent == "text_to_video":
+        return "text_to_video" in signals
+    if intent == "image_to_video":
+        return "image_to_video" in signals
+    if intent in {"image_generation", "text_to_image", "image_to_image"}:
+        expected = intent if intent != "image_generation" else "image_generation"
+        return expected in signals
 
     if any(word in feature_text for word in ["数字人", "avatar", "头像", "形象"]):
         return bool(re.search(r"(数字人|虚拟人|avatar|头像|形象|分身)", evidence_text, re.I))
@@ -936,15 +987,19 @@ def _judge_flow_feature_evidence(competitor_name: str, feature: str, entries: Li
     没有明确证据时只能返回 not_found/similar，不能继续生成流程步骤。
     """
     feature_text = _normalize_evidence_text(feature)
+    normalized_feature = _normalize_feature_intent(feature)
     tokens = _feature_tokens(feature)
     exact_entries = []
     similar_features = []
+    signal_entries = {}
     ai_pattern = re.compile(r"(ai|aigc|智能|生成|设计|绘图|图片|视频|素材|文案|模板|头像|形象|数字人)", re.I)
 
     for entry in entries:
         text = _normalize_evidence_text(_entry_text(entry))
         if not text:
             continue
+        for signal in _evidence_capability_signals(text):
+            signal_entries.setdefault(signal, []).append(entry)
         has_exact_phrase = feature_text and feature_text in text
         has_all_tokens = bool(tokens) and all(token in text for token in tokens)
         has_semantic_evidence = _has_semantic_feature_evidence(feature, text)
@@ -964,17 +1019,66 @@ def _judge_flow_feature_evidence(competitor_name: str, feature: str, entries: Li
             "status": "exact",
             "reason": f"发现 {len(exact_entries)} 条结果明确包含目标功能「{feature}」。",
             "similar_features": [],
+            "normalized_feature": normalized_feature,
+            "evidence_mode": "direct",
+            "confidence": "high",
+            "analysis_allowed": True,
+            "supporting_entries": exact_entries,
+            "capability_signals": sorted(signal_entries.keys()),
+        }
+
+    composite_video_evidence = (
+        normalized_feature == "video_generation" and
+        "image_generation" in signal_entries and
+        ({"video_editing", "video_template"} & set(signal_entries.keys()))
+    )
+    if composite_video_evidence:
+        supporting_entries = []
+        seen = set()
+        for signal in ["image_generation", "video_editing", "video_template"]:
+            for entry in signal_entries.get(signal, []):
+                key = getattr(entry, "url", "") or getattr(entry, "title", "")
+                if key and key not in seen:
+                    seen.add(key)
+                    supporting_entries.append(entry)
+        composite_features = [{
+            "name": getattr(entry, "title", "")[:80],
+            "url": getattr(entry, "url", ""),
+            "description": (getattr(entry, "snippet", "") or getattr(entry, "content", ""))[:180],
+        } for entry in supporting_entries[:8]]
+        return {
+            "status": "similar",
+            "reason": f"发现支持「{feature}」的高置信组合证据：AI 图片生成能力与视频编辑/视频模板链路同时存在；可继续分析，但目标功能的直接官方声明仍待补采。",
+            "similar_features": composite_features,
+            "normalized_feature": normalized_feature,
+            "evidence_mode": "composite",
+            "confidence": "high",
+            "analysis_allowed": True,
+            "supporting_entries": supporting_entries,
+            "capability_signals": sorted(signal_entries.keys()),
         }
     if similar_features:
         return {
             "status": "similar",
             "reason": f"未发现目标功能「{feature}」的明确证据，仅发现 {len(similar_features)} 条相似 AI/设计能力线索。",
             "similar_features": similar_features[:8],
+            "normalized_feature": normalized_feature,
+            "evidence_mode": "related",
+            "confidence": "medium",
+            "analysis_allowed": False,
+            "supporting_entries": [],
+            "capability_signals": sorted(signal_entries.keys()),
         }
     return {
         "status": "not_found",
         "reason": f"搜索结果未包含目标功能「{feature}」的明确证据。",
         "similar_features": [],
+        "normalized_feature": normalized_feature,
+        "evidence_mode": "none",
+        "confidence": "none",
+        "analysis_allowed": False,
+        "supporting_entries": [],
+        "capability_signals": sorted(signal_entries.keys()),
     }
 
 
@@ -1020,7 +1124,8 @@ def analyze_product_framework(
         crawler_features = getattr(crawled_pages, "features", []) or pages_data.get("features", [])
         sitemap_navigation = getattr(crawled_pages, "sitemap_navigation", []) or pages_data.get("sitemap_navigation", [])
         framework.total_pages_crawled = getattr(crawled_pages, "total_pages", 0)
-        framework.source_urls = list(pages_dict.keys())[:50]
+        framework.source_urls = list(pages_dict.keys())[:180]
+        total_sitemap_urls = len(getattr(crawled_pages, "sitemap_urls", []) or [])
     elif isinstance(crawled_pages, dict):
         pages_data = crawled_pages
         nav_tree = crawled_pages.get("navigation_tree", [])
@@ -1028,13 +1133,15 @@ def analyze_product_framework(
         crawler_features = crawled_pages.get("features", []) or crawled_pages.get("crawler_features", [])
         sitemap_navigation = crawled_pages.get("sitemap_navigation", [])
         framework.total_pages_crawled = crawled_pages.get("total_pages", 0)
-        framework.source_urls = list(pages_dict.keys())[:50] if isinstance(pages_dict, dict) else []
+        framework.source_urls = list(pages_dict.keys())[:180] if isinstance(pages_dict, dict) else []
+        total_sitemap_urls = int(crawled_pages.get("sitemap_urls_count", len(crawled_pages.get("sitemap_urls", []))) or 0)
     else:
         pages_data = {}
         nav_tree = []
         pages_dict = {}
         crawler_features = []
         sitemap_navigation = []
+        total_sitemap_urls = 0
 
     framework.crawler_features = _normalize_feature_evidence(crawler_features)
     framework.sitemap_navigation = _normalize_navigation_evidence(sitemap_navigation)
@@ -1044,7 +1151,32 @@ def analyze_product_framework(
         len(framework.sitemap_navigation) +
         len(framework.page_evidence)
     )
-    framework.evidence_quality = "full" if framework.page_evidence and (framework.crawler_features or framework.sitemap_navigation) else (
+    coverage_data_gaps = []
+    page_urls = {str(item.get("url", "")).rstrip("/") for item in framework.page_evidence if item.get("url")}
+    sitemap_evidence_urls = set()
+
+    def collect_navigation_urls(items):
+        for item in items if isinstance(items, list) else []:
+            url = str(item.get("url", "") or "").rstrip("/")
+            if url:
+                sitemap_evidence_urls.add(url)
+            collect_navigation_urls(item.get("children", []))
+
+    collect_navigation_urls(framework.sitemap_navigation)
+    sitemap_only_urls = sorted(url for url in sitemap_evidence_urls if url not in page_urls)
+    if framework.total_pages_crawled > len(framework.page_evidence):
+        coverage_data_gaps.append(
+            f"已爬取 {framework.total_pages_crawled} 个页面，但仅保留 {len(framework.page_evidence)} 个页面证据，剩余页面待补采"
+        )
+    if total_sitemap_urls > 200:
+        coverage_data_gaps.append(
+            f"Sitemap 发现 {total_sitemap_urls} 个 URL，本轮仅分析优先级最高的 200 个候选，其余待补采"
+        )
+    if sitemap_only_urls:
+        coverage_data_gaps.append(
+            f"Sitemap/站点地图中有 {len(sitemap_only_urls)} 个页面尚未抓取正文，已保留 URL 清单并标记待补采"
+        )
+    framework.evidence_quality = "full" if framework.page_evidence and (framework.crawler_features or framework.sitemap_navigation) and not coverage_data_gaps else (
         "partial" if framework.evidence_count else "none"
     )
     framework.sources = _framework_sources(framework.page_evidence, framework.source_urls)
@@ -1054,6 +1186,8 @@ def analyze_product_framework(
         "sitemap_navigation": framework.sitemap_navigation,
         "page_evidence": framework.page_evidence,
         "total_pages_crawled": framework.total_pages_crawled,
+        "total_sitemap_urls": total_sitemap_urls,
+        "coverage_data_gaps": coverage_data_gaps,
     }
 
     # 构建分析素材
@@ -1107,7 +1241,7 @@ def analyze_product_framework(
 
     # 汇总所有步骤的 data_gaps
     all_data_gaps = []
-    for gap_key in ["info_arch_data_gaps", "journey_data_gaps", "decision_data_gaps",
+    for gap_key in ["coverage_data_gaps", "info_arch_data_gaps", "journey_data_gaps", "decision_data_gaps",
                      "exception_data_gaps", "state_data_gaps", "cross_function_data_gaps"]:
         gaps = framework.structured_data.get(gap_key, [])
         if isinstance(gaps, list):
@@ -1179,7 +1313,7 @@ def _normalize_feature_evidence(features) -> List[Dict]:
             "page_count": data.get("page_count", 1),
             "related_urls": data.get("related_urls", [])[:10] if isinstance(data.get("related_urls", []), list) else [],
         })
-    return normalized[:80]
+    return normalized[:200]
 
 
 def _normalize_navigation_evidence(nav_items) -> List[Dict]:
@@ -1187,11 +1321,11 @@ def _normalize_navigation_evidence(nav_items) -> List[Dict]:
     if not isinstance(nav_items, list):
         return []
     normalized = []
-    for item in nav_items[:80]:
+    for item in nav_items[:200]:
         if not isinstance(item, dict):
             continue
         children = []
-        for child in item.get("children", [])[:12] if isinstance(item.get("children", []), list) else []:
+        for child in item.get("children", [])[:200] if isinstance(item.get("children", []), list) else []:
             if isinstance(child, dict):
                 children.append({
                     "name": str(child.get("name", "")).strip(),
@@ -1210,7 +1344,7 @@ def _normalize_navigation_evidence(nav_items) -> List[Dict]:
     return [item for item in normalized if item["name"]]
 
 
-def _build_page_evidence(pages_dict, limit: int = 30) -> List[Dict]:
+def _build_page_evidence(pages_dict, limit: int = 180) -> List[Dict]:
     """抽取页面级证据，供 JSON 和后端模型继续使用。"""
     evidence = []
     if not isinstance(pages_dict, dict):
@@ -1220,8 +1354,8 @@ def _build_page_evidence(pages_dict, limit: int = 30) -> List[Dict]:
         evidence.append({
             "url": str(_page_field(page, "url", url) or url),
             "title": str(_page_field(page, "title", "") or ""),
-            "content": str(_page_field(page, "content", "") or "")[:800],
-            "features": features[:8],
+            "content": str(_page_field(page, "content", "") or "")[:1200],
+            "features": features[:12],
         })
     return evidence
 
@@ -1229,7 +1363,7 @@ def _build_page_evidence(pages_dict, limit: int = 30) -> List[Dict]:
 def _framework_sources(page_evidence: List[Dict], source_urls: List[str]) -> List[Dict]:
     sources = []
     seen = set()
-    for page in page_evidence[:30]:
+    for page in page_evidence[:180]:
         url = str(page.get("url", "") or "").strip()
         title = str(page.get("title", "") or "").strip()
         key = url or title
@@ -1242,26 +1376,26 @@ def _framework_sources(page_evidence: List[Dict], source_urls: List[str]) -> Lis
             "type": "page",
             "snippet": str(page.get("content", "") or "")[:240],
         })
-    for url in source_urls[:30]:
+    for url in source_urls[:180]:
         text = str(url or "").strip()
         if text and text not in seen:
             seen.add(text)
             sources.append({"title": "", "url": text, "type": "page", "snippet": ""})
-    return sources[:50]
+    return sources[:200]
 
 
 def _framework_raw_data(page_evidence: List[Dict], crawler_features: List[Dict], sitemap_navigation: List[Dict]) -> str:
     parts = []
     if crawler_features:
-        names = "、".join([item.get("name", "") for item in crawler_features[:20] if item.get("name")])
+        names = "、".join([item.get("name", "") for item in crawler_features[:100] if item.get("name")])
         if names:
             parts.append(f"爬虫识别功能：{names}")
     if sitemap_navigation:
-        names = "、".join([item.get("name", "") for item in sitemap_navigation[:20] if item.get("name")])
+        names = "、".join([item.get("name", "") for item in sitemap_navigation[:100] if item.get("name")])
         if names:
             parts.append(f"导航证据：{names}")
-    for page in page_evidence[:10]:
-        parts.append(f"{page.get('title', '')}\n{page.get('url', '')}\n{str(page.get('content', '') or '')[:500]}".strip())
+    for page in page_evidence[:40]:
+        parts.append(f"{page.get('title', '')}\n{page.get('url', '')}\n{str(page.get('content', '') or '')[:800]}".strip())
     return "\n---\n".join([part for part in parts if part])
 
 
@@ -1270,6 +1404,13 @@ def _build_framework_material(pages_dict, nav_tree, crawler_features=None, sitem
     material_parts = []
     crawler_features = crawler_features or []
     sitemap_navigation = sitemap_navigation or []
+    page_items = list(pages_dict.items())[:180] if isinstance(pages_dict, dict) else []
+
+    # 页面索引放在最前面，确保后续导航或正文过长时仍保留完整可见页面名称和 URL。
+    material_parts.append("=== 完整页面清单 ===")
+    for i, (url, page) in enumerate(page_items):
+        title = _page_field(page, "title", "")
+        material_parts.append(f"- P{i+1:03d} {title} ({url})")
 
     # 导航结构
     if nav_tree:
@@ -1283,30 +1424,29 @@ def _build_framework_material(pages_dict, nav_tree, crawler_features=None, sitem
 
     if sitemap_navigation:
         material_parts.append("\n=== Sitemap 推断导航/功能入口 ===")
-        for item in sitemap_navigation[:30]:
+        for item in sitemap_navigation[:200]:
             material_parts.append(f"- {item.get('name', '')} ({item.get('url', '')})")
-            for child in item.get("children", [])[:8]:
+            for child in item.get("children", [])[:200]:
                 material_parts.append(f"  - {child.get('name', '')} ({child.get('url', '')})")
 
     if crawler_features:
         material_parts.append("\n=== 爬虫识别功能入口 ===")
-        for feature in crawler_features[:40]:
+        for feature in crawler_features[:120]:
             detail = feature.get("description", "")
             url = feature.get("url", "")
             material_parts.append(f"- {feature.get('name', '')}: {detail} {url}".strip())
 
-    # 页面内容摘要
-    material_parts.append("\n=== 页面内容摘要 ===")
-    if isinstance(pages_dict, dict):
-        for i, (url, page) in enumerate(list(pages_dict.items())[:30]):
+    if page_items:
+        material_parts.append("\n=== 重点页面内容摘要 ===")
+        for i, (url, page) in enumerate(page_items[:30]):
             if hasattr(page, "title"):
                 title = page.title
-                content = page.content[:1500] if page.content else ""
-                features = [f.get("name", "") for f in getattr(page, "features", [])[:5]]
+                content = page.content[:1200] if page.content else ""
+                features = [f.get("name", "") for f in getattr(page, "features", [])[:10]]
             elif isinstance(page, dict):
                 title = page.get("title", "")
-                content = page.get("content", "")[:1500]
-                features = [f.get("name", "") for f in page.get("features", [])[:5]]
+                content = page.get("content", "")[:1200]
+                features = [f.get("name", "") for f in page.get("features", [])[:10]]
             else:
                 continue
 
@@ -1316,7 +1456,10 @@ def _build_framework_material(pages_dict, nav_tree, crawler_features=None, sitem
             part += f"内容:\n{content}\n"
             material_parts.append(part)
 
-    return "\n".join(material_parts)
+    material = "\n".join(material_parts)
+    if len(material) > 80000:
+        return material[:79900] + "\n[材料预算已达 80000 字符，完整页面索引已优先保留，更多正文待补采]"
+    return material
 
 
 def _analyze_information_architecture(
@@ -1455,19 +1598,19 @@ def _ensure_page_hierarchy(framework):
     if framework.page_hierarchy and "LLM 不可用" not in framework.page_hierarchy:
         return
     lines = [framework.product_name or "产品"]
-    for node in framework.navigation_tree[:12]:
+    for node in framework.navigation_tree[:180]:
         lines.append(f"├─ {node.name}")
-        for child in node.children[:8]:
+        for child in node.children[:200]:
             lines.append(f"│  ├─ {child.name}")
     if len(lines) == 1:
-        for module in framework.feature_modules[:12]:
+        for module in framework.feature_modules[:120]:
             lines.append(f"├─ {module.name}")
     framework.page_hierarchy = "\n".join(lines)
 
 
 def _ensure_framework_modules_from_evidence(framework, crawler_features, sitemap_navigation, pages_dict):
-    """确保已采集到的功能证据一定进入框架模块。"""
-    for feature in crawler_features[:40]:
+    """只把明确的功能证据并入模块；页面与 sitemap 栏目保留在独立页面清单。"""
+    for feature in crawler_features[:120]:
         _add_feature_module_if_missing(
             framework,
             feature.get("name", ""),
@@ -1476,14 +1619,10 @@ def _ensure_framework_modules_from_evidence(framework, crawler_features, sitemap
             "L1-爬虫识别功能",
         )
     if not framework.feature_modules:
-        for node in sitemap_navigation[:20]:
-            _add_feature_module_if_missing(framework, node.get("name", ""), node.get("url", ""), "基于 sitemap 推断的产品栏目", "L1-Sitemap 栏目")
-            for child in node.get("children", [])[:5]:
-                _add_feature_module_if_missing(framework, child.get("name", ""), child.get("url", ""), "基于 sitemap 推断的功能入口", "L2-Sitemap 功能")
-    if not framework.feature_modules and isinstance(pages_dict, dict):
-        for url, page in list(pages_dict.items())[:20]:
-            title = _page_field(page, "title", "")
-            _add_feature_module_if_missing(framework, title, url, "基于页面标题推断的功能入口", "L2-页面入口")
+        gaps = framework.structured_data.setdefault("info_arch_data_gaps", [])
+        message = "已获得页面/站点地图证据，但没有足够证据把页面判定为产品功能模块"
+        if message not in gaps:
+            gaps.append(message)
     _ensure_page_hierarchy(framework)
 
 
@@ -1498,7 +1637,7 @@ def _rule_based_information_architecture(framework, nav_tree, crawler_features=N
         _append_navigation_node(framework, item, "page")
 
     if not framework.navigation_tree:
-        for item in sitemap_navigation[:20]:
+        for item in sitemap_navigation[:120]:
             _append_navigation_node(framework, item, "section")
 
     # 生成简单功能模块
@@ -1513,10 +1652,10 @@ def _analyze_user_journeys(framework, material):
     from models import UserJourney, UserJourneyStep
 
     # 获取功能模块名称
-    feature_names = [m.name for m in framework.feature_modules[:10]]
+    feature_names = [m.name for m in framework.feature_modules[:20]]
 
     if config.LLM_API_KEY and feature_names:
-        system_prompt = """你是一位 UX 研究专家，擅长用户旅程地图绘制。请根据提供的产品信息，为每个核心功能提取完整的用户旅程。
+        system_prompt = """你是一位 UX 研究专家，擅长用户旅程地图绘制。请根据提供的产品信息，为每个已识别核心功能提取完整的用户旅程。
 
 只基于提供的证据材料分析，无证据的信息标注 confidence 为 inferred。
 
@@ -1529,8 +1668,9 @@ def _analyze_user_journeys(framework, material):
    confidence: "full"（有直接证据）, "partial"（部分推断）, "inferred"（无证据推断）
    evidence: 说明该步骤结论基于什么证据
 5. normal_flow: 正常流程步骤 ID 列表
-6. exception_flows: 异常流程描述列表
-7. journey_confidence: 整体旅程的置信度（full/partial/inferred）
+6. branch_flows: 分支路径描述列表，说明触发条件和回到主路径的位置
+7. exception_flows: 异常路径描述列表，说明系统响应和恢复路径
+8. journey_confidence: 整体旅程的置信度（full/partial/inferred）
 
 请以 JSON 格式返回：
 {
@@ -1552,6 +1692,7 @@ def _analyze_user_journeys(framework, material):
                 }
             ],
             "normal_flow": ["S1", "S2"],
+            "branch_flows": ["分支路径1：触发条件 → 分支步骤 → 回到主路径"],
             "exception_flows": ["异常流1描述"],
             "journey_confidence": "overall journey confidence"
         }
@@ -1560,7 +1701,7 @@ def _analyze_user_journeys(framework, material):
 }
 只返回 JSON。"""
 
-        prompt = f"请为以下核心功能提取用户旅程：\n功能列表: {', '.join(feature_names)}\n\n产品数据:\n{material[:6000]}"
+        prompt = f"请为以下核心功能提取用户旅程，并逐项区分主路径、分支路径、异常路径：\n功能列表: {', '.join(feature_names)}\n\n产品数据:\n{material[:16000]}"
 
         response = _call_llm(prompt, system_prompt)
         if response:
@@ -1578,6 +1719,7 @@ def _analyze_user_journeys(framework, material):
                         journey.structured_data = {
                             "journey_id": journey_data.get("journey_id", ""),
                             "journey_confidence": journey_data.get("journey_confidence", "inferred"),
+                            "branch_flows": journey_data.get("branch_flows", []),
                         }
                         for step_data in journey_data.get("steps", []):
                             step = UserJourneyStep(
@@ -1603,7 +1745,7 @@ def _analyze_user_journeys(framework, material):
                 logger.error(f"解析用户旅程失败: {e}")
 
     # 降级方案
-    for module in framework.feature_modules[:5]:
+    for module in framework.feature_modules[:20]:
         journey = UserJourney(
             feature_name=module.name,
             entry_point=module.entry_path,
@@ -1645,7 +1787,7 @@ def _analyze_decision_points(framework, material):
 }
 只返回 JSON。"""
 
-        prompt = f"请识别以下产品中的关键决策点：\n\n{material[:6000]}"
+        prompt = f"请识别以下产品中的关键决策点：\n\n{material[:16000]}"
 
         response = _call_llm(prompt, system_prompt)
         if response:
@@ -1717,7 +1859,7 @@ def _analyze_exception_flows(framework, material):
 }
 只返回 JSON。"""
 
-        prompt = f"请分析以下产品中可能的异常场景和处理方式：\n\n{material[:6000]}"
+        prompt = f"请分析以下产品中可能的异常场景和处理方式：\n\n{material[:16000]}"
 
         response = _call_llm(prompt, system_prompt)
         if response:
@@ -1786,7 +1928,7 @@ def _analyze_state_transitions(framework, material):
 }
 只返回 JSON。"""
 
-        prompt = f"请分析以下产品中核心实体的状态流转：\n\n{material[:6000]}"
+        prompt = f"请分析以下产品中核心实体的状态流转：\n\n{material[:16000]}"
 
         response = _call_llm(prompt, system_prompt)
         if response:
@@ -1829,7 +1971,7 @@ def _analyze_cross_function_links(framework, material):
     """步骤6: 跨功能关联分析"""
     from models import CrossFunctionLink
 
-    feature_names = [m.name for m in framework.feature_modules]
+    feature_names = [m.name for m in framework.feature_modules[:40]]
 
     if config.LLM_API_KEY and feature_names:
         system_prompt = """你是一位产品架构师，擅长分析功能间的关联关系。请根据产品信息，分析各功能模块之间的关联。
@@ -1860,7 +2002,7 @@ def _analyze_cross_function_links(framework, material):
 }
 只返回 JSON。"""
 
-        prompt = f"请分析以下功能模块之间的关联关系：\n功能列表: {', '.join(feature_names)}\n\n产品数据:\n{material[:5000]}"
+        prompt = f"请分析以下功能模块之间的关联关系：\n功能列表: {', '.join(feature_names)}\n\n产品数据:\n{material[:16000]}"
 
         response = _call_llm(prompt, system_prompt)
         if response:

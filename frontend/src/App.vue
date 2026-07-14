@@ -1383,6 +1383,7 @@
           @switch-to-factory-from-knowledge-demo="switchToFactoryFromKnowledgeDemo"
           @trigger-knowledge-prototype-hotspot="triggerKnowledgePrototypeHotspot"
           @open-knowledge-entry-detail="openKnowledgeEntryDetail"
+          @delete-knowledge-entry="deleteKnowledgeEntry"
           @download-markdown="downloadMarkdown"
         />
         <template v-else-if="materialsTab !== 'requirements'">
@@ -2528,7 +2529,7 @@
       <span v-if="globalUploadNotice.status === 'loading'" class="global-upload-notice-spinner" aria-hidden="true"></span>
       <span v-else class="global-upload-notice-icon" aria-hidden="true">{{ globalUploadNotice.status === 'success' ? '✓' : '!' }}</span>
       <span>{{ globalUploadNotice.message }}</span>
-      <button v-if="globalUploadNotice.status !== 'loading'" type="button" aria-label="关闭上传提示" @click="hideGlobalUploadNotice">×</button>
+      <button v-if="globalUploadNotice.status !== 'loading' && !globalUploadNotice.transient" type="button" aria-label="关闭上传提示" @click="hideGlobalUploadNotice">×</button>
     </div>
   </div>
 </template>
@@ -3150,7 +3151,8 @@ const projectAssetDeleteConfirm = reactive({
 let projectAssetDeleteResolve = null
 const globalUploadNotice = reactive({
   status: 'idle',
-  message: ''
+  message: '',
+  transient: false
 })
 const selectedProjectDetailId = ref('')
 const pmForm = reactive({ skill: 'PRD 生成', answer: '' })
@@ -9334,23 +9336,30 @@ function hideGlobalUploadNotice() {
   }
   globalUploadNotice.status = 'idle'
   globalUploadNotice.message = ''
+  globalUploadNotice.transient = false
 }
 
-function showGlobalUploadNotice(status, message) {
+function showGlobalUploadNotice(status, message, options = {}) {
   if (globalUploadNoticeTimer) {
     clearTimeout(globalUploadNoticeTimer)
     globalUploadNoticeTimer = null
   }
+  const displayMessage = message || (status === 'loading' ? '正在上传文件...' : status === 'success' ? '文件上传完成' : '文件上传失败')
   globalUploadNotice.status = status
-  globalUploadNotice.message = message || (status === 'loading' ? '正在上传文件...' : status === 'success' ? '文件上传完成' : '文件上传失败')
-  const timeout = GLOBAL_UPLOAD_NOTICE_AUTO_HIDE_MS[status]
+  globalUploadNotice.message = displayMessage
+  globalUploadNotice.transient = Boolean(options.transient)
+  const timeout = Number(options.autoHideMs) || GLOBAL_UPLOAD_NOTICE_AUTO_HIDE_MS[status]
   if (timeout) {
     globalUploadNoticeTimer = window.setTimeout(() => {
-      if (globalUploadNotice.status === status && globalUploadNotice.message === message) {
+      if (globalUploadNotice.status === status && globalUploadNotice.message === displayMessage) {
         hideGlobalUploadNotice()
       }
     }, timeout)
   }
+}
+
+function showTransientGlobalNotice(status, message, autoHideMs = 1000) {
+  showGlobalUploadNotice(status, message, { autoHideMs, transient: true })
 }
 
 function clearStatusNotice(statusRef) {
@@ -10117,6 +10126,28 @@ async function deleteRequirementDocument(item = {}) {
   store.splice(0, store.length, ...next)
   await refreshMaterialsFromBackend('requirements')
   setStatus(requirementStatus, 'success', '已删除需求文档')
+}
+
+async function deleteKnowledgeEntry(entry = {}) {
+  const materialId = entry.raw?.id || entry.materialId || entry.id
+  if (!materialId) {
+    setStatus(knowledgeStatus, 'failed', '知识条目缺少可删除的材料 ID')
+    return
+  }
+  const confirmed = await confirmProjectAssetDelete({
+    title: '删除知识条目',
+    itemName: entry.title || '未命名知识条目',
+    message: '删除后会从当前项目的知识库列表移除，相关框架引用会在下次刷新后同步更新。'
+  })
+  if (!confirmed) return
+  const result = await api.workspace.deleteMaterial(state.apiConfig, materialId)
+  const data = applyApiResult(knowledgeStatus, result, '知识条目删除失败')
+  if (!data) return
+  const store = materialStore('knowledge')
+  const next = deleteMaterialItemsById(store, [materialId])
+  store.splice(0, store.length, ...next)
+  await refreshMaterialsFromBackend('knowledge')
+  setStatus(knowledgeStatus, 'success', '已删除知识条目')
 }
 
 function toggleMaterialBatchMode() {
@@ -12488,7 +12519,8 @@ function upsertWorkspaceAssetFromImport(asset) {
 
 async function submitProjectPackageImportAndClose() {
   if (!projectPackageImportForm.fileName) {
-    setStatus(knowledgeStatus, 'failed', '请先选择项目包文件')
+    clearStatusNotice(knowledgeStatus)
+    showTransientGlobalNotice('failed', '请先选择项目包文件', 1000)
     return
   }
   closeMaterialTool()
@@ -12522,7 +12554,8 @@ async function submitProjectPackageImportAndClose() {
 
 async function startProjectPackageRuntimeAndImport() {
   if (!projectPackageImportForm.fileName) {
-    setStatus(knowledgeStatus, 'failed', '请先选择项目包文件')
+    clearStatusNotice(knowledgeStatus)
+    showTransientGlobalNotice('failed', '请先选择项目包文件', 1000)
     return
   }
   if (!projectPackageImportForm.files.length) {

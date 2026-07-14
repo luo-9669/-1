@@ -406,6 +406,7 @@ def generate_framework_report(framework, output_dir: str = None) -> str:
     md_lines.append("  - [1.1 顶层导航结构](#11-顶层导航结构)")
     md_lines.append("  - [1.2 功能模块划分](#12-功能模块划分)")
     md_lines.append("  - [1.3 页面层级关系](#13-页面层级关系)")
+    md_lines.append("  - [1.4 完整页面清单](#14-完整页面清单)")
     md_lines.append("- [二、完整用户旅程](#二完整用户旅程)")
     md_lines.append("- [三、关键决策点汇总](#三关键决策点汇总)")
     md_lines.append("- [四、异常处理流程](#四异常处理流程)")
@@ -482,12 +483,17 @@ def _render_chapter1_information_architecture(md_lines, framework):
     md_lines.append("")
 
     if framework.feature_modules:
-        md_lines.append("| 模块编号 | 功能模块 | 所属层级 | 核心用途 | 入口路径 | 前置条件 | 复杂度 |")
-        md_lines.append("|---------|---------|---------|---------|---------|---------|-------|")
+        md_lines.append("| 模块编号 | 功能模块 | 所属层级 | 核心用途 | 入口路径 | 前置条件 | 复杂度 | 置信度 | 数据来源 |")
+        md_lines.append("|---------|---------|---------|---------|---------|---------|-------|---------|---------|")
         for m in framework.feature_modules:
+            structured = getattr(m, "structured_data", {}) or {}
+            data_sources = structured.get("data_sources", "")
+            if isinstance(data_sources, list):
+                data_sources = "、".join(data_sources)
             md_lines.append(
                 f"| {m.module_id} | {m.name} | {m.level} | {m.purpose} | "
-                f"{m.entry_path} | {m.prerequisite} | {m.complexity} |"
+                f"{m.entry_path} | {m.prerequisite} | {m.complexity} | "
+                f"{structured.get('confidence', 'inferred')} | {data_sources} |"
             )
     else:
         md_lines.append("(未识别到功能模块)")
@@ -502,6 +508,26 @@ def _render_chapter1_information_architecture(md_lines, framework):
     else:
         md_lines.append("(页面层级关系未生成)")
     md_lines.append("```")
+    md_lines.append("")
+
+    # 1.4 完整页面清单
+    md_lines.append("### 1.4 完整页面清单")
+    md_lines.append("")
+    if framework.page_evidence:
+        md_lines.append("| 页面编号 | 页面名称 | URL | 功能入口 |")
+        md_lines.append("|---------|---------|-----|---------|")
+        for index, page in enumerate(framework.page_evidence, 1):
+            features = page.get("features", []) if isinstance(page, dict) else []
+            feature_names = "、".join([
+                str(item.get("name", "") if isinstance(item, dict) else item)
+                for item in features
+                if item
+            ])
+            md_lines.append(
+                f"| P{index:03d} | {page.get('title', '')} | {page.get('url', '')} | {feature_names} |"
+            )
+    else:
+        md_lines.append("(未采集到页面级证据，待补采)")
     md_lines.append("")
     md_lines.append("---")
     md_lines.append("")
@@ -574,6 +600,11 @@ def _render_chapter2_user_journeys(md_lines, framework):
             md_lines.append(f"**入口**: {journey.entry_point}")
             md_lines.append("")
 
+        journey_structured = getattr(journey, "structured_data", {}) or {}
+        if journey_structured.get("journey_confidence"):
+            md_lines.append(f"**旅程置信度**: {journey_structured.get('journey_confidence')}")
+            md_lines.append("")
+
         # 渲染步骤树
         md_lines.append("```")
         md_lines.append(f"{journey.feature_name}")
@@ -590,6 +621,18 @@ def _render_chapter2_user_journeys(md_lines, framework):
                     md_lines.append(f"│   ├─ 用户操作: {step.user_action}")
                 if step.system_feedback:
                     md_lines.append(f"│   └─ 系统反馈: {step.system_feedback}")
+                step_structured = getattr(step, "structured_data", {}) or {}
+                if step_structured.get("confidence"):
+                    md_lines.append(f"│   ├─ 置信度: {step_structured.get('confidence')}")
+                if step_structured.get("evidence"):
+                    md_lines.append(f"│   └─ 依据: {step_structured.get('evidence')}")
+
+        branch_flows = journey_structured.get("branch_flows", [])
+        if branch_flows:
+            md_lines.append("│")
+            md_lines.append("├─ 分支路径:")
+            for branch in branch_flows:
+                md_lines.append(f"│   ├── {branch}")
 
         # 异常流
         if journey.exception_flows:

@@ -40,11 +40,13 @@ function arrayBufferToBase64(arrayBuffer) {
 
 async function buildDocumentPreview(file, arrayBuffer = null) {
   const extension = extensionFromName(file.name)
-  if (!['docx', 'pdf'].includes(extension)) return null
+  if (!['doc', 'docx', 'pdf'].includes(extension)) return null
   const buffer = arrayBuffer || await file.arrayBuffer()
-  const mimeType = file.type || (extension === 'docx'
-    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    : 'application/pdf')
+  const mimeType = file.type || (extension === 'doc'
+    ? 'application/msword'
+    : extension === 'docx'
+      ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      : 'application/pdf')
   return {
     format: extension,
     fileName: file.name,
@@ -74,7 +76,7 @@ export async function extractXlsxText(arrayBuffer) {
 
 export async function extractDocumentText(file) {
   const extension = extensionFromName(file.name)
-  if (extension === 'txt' || extension === 'md') {
+  if (extension === 'txt' || extension === 'md' || extension === 'markdown') {
     return normalizeExtractedText(await file.text())
   }
   if (extension === 'docx') {
@@ -83,7 +85,7 @@ export async function extractDocumentText(file) {
   if (extension === 'xlsx') {
     return extractXlsxText(await file.arrayBuffer())
   }
-  if (extension === 'pdf') {
+  if (extension === 'doc' || extension === 'pdf') {
     return ''
   }
   if (typeof file.text === 'function') {
@@ -97,14 +99,14 @@ export async function importLocalDocuments(files = [], { projectId = '', type = 
   for (const file of files) {
     try {
       const extension = extensionFromName(file.name)
-      const binaryBuffer = ['docx', 'pdf'].includes(extension) ? await file.arrayBuffer() : null
+      const binaryBuffer = ['doc', 'docx', 'pdf'].includes(extension) ? await file.arrayBuffer() : null
       let content = ''
       try {
         content = extension === 'docx'
           ? await extractDocxText(binaryBuffer)
           : await extractDocumentText(file)
       } catch (error) {
-        if (extension !== 'docx' && extension !== 'pdf') throw error
+        if (extension !== 'doc' && extension !== 'docx' && extension !== 'pdf') throw error
       }
       const preview = await buildDocumentPreview(file, binaryBuffer)
       results.push({

@@ -4,6 +4,7 @@ import test from 'node:test'
 
 test('knowledge entries render as a requirements-style table with pagination', async () => {
   const knowledgeHubSource = await readFile(new URL('../frontend/src/pages/knowledge/KnowledgeHubPanel.vue', import.meta.url), 'utf8')
+  const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
   const styles = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
 
   assert.match(knowledgeHubSource, /knowledgeHubSection === 'entries'/)
@@ -23,6 +24,10 @@ test('knowledge entries render as a requirements-style table with pagination', a
   assert.match(knowledgeHubSource, /下一页/)
   assert.match(knowledgeHubSource, /setKnowledgeEntryPage/)
   assert.match(knowledgeHubSource, /open-knowledge-entry-detail/)
+  assert.match(knowledgeHubSource, /delete-knowledge-entry/)
+  assert.match(knowledgeHubSource, />删除</)
+  assert.match(appSource, /@delete-knowledge-entry="deleteKnowledgeEntry"/)
+  assert.match(appSource, /function deleteKnowledgeEntry/)
   assert.doesNotMatch(knowledgeHubSource, /knowledge-entry-card/)
   assert.doesNotMatch(knowledgeHubSource, /knowledge-entry-grid/)
 
@@ -31,4 +36,17 @@ test('knowledge entries render as a requirements-style table with pagination', a
   assert.match(styles, /\.knowledge-entry-pagination/)
   assert.doesNotMatch(styles, /\.knowledge-entry-grid/)
   assert.doesNotMatch(styles, /\.knowledge-entry-card/)
+})
+
+test('knowledge import file action opens the document file picker only', async () => {
+  const knowledgeHubSource = await readFile(new URL('../frontend/src/pages/knowledge/KnowledgeHubPanel.vue', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(knowledgeHubSource, /召回测试/)
+  assert.doesNotMatch(knowledgeHubSource, /解析任务/)
+  assert.match(knowledgeHubSource, /ref="knowledgeFileInputRef"/)
+  assert.match(knowledgeHubSource, /knowledgeFileInputRef\.value\?\.click\(\)/)
+  assert.match(knowledgeHubSource, /@click="openKnowledgeFilePicker"/)
+  assert.match(knowledgeHubSource, /accept="[^"]*\.pdf[^"]*\.doc[^"]*\.docx[^"]*\.md[^"]*\.markdown[^"]*"/)
+  assert.match(knowledgeHubSource, /import-material-files/)
+  assert.doesNotMatch(knowledgeHubSource, /导入文件<\/BaseButton>[\s\S]{0,120}\$emit\('open-material-create'\)/)
 })

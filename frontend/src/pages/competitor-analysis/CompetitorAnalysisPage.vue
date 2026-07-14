@@ -1,13 +1,23 @@
 <template>
   <section class="competitor-analysis-page">
     <div class="competitor-analysis-toolbar">
-      <BaseTabs
-        v-model="activeKind"
-        class="competitor-analysis-primary-tabs"
-        :items="primaryTabs"
-        label="竞品分析"
-        @change="setActiveKind"
-      />
+      <div class="competitor-analysis-tab-stack">
+        <BaseTabs
+          v-model="activePrimaryTab"
+          class="competitor-analysis-primary-tabs"
+          :items="primaryTabs"
+          label="竞品分析一级分类"
+          @change="setActivePrimaryTab"
+        />
+        <div v-if="activePrimaryTab === 'monitor'" class="competitor-analysis-secondary-tabs">
+          <BaseSecondaryTabs
+            v-model="activeKind"
+            :items="monitorTabs"
+            label="竞品监控二级分类"
+            @change="setActiveKind"
+          />
+        </div>
+      </div>
       <div class="competitor-analysis-actions">
         <BaseButton type="button" @click="openCreateDialog">
           <template #icon><Plus class="competitor-analysis-button-icon" aria-hidden="true" /></template>
@@ -612,7 +622,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElInput, ElOption, ElSelect } from 'element-plus'
 import { FileText, Play, Plus, Search } from 'lucide-vue-next'
-import { BaseButton, BaseDataTable, BaseTabs, BaseTag } from '../../components/base'
+import { BaseButton, BaseDataTable, BaseSecondaryTabs, BaseTabs, BaseTag } from '../../components/base'
 import { api } from '../../services/api'
 
 const props = defineProps({
@@ -629,12 +639,16 @@ const analysisTabs = [
 ]
 
 const primaryTabs = [
+  { value: 'monitor', label: '竞品监控' },
+  { value: 'gap', label: '机会点分析' }
+]
+
+const monitorTabs = [
   { value: 'competitors', label: '竞品表' },
   { value: 'daily', label: '每日生成' },
   { value: 'weekly', label: '周报生成' },
   { value: 'flow', label: '交互流程' },
-  { value: 'framework', label: '完整框架' },
-  { value: 'gap', label: '机会点分析' }
+  { value: 'framework', label: '完整框架' }
 ]
 
 const statusFilterOptions = [
@@ -654,6 +668,7 @@ function routeProjectIdFromLocation() {
 }
 
 const activeKind = ref('competitors')
+const activePrimaryTab = ref('monitor')
 const selectedRecordId = ref('')
 const selectedFeatureEventId = ref('')
 const analysisRecords = ref([])
@@ -700,9 +715,6 @@ const competitorFilterOptions = computed(() => {
   for (const competitor of competitors.value) {
     if (competitor?.name) names.add(competitor.name)
   }
-  for (const record of analysisRecords.value) {
-    for (const name of recordCompetitorNameList(record)) names.add(name)
-  }
   return [...names].sort((a, b) => a.localeCompare(b, 'zh-CN'))
 })
 const hasActiveListFilters = computed(() => Boolean(
@@ -721,22 +733,6 @@ const allCompetitorsSelected = computed(() =>
 const analysisCompetitorOptions = computed(() => {
   const byKey = new Map()
   for (const competitor of competitors.value) addAnalysisCompetitorOption(byKey, competitor)
-  for (const record of analysisRecords.value) {
-    const names = recordCompetitorNameList(record)
-    const urls = Array.isArray(record.productUrls) ? record.productUrls : []
-    names.forEach((name, index) => addAnalysisCompetitorOption(byKey, {
-      id: competitorOptionId(name, urls[index] || record.productUrl || ''),
-      name,
-      websiteUrl: urls[index] || record.productUrl || ''
-    }))
-    for (const event of normalizeFeatureEvents(record.featureEvents || [])) {
-      addAnalysisCompetitorOption(byKey, {
-        id: competitorOptionId(event.competitorName, event.sourceUrls?.[0] || ''),
-        name: event.competitorName,
-        websiteUrl: event.sourceUrls?.[0] || ''
-      })
-    }
-  }
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
 const analysisRequiresScopeFields = computed(() => !['daily', 'weekly'].includes(analysisForm.kind))
@@ -793,11 +789,25 @@ function getKindLabel(kind = '') {
 
 function setActiveKind(kind = 'daily') {
   activeKind.value = kind
+  activePrimaryTab.value = kind === 'gap' ? 'gap' : 'monitor'
   if (isAnalysisKind(kind)) {
     analysisForm.kind = kind
   }
   fillDialogDefaults()
   void refreshActiveKindData(kind)
+}
+
+function setActivePrimaryTab(tab = 'monitor') {
+  activePrimaryTab.value = tab
+  if (tab === 'gap') {
+    setActiveKind('gap')
+    return
+  }
+  if (activeKind.value === 'gap') {
+    setActiveKind('competitors')
+    return
+  }
+  void refreshActiveKindData(activeKind.value)
 }
 
 async function refreshActiveKindData(kind = activeKind.value) {
@@ -1369,6 +1379,13 @@ function competitorOptionId(name = '', websiteUrl = '') {
   return `competitor-option-${source.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')}`
 }
 
+function competitorOptionIdsForItem(item = {}) {
+  return [
+    String(item.id || '').trim(),
+    competitorOptionId(item.name || item.competitorName || item.productName || '', item.websiteUrl || item.productUrl || '')
+  ].filter(Boolean)
+}
+
 function addAnalysisCompetitorOption(map = new Map(), item = {}) {
   const name = String(item.name || item.competitorName || item.productName || '').trim()
   if (!name) return
@@ -1386,6 +1403,12 @@ function addAnalysisCompetitorOption(map = new Map(), item = {}) {
 
 function analysisCompetitorOptionLabel(item = {}) {
   return item.websiteUrl ? `${item.name}（${item.websiteUrl}）` : item.name
+}
+
+function pruneDeletedCompetitorReferences(competitor = {}, deletedOptionIds = competitorOptionIdsForItem(competitor)) {
+  if (listFilters.competitor === competitor.name) listFilters.competitor = 'all'
+  analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => !deletedOptionIds.includes(id))
+  fillDialogDefaults()
 }
 
 function handleAnalysisCompetitorChange(value = []) {
@@ -1712,18 +1735,27 @@ async function handleSaveCompetitor() {
 async function deleteCompetitor(competitor = {}) {
   if (!competitor?.id || creatingCompetitor.value) return
   const previousCompetitors = [...competitors.value]
+  const previousSelectedCompetitorIds = [...analysisForm.competitorIds]
+  const previousFilterCompetitor = listFilters.competitor
+  const deletedOptionIds = competitorOptionIdsForItem(competitor)
   competitors.value = competitors.value.filter((item) => item.id !== competitor.id)
-  analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => id !== competitor.id)
-  fillDialogDefaults()
+  if (listFilters.competitor === competitor.name) listFilters.competitor = 'all'
+  analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => !deletedOptionIds.includes(id))
+  pruneDeletedCompetitorReferences(competitor, deletedOptionIds)
   const result = await api.competitors.delete(props.apiConfig, competitor.id, {
     projectId: effectiveProjectId.value || competitor.projectId || 'default'
   })
   if (!result.ok) {
     competitors.value = previousCompetitors
+    analysisForm.competitorIds = previousSelectedCompetitorIds
+    listFilters.competitor = previousFilterCompetitor
+    fillDialogDefaults()
     statusTone.value = 'failed'
     statusMessage.value = result.message || '删除竞品失败，请稍后重试。'
     return
   }
+  await refreshPageData()
+  pruneDeletedCompetitorReferences(competitor, deletedOptionIds)
   statusTone.value = 'info'
   statusMessage.value = `已删除竞品：${competitor.name || '未命名竞品'}`
 }
@@ -2198,7 +2230,7 @@ watch(() => props.projectId, () => {
 .competitor-analysis-page {
   display: grid;
   gap: 20px;
-  padding: 28px 32px 40px;
+  padding: 0;
   --el-color-primary: var(--color-primary);
   --el-color-primary-dark-2: var(--color-primary-active);
   --el-color-primary-light-3: var(--color-n6);
@@ -2212,8 +2244,14 @@ watch(() => props.projectId, () => {
 .competitor-analysis-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 16px;
+}
+
+.competitor-analysis-tab-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .competitor-analysis-actions,
@@ -2227,9 +2265,16 @@ watch(() => props.projectId, () => {
 .competitor-analysis-primary-tabs {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 24px;
   min-height: 44px;
   min-width: 0;
+}
+
+.competitor-analysis-secondary-tabs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .competitor-analysis-primary-tabs :deep(.ui-tab) {
@@ -2240,6 +2285,10 @@ watch(() => props.projectId, () => {
   font-weight: 800;
   line-height: 36px;
   letter-spacing: 0;
+}
+
+.competitor-analysis-secondary-tabs :deep(.ui-secondary-tabs) {
+  width: max-content;
 }
 
 .competitor-analysis-primary-tabs :deep(.ui-tab:hover),

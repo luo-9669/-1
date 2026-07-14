@@ -275,6 +275,7 @@ class FeatureModule:
     entry_path: str = ""
     prerequisite: str = ""
     complexity: str = ""  # ★☆☆☆☆ ~ ★★★★★
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -285,6 +286,7 @@ class FeatureModule:
             "entry_path": self.entry_path,
             "prerequisite": self.prerequisite,
             "complexity": self.complexity,
+            "structured_data": self.structured_data,
         }
 
 
@@ -297,6 +299,7 @@ class UserJourneyStep:
     user_action: str = ""
     system_feedback: str = ""
     is_exception: bool = False
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -306,6 +309,7 @@ class UserJourneyStep:
             "user_action": self.user_action,
             "system_feedback": self.system_feedback,
             "is_exception": self.is_exception,
+            "structured_data": self.structured_data,
         }
 
 
@@ -317,6 +321,7 @@ class UserJourney:
     steps: List[UserJourneyStep] = field(default_factory=list)
     normal_flow: List[str] = field(default_factory=list)
     exception_flows: List[str] = field(default_factory=list)
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -325,6 +330,7 @@ class UserJourney:
             "steps": [s.to_dict() for s in self.steps],
             "normal_flow": self.normal_flow,
             "exception_flows": self.exception_flows,
+            "structured_data": self.structured_data,
         }
 
 
@@ -336,6 +342,7 @@ class DecisionPoint:
     options: List[str] = field(default_factory=list)
     criteria: str = ""  # 决策依据
     ux_implication: str = ""  # UX 影响
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -344,6 +351,7 @@ class DecisionPoint:
             "options": self.options,
             "criteria": self.criteria,
             "ux_implication": self.ux_implication,
+            "structured_data": self.structured_data,
         }
 
 
@@ -355,6 +363,7 @@ class ExceptionFlow:
     system_response: str  # 系统响应
     recovery_path: str  # 恢复路径
     error_type: str = ""  # error/empty/loading/timeout/validation
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -363,6 +372,7 @@ class ExceptionFlow:
             "system_response": self.system_response,
             "recovery_path": self.recovery_path,
             "error_type": self.error_type,
+            "structured_data": self.structured_data,
         }
 
 
@@ -374,6 +384,7 @@ class StateTransition:
     to_state: str
     trigger: str  # 触发动作
     conditions: str = ""  # 前置条件
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -382,6 +393,7 @@ class StateTransition:
             "to_state": self.to_state,
             "trigger": self.trigger,
             "conditions": self.conditions,
+            "structured_data": self.structured_data,
         }
 
 
@@ -392,6 +404,7 @@ class CrossFunctionLink:
     target_feature: str
     relationship: str  # 数据共享/导航跳转/依赖关系
     description: str
+    structured_data: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -399,6 +412,7 @@ class CrossFunctionLink:
             "target_feature": self.target_feature,
             "relationship": self.relationship,
             "description": self.description,
+            "structured_data": self.structured_data,
         }
 
 

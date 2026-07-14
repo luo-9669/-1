@@ -14,19 +14,18 @@
           <BaseButton type="button" @click="$emit('open-material-tool', 'website-import')">网站导入</BaseButton>
           <BaseButton type="button" @click="$emit('open-material-tool', 'project-package-import')">项目包导入</BaseButton>
           <BaseButton type="button" @click="$emit('open-material-tool', 'project-package-import')">交互蓝图包导入</BaseButton>
-          <BaseButton type="button" @click="$emit('open-material-tool', 'retrieval-test')">召回测试</BaseButton>
-          <BaseButton type="button" @click="$emit('open-material-tool', 'parse-jobs')">解析任务</BaseButton>
           <BaseButton type="button" @click="$emit('toggle-material-batch-mode')">
             {{ materialBatchMode ? '退出管理' : '批量管理' }}
           </BaseButton>
-          <BaseButton variant="primary" type="button" @click="$emit('open-material-create')">导入文件</BaseButton>
+          <BaseButton variant="primary" type="button" @click="openKnowledgeFilePicker">导入文件</BaseButton>
         </div>
       </div>
       <input
+        ref="knowledgeFileInputRef"
         class="hidden-file-input"
         type="file"
         multiple
-        accept=".pdf,.docx,.md,.txt,.xlsx,.csv,.json"
+        accept=".pdf,.doc,.docx,.md,.markdown,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/x-markdown"
         @change="$emit('import-material-files', $event)"
       />
       <Notice :result="currentMaterialStatus" floating />
@@ -58,6 +57,7 @@
                 <td>
                   <div class="requirements-row-actions">
                     <button type="button" @click="$emit('open-knowledge-entry-detail', entry)">查看</button>
+                    <button type="button" class="danger" @click="$emit('delete-knowledge-entry', entry)">删除</button>
                   </div>
                 </td>
               </tr>
@@ -569,6 +569,7 @@ const knowledgeWorkflowDragState = ref(null)
 const expandedKnowledgeFlowStructureNodeIds = ref(new Set())
 const knowledgeFrameworkViewportRef = ref(null)
 const knowledgeFrameworkMapRef = ref(null)
+const knowledgeFileInputRef = ref(null)
 const knowledgeFrameworkConnectorPaths = ref([])
 const knowledgeFrameworkConnectorSize = ref({ width: 1, height: 1 })
 let knowledgeFrameworkResizeObserver = null
@@ -654,6 +655,10 @@ function knowledgeFrameworkBranchColumns(branch = {}) {
     columns.get(depth).push(node)
   })
   return Array.from(columns.entries()).map(([depth, nodes]) => ({ depth, nodes }))
+}
+
+function openKnowledgeFilePicker() {
+  knowledgeFileInputRef.value?.click()
 }
 const rawKnowledgeFlowStructureNodes = computed(() => {
   const sourceFlowRoots = props.knowledgePrototypeFlowTree.roots || []
@@ -1282,6 +1287,7 @@ const emit = defineEmits([
   'switch-to-factory-from-knowledge-demo',
   'trigger-knowledge-prototype-hotspot',
   'open-knowledge-entry-detail',
+  'delete-knowledge-entry',
   'download-markdown'
 ])
 </script>

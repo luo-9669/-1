@@ -442,6 +442,8 @@ function normalizeRecord(record = {}) {
     sourceRecordId: safeText(record.sourceRecordId || record.source_record_id, ''),
     sourceKind: safeText(record.sourceKind || record.source_kind, ''),
     sourceTitle: safeText(record.sourceTitle || record.source_title, ''),
+    failureType: safeText(record.failureType || record.failure_type, ''),
+    qualityIssues: uniquePlainTextList(record.qualityIssues || record.quality_issues),
     durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : 0,
     createdAt,
     updatedAt
@@ -665,7 +667,17 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     lines.push('- 每个条目必须标注置信度（有直接证据/部分证据推断/无证据推断）')
     lines.push('- 缺失信息单独列出"待补采清单"')
   } else if (kind === 'framework') {
-    lines.push('- 完整框架需要包含产品定位、核心页面、关键任务链路、信息架构、状态与异常、可复用启发。')
+    lines.push('- 完整框架必须覆盖以下结构，不得只列核心页面或几个示例页面：')
+    lines.push('  1. 产品定位与分析边界：产品定位、目标用户、核心价值、公开证据覆盖范围。')
+    lines.push('  2. 产品整体信息架构：顶层导航、功能模块划分、完整站点页面清单/站点地图、页面层级树。')
+    lines.push('  3. 用户角色与使用场景：基于证据归纳角色、目标、入口和典型场景。')
+    lines.push('  4. 完整用户旅程：按已识别核心功能逐项输出，并分别写明主路径、分支路径、异常路径。')
+    lines.push('  5. 关键决策点：位置、选项、判断依据、认知负荷和改进建议。')
+    lines.push('  6. 状态与异常：状态机、转换条件、失败状态、恢复路径。')
+    lines.push('  7. 跨功能关联与数据共享：入口跳转、依赖关系、共享数据。')
+    lines.push('  8. 可复用 UX 洞察、证据来源与待补采清单。')
+    lines.push('- “完整”指把导航、sitemap 和爬取结果中全部可见页面/栏目纳入页面清单；不能访问、需要登录或证据未覆盖的页面必须进入 data_gaps，不能编造。')
+    lines.push('- 页面清单至少包含页面/栏目名称、URL、所属层级或模块、页面目的、证据置信度；同一页面去重。')
     lines.push('- 统一产品模型：每个功能模块标注 confidence（full/partial/inferred）和 data_sources；每个步骤标注 confidence 和 evidence；无证据信息不编造，放入 data_gaps。')
     lines.push('- 决策点增加 decision_type（选择/配置/确认/放弃）、user_cognitive_load（high/medium/low）、current_ux_quality（好/一般/差）、improvement_suggestion。')
     lines.push('- 异常流增加 exception_id（E01格式）、affected_pages、user_frustration_level（high/medium/low）、recovery_success_estimate。')
@@ -694,41 +706,76 @@ function truncateEvidenceText(value = '', maxLength = 700) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
 }
 
-function pushEvidenceLine(lines = [], label = '', value = '') {
-  const text = truncateEvidenceText(value)
+function pushEvidenceLine(lines = [], label = '', value = '', maxLength = 700) {
+  const text = truncateEvidenceText(value, maxLength)
   if (text) lines.push(`- ${label}: ${text}`)
 }
 
-function collectPageEvidence(lines = [], pages = {}) {
+function joinEvidenceLines(lines = [], options = {}) {
+  const lineLimit = Number.isFinite(Number(options.lineLimit)) ? Number(options.lineLimit) : 60
+  const charLimit = Number.isFinite(Number(options.charLimit)) ? Number(options.charLimit) : Number.POSITIVE_INFINITY
+  const selected = []
+  let charCount = 0
+  for (const line of lines.slice(0, lineLimit)) {
+    const nextLength = String(line || '').length + (selected.length ? 1 : 0)
+    if (charCount + nextLength > charLimit) {
+      selected.push('- 证据预算说明: 后续长正文摘要已截断；完整页面索引和未覆盖项请以 page_evidence/data_gaps 为准。')
+      break
+    }
+    selected.push(line)
+    charCount += nextLength
+  }
+  return selected.join('\n')
+}
+
+function collectPageEvidence(lines = [], pages = {}, options = {}) {
   const entries = Array.isArray(pages)
     ? pages.map((page, index) => [page?.url || `page-${index + 1}`, page])
     : Object.entries(normalizePlainObject(pages))
-  for (const [url, page] of entries.slice(0, 8)) {
+  const limit = Number.isFinite(Number(options.limit)) ? Number(options.limit) : 8
+  const detailLimit = Number.isFinite(Number(options.detailLimit)) ? Number(options.detailLimit) : limit
+  const summaryLength = Number.isFinite(Number(options.summaryLength)) ? Number(options.summaryLength) : 700
+  for (const [index, [url, page]] of entries.slice(0, limit).entries()) {
     const item = normalizePlainObject(page)
     pushEvidenceLine(lines, '页面', `${item.title || ''} ${url || item.url || ''}`)
-    pushEvidenceLine(lines, '页面正文摘要', item.content || item.summary || item.snippet || '')
-    const features = Array.isArray(item.features) ? item.features.map((feature) => feature?.name || feature).filter(Boolean).join('、') : ''
-    pushEvidenceLine(lines, '页面功能入口', features)
+    if (index < detailLimit) {
+      pushEvidenceLine(lines, '页面正文摘要', item.content || item.summary || item.snippet || '', summaryLength)
+      const features = Array.isArray(item.features) ? item.features.map((feature) => feature?.name || feature).filter(Boolean).join('、') : ''
+      pushEvidenceLine(lines, '页面功能入口', features)
+    }
   }
 }
 
-function collectNavigationEvidence(lines = [], navItems = []) {
+function collectNavigationEvidence(lines = [], navItems = [], options = {}) {
   const items = Array.isArray(navItems) ? navItems : []
   const labels = []
+  const itemLimit = Number.isFinite(Number(options.itemLimit)) ? Number(options.itemLimit) : 12
+  const childLimit = Number.isFinite(Number(options.childLimit)) ? Number(options.childLimit) : 12
+  const maxDepth = Number.isFinite(Number(options.maxDepth)) ? Number(options.maxDepth) : 2
+  const totalNodeLimit = Number.isFinite(Number(options.totalNodeLimit)) ? Number(options.totalNodeLimit) : Number.POSITIVE_INFINITY
+  let visitedNodes = 0
   const walk = (nodes = [], depth = 0) => {
-    for (const node of nodes.slice(0, 12)) {
+    for (const node of nodes.slice(0, depth === 0 ? itemLimit : childLimit)) {
+      if (visitedNodes >= totalNodeLimit) return
       const item = normalizePlainObject(node)
-      if (item.name) labels.push(`${'  '.repeat(depth)}${item.name}${item.url ? ` (${item.url})` : ''}`)
-      if (Array.isArray(item.children) && depth < 2) walk(item.children, depth + 1)
+      if (item.name) {
+        labels.push(`${'  '.repeat(depth)}${item.name}${item.url ? ` (${item.url})` : ''}`)
+        visitedNodes += 1
+      }
+      if (Array.isArray(item.children) && depth < maxDepth) walk(item.children, depth + 1)
     }
   }
   walk(items)
-  pushEvidenceLine(lines, '导航结构', labels.join(' / '))
+  if (options.lineMode) {
+    for (const label of labels) pushEvidenceLine(lines, '导航节点', label)
+  } else {
+    pushEvidenceLine(lines, '导航结构', labels.join(' / '))
+  }
 }
 
-function collectFeatureModuleEvidence(lines = [], features = [], label = '功能模块') {
+function collectFeatureModuleEvidence(lines = [], features = [], label = '功能模块', limit = 12) {
   const items = Array.isArray(features) ? features : []
-  for (const feature of items.slice(0, 12)) {
+  for (const feature of items.slice(0, limit)) {
     const item = normalizePlainObject(feature)
     const name = item.name || item.module_id || ''
     const detail = [
@@ -1014,9 +1061,10 @@ function buildWeeklyChangesMarkdown(changes = [], input = {}, data = {}, current
   return lines.join('\n').trim()
 }
 
-function buildAnalysisEvidence(jsonText = '', stdout = '') {
+function buildAnalysisEvidence(jsonText = '', stdout = '', kind = '') {
   const data = parseJsonSafe(jsonText)
   const lines = []
+  const isFramework = normalizeKind(kind) === 'framework'
   if (data) {
     const quality = normalizeEvidenceQuality(data)
     const count = evidenceCount(data)
@@ -1027,28 +1075,39 @@ function buildAnalysisEvidence(jsonText = '', stdout = '') {
     pushEvidenceLine(lines, '证据数量', String(count))
     pushEvidenceLine(lines, '功能证据状态', data.evidence_status || '')
     pushEvidenceLine(lines, '功能证据说明', data.evidence_reason || '')
-    for (const source of evidenceSources(data).slice(0, 10)) {
+    for (const source of evidenceSources(data).slice(0, isFramework ? 30 : 10)) {
       pushEvidenceLine(lines, '证据来源', `${source.title || ''} ${source.url || ''} ${source.snippet || ''}`)
     }
-    pushEvidenceLine(lines, '原始证据摘要', data.raw_data || data.rawData || '')
+    pushEvidenceLine(lines, '原始证据摘要', data.raw_data || data.rawData || '', isFramework ? 2000 : 700)
     const structured = data.structured_data || data.structuredData
     if (structured && typeof structured === 'object') {
       pushEvidenceLine(lines, '结构化证据字段', Object.keys(structured).slice(0, 12).join('、'))
     }
     collectFeatureModuleEvidence(lines, data.similar_features, '相似功能线索')
     collectFlowStepEvidence(lines, data.steps)
-    collectPageEvidence(lines, data.pages)
-    collectPageEvidence(lines, data.page_evidence)
-    collectNavigationEvidence(lines, data.navigation_tree)
-    collectNavigationEvidence(lines, data.sitemap_navigation)
-    collectFeatureModuleEvidence(lines, data.feature_modules, '框架功能模块')
-    collectFeatureModuleEvidence(lines, data.crawler_features || data.features, '爬虫识别功能')
+    if (isFramework) {
+      const pages = Array.isArray(data.page_evidence) && data.page_evidence.length ? data.page_evidence : data.pages
+      collectPageEvidence(lines, pages, { limit: 180, detailLimit: 30, summaryLength: 400 })
+      collectNavigationEvidence(lines, data.navigation_tree, { itemLimit: 180, childLimit: 200, maxDepth: 4, totalNodeLimit: 500, lineMode: true })
+      collectNavigationEvidence(lines, data.sitemap_navigation, { itemLimit: 500, childLimit: 200, maxDepth: 4, totalNodeLimit: 500, lineMode: true })
+      collectFeatureModuleEvidence(lines, data.feature_modules, '框架功能模块', 120)
+      collectFeatureModuleEvidence(lines, data.crawler_features || data.features, '爬虫识别功能', 120)
+    } else {
+      collectPageEvidence(lines, data.pages)
+      collectPageEvidence(lines, data.page_evidence)
+      collectNavigationEvidence(lines, data.navigation_tree)
+      collectNavigationEvidence(lines, data.sitemap_navigation)
+      collectFeatureModuleEvidence(lines, data.feature_modules, '框架功能模块')
+      collectFeatureModuleEvidence(lines, data.crawler_features || data.features, '爬虫识别功能')
+    }
     collectChangeEvidence(lines, data.changes)
     collectScanEvidence(lines, data.results)
     if (Array.isArray(data.source_urls)) pushEvidenceLine(lines, '来源链接', data.source_urls.slice(0, 8).join(', '))
   }
   pushEvidenceLine(lines, '脚本输出摘要', stdout)
-  return lines.slice(0, 60).join('\n')
+  return joinEvidenceLines(lines, isFramework
+    ? { lineLimit: 900, charLimit: 110000 }
+    : { lineLimit: 60 })
 }
 
 function buildInputMonitorEvidence(input = {}) {
@@ -1249,7 +1308,96 @@ function buildNoEvidenceAnalysisMarkdown(kind = '', input = {}, data = {}) {
 }
 
 function partialEvidenceMarkdownIsSafe(markdown = '') {
-  return /证据不足|待补采|未找到|缺失|仅发现|相似功能/.test(String(markdown || ''))
+  return /证据不足|待补采|未找到|缺失|仅发现|相似功能|组合证据|直接声明/.test(String(markdown || ''))
+}
+
+const FRAMEWORK_REPORT_SECTION_RULES = [
+  ['产品定位与分析边界', /产品定位|分析边界/],
+  ['产品整体信息架构', /产品整体信息架构|信息架构/],
+  ['完整页面清单或站点地图', /完整页面清单|完整站点页面清单|站点地图|页面层级关系/],
+  ['用户角色与使用场景', /用户角色|使用场景/],
+  ['完整用户旅程', /完整用户旅程|用户旅程/],
+  ['主路径', /主路径|正常路径|正常流程/],
+  ['分支路径', /分支路径|分支流程/],
+  ['异常路径', /异常路径|异常流程/],
+  ['关键决策点', /关键决策点|决策点/],
+  ['状态与异常', /状态机|状态流转|状态与异常/],
+  ['跨功能关联', /跨功能关联|功能关联|数据共享/],
+  ['可复用 UX 洞察', /可复用\s*UX\s*洞察|可复用启发|reusable_insights/i],
+  ['证据与待补采', /待补采|信息缺口|data_gaps|证据来源/i]
+]
+
+function markdownHeadingSections(markdown = '') {
+  const lines = String(markdown || '').split(/\r?\n/)
+  const headings = []
+  lines.forEach((line, index) => {
+    const match = line.match(/^(#{2,4})\s+(.+?)\s*$/)
+    if (match) headings.push({ level: match[1].length, title: match[2], index })
+  })
+  return headings.map((heading, headingIndex) => {
+    let end = lines.length
+    for (let index = headingIndex + 1; index < headings.length; index += 1) {
+      if (headings[index].level <= heading.level) {
+        end = headings[index].index
+        break
+      }
+    }
+    const body = lines.slice(heading.index + 1, end).join('\n')
+    const substantiveText = body
+      .replace(/^#{2,6}\s+.*$/gm, '')
+      .replace(/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/gm, '')
+      .replace(/[|*_`>#\[\]()\-]/g, '')
+      .replace(/\s+/g, '')
+    return { ...heading, body, substantiveLength: substantiveText.length }
+  })
+}
+
+function frameworkReportQualityIssues(markdown = '', options = {}) {
+  const sections = markdownHeadingSections(markdown)
+  const issues = FRAMEWORK_REPORT_SECTION_RULES
+    .filter(([, pattern]) => !sections.some((section) => pattern.test(section.title) && section.substantiveLength >= 8))
+    .map(([label]) => `缺失或内容为空：${label}`)
+  const expectedPageUrls = uniquePlainTextList(options.expectedPageUrls || [])
+  if (expectedPageUrls.length) {
+    const text = String(markdown || '')
+    const covered = expectedPageUrls.filter((url) => text.includes(url))
+    if (covered.length !== expectedPageUrls.length) {
+      issues.push(`页面清单覆盖不足：${covered.length}/${expectedPageUrls.length}`)
+    }
+  }
+  return issues
+}
+
+function navigationEvidenceUrls(navItems = [], limit = 500) {
+  const urls = []
+  const walk = (items = []) => {
+    for (const item of Array.isArray(items) ? items : []) {
+      if (urls.length >= limit) return
+      const node = normalizePlainObject(item)
+      if (node.url) urls.push(String(node.url).trim())
+      if (Array.isArray(node.children)) walk(node.children)
+    }
+  }
+  walk(navItems)
+  return uniquePlainTextList(urls)
+}
+
+function buildFrameworkRepairPrompt(originalPrompt = '', markdown = '', missingSections = []) {
+  const promptEvidence = String(originalPrompt || '').slice(0, 78000)
+  const previousDraft = String(markdown || '').slice(0, 18000)
+  return [
+    '上一版报告质量门禁未通过，请基于同一批证据重新输出完整 Markdown 正文。',
+    `缺失章节：${missingSections.join('、')}`,
+    '- 必须补齐所有缺失章节并保持章节结构完整，不要只输出补丁或解释。',
+    '- 页面清单必须覆盖证据中全部可见页面/栏目；不确定项进入待补采，不得编造。',
+    '- 每个核心功能旅程必须分别标明主路径、分支路径、异常路径。',
+    '',
+    '原始要求与证据：',
+    promptEvidence,
+    '',
+    '上一版报告：',
+    previousDraft
+  ].join('\n').slice(0, 100000)
 }
 
 function buildInteractionArtifactsFromData(kind = '', markdown = '', input = {}, data = {}) {
@@ -1350,14 +1498,15 @@ export function createCompetitorAnalysisEngineService(options = {}) {
     }
     if (!provider || typeof provider.generate !== 'function') return null
     const model = input.llmName || settings.defaultModel || 'gpt-5.5'
-    try {
+    const modelPrompt = buildBackendModelReportPrompt(input, reason)
+    const requestReport = async (userPrompt) => {
       const result = await provider.generate({
         model,
         responseFormat: 'markdown',
         actionType: 'competitor-analysis-report',
         scopeId: input.recordId || input.projectId || '',
         systemPrompt: '你是流程通后端的竞品分析报告模型，负责生成可直接展示的中文 Markdown 报告。',
-        userPrompt: buildBackendModelReportPrompt(input, reason),
+        userPrompt,
         timeoutMs: settings.timeoutMs,
         references: [],
         retrievedKnowledge: []
@@ -1370,6 +1519,42 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         model: result?.model || model,
         usage: result?.usage || null
       }
+    }
+    try {
+      const firstReport = await requestReport(modelPrompt)
+      if (!firstReport) return null
+      if (normalizeKind(input.kind) !== 'framework') return firstReport
+      const missingSections = frameworkReportQualityIssues(firstReport.markdown, { expectedPageUrls: input.frameworkPageUrls })
+      if (!missingSections.length) return firstReport
+      let repairedReport = null
+      try {
+        repairedReport = await requestReport(buildFrameworkRepairPrompt(modelPrompt, firstReport.markdown, missingSections))
+      } catch {
+        return {
+          markdown: '',
+          qualityFailed: true,
+          qualityIssues: [...missingSections, '二次修复调用失败'],
+          draftMarkdown: firstReport.markdown,
+          provider: firstReport.provider,
+          model: firstReport.model,
+          usage: firstReport.usage
+        }
+      }
+      const repairedIssues = repairedReport
+        ? frameworkReportQualityIssues(repairedReport.markdown, { expectedPageUrls: input.frameworkPageUrls })
+        : missingSections
+      if (!repairedReport || repairedIssues.length) {
+        return {
+          markdown: '',
+          qualityFailed: true,
+          qualityIssues: repairedIssues,
+          draftMarkdown: repairedReport?.markdown || firstReport.markdown,
+          provider: repairedReport?.provider || firstReport.provider,
+          model: repairedReport?.model || firstReport.model,
+          usage: repairedReport?.usage || firstReport.usage
+        }
+      }
+      return repairedReport
     } catch {
       return null
     }
@@ -1593,12 +1778,21 @@ export function createCompetitorAnalysisEngineService(options = {}) {
       const markdown = await latestFileText(outputDir, '.md')
       const jsonText = await latestFileText(outputDir, '.json')
       const analysisData = parseJsonSafe(jsonText) || {}
+      const frameworkPageUrls = kind === 'framework'
+        ? uniquePlainTextList([
+            ...(Array.isArray(analysisData.page_evidence)
+              ? analysisData.page_evidence.map((page) => normalizePlainObject(page).url).filter(Boolean)
+              : []),
+            ...navigationEvidenceUrls(analysisData.navigation_tree),
+            ...navigationEvidenceUrls(analysisData.sitemap_navigation)
+          ])
+        : []
       const featureEvents = extractFeatureEventsFromAnalysisData(kind, analysisData, input, { currentDateProvider })
       const failureReason = safeText(result.stderr || result.stdout, SAFE_FAILURE_MESSAGE)
       const scriptOk = result.code === 0 && Boolean(markdown.trim())
       const analysisEvidence = [
         buildInputMonitorEvidence(input),
-        buildAnalysisEvidence(jsonText, result.stdout)
+        buildAnalysisEvidence(jsonText, result.stdout, kind)
       ].filter(Boolean).join('\n')
       const scriptFallbackMarkdown = isFallbackFlowMarkdown(markdown)
       const flowStatus = kind === 'flow' ? flowEvidenceStatus(analysisData) : ''
@@ -1613,7 +1807,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         ...input,
         analysisEvidence,
         evidenceQuality,
-        evidenceCount: evidenceCountValue
+        evidenceCount: evidenceCountValue,
+        frameworkPageUrls
       }, modelSettings, scriptOk ? '' : failureReason) : null
       const partialModelReport = (!modelReport && shouldUsePartialFlowModel) ? await generateBackendModelReport({
         ...input,
@@ -1622,6 +1817,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         evidenceCount: evidenceCountValue
       }, modelSettings, '') : null
       const rawModelReport = modelReport || partialModelReport
+      const frameworkQualityFailed = kind === 'framework' && Boolean(rawModelReport?.qualityFailed)
       const effectiveModelReport = ['partial', 'none'].includes(evidenceQuality) && rawModelReport?.markdown && !partialEvidenceMarkdownIsSafe(rawModelReport.markdown)
         ? null
         : rawModelReport
@@ -1645,17 +1841,23 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           : sanitizeCompetitorAnalysisMarkdown('', '')
       const ok = kind === 'flow'
         ? ((scriptOk || Boolean(effectiveModelReport) || shouldBlockFlowModel) && flowHasEvidenceResult && Boolean(generatedMarkdown))
-        : (scriptOk || Boolean(generatedMarkdown))
+        : kind === 'framework'
+          ? (!frameworkQualityFailed && (scriptOk || Boolean(generatedMarkdown)))
+          : (scriptOk || Boolean(generatedMarkdown))
 
       const response = {
         ok,
         title: `${kindLabel(kind)}结果`,
         kind,
-        statusLabel: ok ? '已生成' : '未完成',
+        statusLabel: ok ? '已生成' : frameworkQualityFailed ? '质量未通过' : '未完成',
         summary: ok
-          ? (effectiveModelReport ? '已使用当前后端模型基于采集证据生成分析报告。' : '分析报告已生成，可继续复制或沉淀。')
-          : (failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
-        markdown: ok ? generatedMarkdown : fallbackMarkdown(input, failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
+          ? (effectiveModelReport?.markdown ? '已使用当前后端模型基于采集证据生成分析报告。' : '分析报告已生成，可继续复制或沉淀。')
+          : frameworkQualityFailed
+            ? `完整框架质量门禁未通过：${rawModelReport.qualityIssues.join('；')}`
+            : (failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
+        markdown: generatedMarkdown || fallbackMarkdown(input, failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
+        failureType: frameworkQualityFailed ? 'quality_failed' : '',
+        qualityIssues: frameworkQualityFailed ? rawModelReport.qualityIssues : [],
         interactionArtifacts: buildInteractionArtifactsFromData(kind, generatedMarkdown, input, analysisData),
         featureEvents,
         jsonAvailable: Boolean(jsonText.trim()),
@@ -1671,6 +1873,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           markdown: response.markdown,
           interactionArtifacts: response.interactionArtifacts || input.interactionArtifacts,
           featureEvents: response.featureEvents || input.featureEvents,
+          failureType: response.failureType,
+          qualityIssues: response.qualityIssues,
           sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
           monitorEvidence: input.monitorEvidence || input.monitor_evidence,
           durationMs: response.durationMs
@@ -1694,6 +1898,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           markdown: response.markdown,
           interactionArtifacts: response.interactionArtifacts || input.interactionArtifacts,
           featureEvents: response.featureEvents || input.featureEvents,
+          failureType: response.failureType,
+          qualityIssues: response.qualityIssues,
           sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
           monitorEvidence: input.monitorEvidence || input.monitor_evidence,
           durationMs: response.durationMs,
