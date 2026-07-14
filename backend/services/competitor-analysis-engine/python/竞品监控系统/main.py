@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 from models import (
     Competitor, WeeklyReport, ScanResult,
-    ChangeRecord, InteractionFlow,
+    ChangeRecord, InteractionFlow, SearchEntry,
 )
 import scraper
 import analyzer
@@ -300,22 +300,86 @@ def run_interaction_flow(
     competitors: List[Competitor],
     competitor_name: str,
     feature: str,
+    product_url: str = "",
 ) -> InteractionFlow:
     """
     执行交互流程梳理。
 
-    流程：搜索教程/文档 → 抓取页面内容 → 提取交互流程 → 生成文档
+    流程：优先站内采集 → 搜索教程/文档补充 → 抓取页面内容 → 提取交互流程 → 生成文档
 
     Args:
         competitors: 竞品列表（用于查找目标竞品）
         competitor_name: 目标竞品名称
         feature: 目标功能名称
+        product_url: 竞品官网地址（可选，优先用于站内采集）
 
     Returns:
         交互流程数据
     """
     logger = logging.getLogger("flow")
     logger.info(f"===== 开始交互流程梳理: [{competitor_name}] [{feature}] =====")
+
+    def _flow_entry_title(title: str = "", url: str = "") -> str:
+        text = (title or "").strip()
+        return text or (url or "").strip() or "站内页面"
+
+    def _flow_entry_content(page) -> str:
+        content = getattr(page, "content", "") or ""
+        return content[:4000]
+
+    def _site_flow_entries(crawl_result) -> List[SearchEntry]:
+        entries = []
+        pages = getattr(crawl_result, "pages", {}) or {}
+        for page in pages.values():
+            url = (getattr(page, "url", "") or "").strip()
+            if not url:
+                continue
+            title = _flow_entry_title(getattr(page, "title", ""), url)
+            feature_names = [item.get("name", "") for item in (getattr(page, "features", []) or []) if item.get("name")]
+            snippet = "；".join(feature_names[:3]) if feature_names else title
+            entries.append(SearchEntry(
+                title=title,
+                url=url,
+                snippet=snippet[:240],
+                source="site_crawl",
+                content=_flow_entry_content(page),
+            ))
+        for item in getattr(crawl_result, "sitemap_navigation", []) or []:
+            url = str(item.get("url", "") or "").strip()
+            if not url:
+                continue
+            title = _flow_entry_title(str(item.get("name", "") or ""), url)
+            evidence = str(item.get("evidence", "") or "").strip()
+            snippet = f"站内导航入口{f'（{evidence}）' if evidence else ''}"
+            entries.append(SearchEntry(
+                title=title,
+                url=url,
+                snippet=snippet,
+                source="sitemap",
+                content="",
+            ))
+        deduped = []
+        seen = set()
+        for entry in entries:
+            key = (entry.url or "").strip() or entry.title
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(entry)
+        return deduped[:20]
+
+    def _merge_flow_entries(primary_entries: List[SearchEntry], secondary_entries: List[SearchEntry], limit: int = 20) -> List[SearchEntry]:
+        merged = []
+        seen = set()
+        for entry in list(primary_entries) + list(secondary_entries):
+            key = (getattr(entry, "url", "") or "").strip() or (getattr(entry, "title", "") or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(entry)
+            if len(merged) >= limit:
+                break
+        return merged
 
     # 查找目标竞品
     target = None
@@ -339,7 +403,19 @@ def run_interaction_flow(
             ],
         )
 
-    # 1. 搜索教程和帮助文档
+    resolved_product_url = (product_url or target.url or "").strip()
+
+    # 1. 优先站内采集
+    site_entries = []
+    if resolved_product_url:
+        try:
+            crawl_result = site_crawler.deep_crawl_product(resolved_product_url, target.name)
+            site_entries = _site_flow_entries(crawl_result)
+            logger.info(f"站内采集到 {len(site_entries)} 条页面/导航证据")
+        except Exception as exc:
+            logger.warning(f"站内采集失败，降级为搜索补充: {exc}")
+
+    # 2. 搜索教程和帮助文档补充
     flow_keywords = [
         f"{target.name} {feature} 教程",
         f"{target.name} {feature} tutorial",
@@ -353,14 +429,15 @@ def run_interaction_flow(
         keywords=flow_keywords,
         days=365,  # 搜索范围更大
     )
+    entries = _merge_flow_entries(site_entries, entries)
 
-    # 2. 抓取页面内容（交互流程需要详细内容）
+    # 3. 抓取页面内容（交互流程需要详细内容）
     entries = scraper.enrich_entries_with_content(entries, max_pages=20)
 
-    # 3. 提取交互流程
+    # 4. 提取交互流程
     flow = analyzer.extract_interaction_flow(target.name, feature, entries)
 
-    # 4. 生成文档
+    # 5. 生成文档
     doc_path = reporter.generate_interaction_doc(flow)
 
     # 保存 JSON 数据
@@ -476,7 +553,7 @@ def main():
     parser.add_argument("--feature", "-f", help="目标功能名称（仅 flow 模式必需）")
 
     # 完整流程框架模式专用参数
-    parser.add_argument("--url", help="产品 URL（framework 模式必需）")
+    parser.add_argument("--url", help="产品 URL（flow/framework 模式使用）")
     parser.add_argument("--name", help="产品名称（framework 模式可选，默认从 URL 推断）")
     parser.add_argument("--all", action="store_true", help="对所有默认竞品执行框架分析（framework 模式）")
 
@@ -522,7 +599,7 @@ def main():
         elif args.mode == "flow":
             if not args.competitor or not args.feature:
                 parser.error("flow 模式需要指定 --competitor 和 --feature 参数")
-            run_interaction_flow(competitors, args.competitor, args.feature)
+            run_interaction_flow(competitors, args.competitor, args.feature, args.url or "")
 
         elif args.mode == "framework":
             if getattr(args, "all", False):

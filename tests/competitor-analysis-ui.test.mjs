@@ -34,7 +34,7 @@ test('competitor analysis dialog uses the confirmed field order and selectors', 
   )
   assert.match(pageSource, /v-if="analysisRequiresScopeFields"/)
   assert.match(pageSource, /const analysisRequiresScopeFields = computed/)
-  assert.match(pageSource, /!\['daily', 'weekly'\]\.includes\(analysisForm\.kind\)/)
+  assert.match(pageSource, /analysisForm\.kind === 'flow'/)
   assert.match(pageSource, /analysisCompetitorOptions/)
   assert.match(pageSource, /handleAnalysisCompetitorChange/)
   assert.match(pageSource, /multiple/)
@@ -502,6 +502,24 @@ test('competitor analysis confirm shows validation feedback instead of silently 
   assert.match(confirmSource, /const validationMessage = analysisDialogValidationMessage\(\)/)
   assert.match(confirmSource, /analysisDialogMessage\.value = validationMessage/)
   assert.match(confirmSource, /if \(validationMessage\) \{[\s\S]*?return[\s\S]*?\}/)
+})
+
+test('competitor framework analysis does not require flow-only feature and goal fields', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const validationStart = pageSource.indexOf('function analysisDialogValidationMessage()')
+  const validationEnd = pageSource.indexOf('async function handleConfirmAnalysis()', validationStart)
+  const validationSource = pageSource.slice(validationStart, validationEnd)
+  const recordsStart = pageSource.indexOf('function recordsForSelectedCompetitors()')
+  const recordsEnd = pageSource.indexOf('function setDialogKind', recordsStart)
+  const recordsSource = pageSource.slice(recordsStart, recordsEnd)
+
+  assert.ok(validationStart >= 0 && validationEnd > validationStart, 'analysisDialogValidationMessage should be present')
+  assert.ok(recordsStart >= 0 && recordsEnd > recordsStart, 'recordsForSelectedCompetitors should be present')
+  assert.match(pageSource, /const analysisRequiresScopeFields = computed\(\(\) => analysisForm\.kind === 'flow'\)/)
+  assert.doesNotMatch(validationSource, /analysisForm\.kind === 'framework'[\s\S]*请输入分析的功能名称/)
+  assert.doesNotMatch(validationSource, /analysisForm\.kind === 'framework'[\s\S]*请输入分析目标/)
+  assert.match(recordsSource, /feature:\s*analysisRequiresScopeFields\.value \? analysisForm\.feature\?\.trim\(\) \|\| '' : ''/)
+  assert.match(recordsSource, /goal:\s*analysisRequiresScopeFields\.value \? analysisForm\.goal\?\.trim\(\) \|\| '' : ''/)
 })
 
 test('competitor analysis shows a table shell while a new analysis is starting', async () => {

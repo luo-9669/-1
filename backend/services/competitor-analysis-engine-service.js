@@ -75,6 +75,9 @@ function buildArgs(input = {}, outputDir = '') {
   if (kind === 'flow') {
     args.push('--competitor', String(input.competitor || input.competitorName || '').trim() || '未命名竞品')
     args.push('--feature', String(input.feature || '').trim() || '未指定功能')
+    if (String(input.productUrl || '').trim()) {
+      args.push('--url', String(input.productUrl).trim())
+    }
   }
   if (kind === 'framework') {
     args.push('--url', String(input.productUrl || '').trim())

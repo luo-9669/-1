@@ -735,7 +735,7 @@ const analysisCompetitorOptions = computed(() => {
   for (const competitor of competitors.value) addAnalysisCompetitorOption(byKey, competitor)
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
-const analysisRequiresScopeFields = computed(() => !['daily', 'weekly'].includes(analysisForm.kind))
+const analysisRequiresScopeFields = computed(() => analysisForm.kind === 'flow')
 const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRecord.value))
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))

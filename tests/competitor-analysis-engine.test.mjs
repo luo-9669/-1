@@ -361,8 +361,10 @@ test('deep flow records preserve monitor evidence for backend model grounding', 
 
 test('flow runs pass the selected competitor config to python', async () => {
   let capturedConfig = null
+  let capturedArgs = null
   const service = createCompetitorAnalysisEngineService({
     pythonRunner: async (args, env) => {
+      capturedArgs = args
       assert.equal(args[1], 'flow')
       assert.ok(env.COMPETITORS_CONFIG, 'flow run should receive selected competitor config')
       capturedConfig = JSON.parse(await readFile(env.COMPETITORS_CONFIG, 'utf8'))
@@ -393,9 +395,82 @@ test('flow runs pass the selected competitor config to python', async () => {
 
   assert.equal(response.ok, true)
   assert.equal(response.interactionArtifacts.evidenceStatus, 'exact')
+  assert.ok(capturedArgs.includes('--url'))
+  assert.equal(capturedArgs[capturedArgs.indexOf('--url') + 1], 'https://www.gaoding.art/creation')
   assert.deepEqual(capturedConfig.competitors.map((item) => item.name), ['稿定设计'])
   assert.equal(capturedConfig.competitors[0].url, 'https://www.gaoding.art/creation')
   assert.doesNotMatch(JSON.stringify(capturedConfig), /创客贴|Higgsfield AI|Riverside/)
+})
+
+test('python flow analysis crawls the competitor site before search-engine fallback when url is available', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+import main
+from models import Competitor, SearchEntry, InteractionFlow
+
+events = []
+
+def fake_deep_crawl_product(url, product_name=""):
+    events.append(["crawl", url, product_name])
+    class FakeResult:
+        def __init__(self):
+            self.pages = {
+                "https://example.com/tools/video": type("Page", (), {
+                    "url": "https://example.com/tools/video",
+                    "title": "AI 视频生成",
+                    "content": "上传素材后即可生成视频",
+                    "features": [{"name": "AI 视频生成"}],
+                })()
+            }
+            self.sitemap_navigation = [
+                {"name": "视频工具", "url": "https://example.com/tools/video", "evidence": "sitemap"}
+            ]
+    return FakeResult()
+
+def fake_search_competitor(name, keywords, days=365):
+    events.append(["search", name, days, len(keywords)])
+    return [SearchEntry(
+        title="帮助中心 - 视频生成",
+        url="https://example.com/help/video",
+        snippet="帮助页",
+        content="帮助中心描述视频生成流程"
+    )]
+
+def fake_enrich_entries_with_content(entries, max_pages=20):
+    events.append(["enrich", len(entries), max_pages])
+    return entries
+
+def fake_extract_interaction_flow(competitor_name, feature, entries):
+    events.append(["extract", competitor_name, feature, len(entries), entries[0].url if entries else ""])
+    flow = InteractionFlow(competitor=competitor_name, feature=feature)
+    flow.evidence_status = "exact"
+    flow.evidence_quality = "full"
+    flow.evidence_count = len(entries)
+    flow.source_urls = [entry.url for entry in entries]
+    flow.structured_data = {"steps": []}
+    return flow
+
+main.site_crawler.deep_crawl_product = fake_deep_crawl_product
+main.scraper.search_competitor = fake_search_competitor
+main.scraper.enrich_entries_with_content = fake_enrich_entries_with_content
+main.analyzer.extract_interaction_flow = fake_extract_interaction_flow
+main.reporter.generate_interaction_doc = lambda flow: "/tmp/flow.md"
+main.reporter.save_raw_data = lambda data, filename, output_dir: None
+
+competitors = [Competitor(name="Example", url="https://example.com", tier=None, keywords=[])]
+main.run_interaction_flow(competitors, "Example", "生成视频")
+print(json.dumps(events, ensure_ascii=False))
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  const events = JSON.parse(result.stdout.trim().split('\n').at(-1))
+  assert.deepEqual(events[0], ['crawl', 'https://example.com', 'Example'])
+  assert.deepEqual(events[1], ['search', 'Example', 365, 5])
+  assert.deepEqual(events[2], ['enrich', 2, 20])
+  assert.deepEqual(events[3], ['extract', 'Example', '生成视频', 2, 'https://example.com/tools/video'])
 })
 
 test('flow python failures are not reported as generated reports', async () => {
