@@ -40,6 +40,42 @@ test('openai compatible responses request forwards max output token limit', asyn
   assert.equal(capturedBody.max_output_tokens, 1200)
 })
 
+test('openai compatible responses request sends uploaded reference images as vision input', async () => {
+  let capturedBody = null
+  const firstImage = 'data:image/png;base64,Zmlyc3QtaW1hZ2U='
+  const secondImage = 'data:image/png;base64,c2Vjb25kLWltYWdl'
+  const provider = createOpenAICompatibleAgentProvider({
+    apiKey: 'test-key',
+    baseUrl: 'http://model.local/v1',
+    defaultModel: 'gpt-test',
+    apiSurface: 'responses',
+    fetchImpl: async (_url, init = {}) => {
+      capturedBody = JSON.parse(init.body)
+      return new Response(JSON.stringify({ output_text: '{"ok":true}', usage: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+  })
+
+  await provider.generate({
+    systemPrompt: 'json only',
+    userPrompt: '识别图片',
+    imageDataUrl: firstImage,
+    referenceImages: [
+      { imageDataUrl: firstImage },
+      { imageDataUrl: secondImage }
+    ]
+  })
+
+  const content = capturedBody.input[0].content
+  assert.equal(content[0].type, 'input_text')
+  assert.deepEqual(
+    content.filter((item) => item.type === 'input_image').map((item) => item.image_url),
+    [firstImage, secondImage]
+  )
+})
+
 test('openai compatible generate falls back to curl transport after fetch timeout', async () => {
   let fallbackCalled = false
   let capturedFallbackBody = null

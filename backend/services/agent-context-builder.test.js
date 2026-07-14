@@ -128,6 +128,52 @@ test('workflow agent prompt asks for complete readable content instead of short 
   assert.doesNotMatch(context.systemPrompt, /content 是给用户看的短回复/)
 })
 
+test('workflow agent image references become model-readable vision input', () => {
+  const imageDataUrl = 'data:image/png;base64,aW1hZ2UtcmVmZXJlbmNl'
+  const context = buildAgentContext({
+    action: 'canvas-action-advice',
+    scopeId: 'requirement-dissection-agent',
+    message: { role: 'user', content: '请识别这张图里的需求信息' },
+    references: [
+      {
+        id: 'uploaded-image',
+        name: '需求截图.png',
+        kind: 'image',
+        type: 'image/png',
+        status: 'ready',
+        preview: imageDataUrl
+      }
+    ],
+    run: {
+      id: 'run-image-reference',
+      workflowName: '截图需求分析',
+      input: '根据截图补充需求',
+      documentAnalysis: {
+        totalDesignFlow: {
+          currentStage: 'requirement-dissection',
+          stages: [{ id: 'requirement-dissection', name: '需求分析' }],
+          stageCanvases: {
+            'requirement-dissection': {
+              nodes: [
+                { id: 'requirement-dissection-agent', stageId: 'requirement-dissection', title: '需求分析', summary: '识别用户上传截图' }
+              ],
+              edges: []
+            }
+          }
+        }
+      },
+      agentSessions: {}
+    },
+    context: {
+      activeNode: { id: 'requirement-dissection-agent', title: '需求分析', stageId: 'requirement-dissection' }
+    }
+  })
+
+  assert.equal(context.imageDataUrl, imageDataUrl)
+  assert.equal(context.references[0].preview, imageDataUrl)
+  assert.match(context.userPrompt, /需求截图\.png：image/)
+})
+
 test('agent context separates workflow shell from the active business project', () => {
   const context = buildAgentContext({
     scopeId: 'requirement-dissection-agent',

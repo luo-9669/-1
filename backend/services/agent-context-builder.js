@@ -100,9 +100,36 @@ function compactReferences(references = []) {
       id: item.id || '',
       name: item.name || '未命名引用',
       kind: item.kind || item.type || 'document',
+      type: item.type || '',
       status: item.status || 'ready',
-      text: compactText(item.text || item.content || '', 800)
+      text: compactText(item.text || item.content || '', 800),
+      ...(() => {
+        const imageDataUrl = referenceImageDataUrl(item)
+        return imageDataUrl ? { preview: imageDataUrl, imageDataUrl } : {}
+      })()
     }))
+}
+
+function referenceImageDataUrl(reference = {}) {
+  const source = String(reference.imageDataUrl || reference.dataUrl || reference.preview || '').trim()
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(source) ? source : ''
+}
+
+function referenceImages(references = []) {
+  return (Array.isArray(references) ? references : [])
+    .map((item, index) => {
+      const imageDataUrl = referenceImageDataUrl(item)
+      if (!imageDataUrl) return null
+      return {
+        id: item.id || '',
+        title: item.name || item.title || `上传图片 ${index + 1}`,
+        name: item.name || item.title || `上传图片 ${index + 1}`,
+        type: item.type || 'image',
+        imageDataUrl
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 4)
 }
 
 function compactHistory(run = {}, scopeId = '') {
@@ -124,6 +151,7 @@ function buildDialogueAgentContext(payload = {}, base = {}) {
     .filter((item) => item.content !== message.content)
     .slice(-10)
   const references = compactReferences(payload.references || [])
+  const uploadedImages = referenceImages(references)
   const referenceText = references.length
     ? renderLines('用户上传资料', references.map((item) => `${item.name}：${item.text || item.kind}`))
     : '用户上传资料：暂无'
@@ -148,6 +176,8 @@ function buildDialogueAgentContext(payload = {}, base = {}) {
       content: message.content || ''
     },
     references,
+    referenceImages: uploadedImages,
+    ...(uploadedImages[0]?.imageDataUrl ? { imageDataUrl: uploadedImages[0].imageDataUrl } : {}),
     retrievedKnowledge: [],
     knowledgeRetrievalError: '',
     history,
@@ -542,6 +572,7 @@ function buildAgentWorkbenchContext(payload = {}, base = {}) {
     .filter((item) => item.content !== message.content)
     .slice(-10)
   const references = compactReferences(payload.references || [])
+  const uploadedImages = referenceImages(references)
   const referenceText = references.length
     ? renderLines('用户上传资料', references.map((item) => `${item.name}：${item.text || item.kind}`))
     : '用户上传资料：暂无'
@@ -591,6 +622,8 @@ function buildAgentWorkbenchContext(payload = {}, base = {}) {
       content: message.content || ''
     },
     references,
+    referenceImages: uploadedImages,
+    ...(uploadedImages[0]?.imageDataUrl ? { imageDataUrl: uploadedImages[0].imageDataUrl } : {}),
     analysisGuidance,
     advancedUxReport,
     retrievedKnowledge,
@@ -661,6 +694,7 @@ export function buildAgentContext(payload = {}) {
     ? explicitAction
     : classifyAgentAction(message.content || '')
   const references = compactReferences(payload.references || [])
+  const uploadedImages = referenceImages(references)
   const history = compactHistory(run, scopeId)
   const canvasContext = resolveCanvas(run, rawNode, scopeId)
   const totalFlowContext = canvasContext.totalFlowContext || null
@@ -753,6 +787,8 @@ export function buildAgentContext(payload = {}) {
       content: message.content || ''
     },
     references,
+    referenceImages: uploadedImages,
+    ...(uploadedImages[0]?.imageDataUrl ? { imageDataUrl: uploadedImages[0].imageDataUrl } : {}),
     advancedUxReport,
     retrievedKnowledge,
     knowledgeRetrievalError,

@@ -841,23 +841,41 @@ export function createOpenAICompatibleAgentProvider(options = {}) {
   const spawnImpl = options.spawnImpl
   if (!fetchImpl) throw new Error('当前运行环境不支持 fetch')
 
-  const chatUserContent = (context = {}) => context.imageDataUrl
+  const agentVisionImageUrls = (context = {}) => {
+    const urls = []
+    const pushUrl = (value = '') => {
+      const url = String(value || '').trim()
+      if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(url)) return
+      if (!urls.includes(url)) urls.push(url)
+    }
+    pushUrl(context.imageDataUrl)
+    const images = Array.isArray(context.referenceImages) ? context.referenceImages : []
+    images.forEach((reference) => pushUrl(reference?.imageDataUrl || reference?.dataUrl || reference?.preview))
+    return urls.slice(0, 4)
+  }
+  const chatUserContent = (context = {}) => {
+    const imageUrls = agentVisionImageUrls(context)
+    return imageUrls.length
     ? [
         { type: 'text', text: context.userPrompt || '' },
-        { type: 'image_url', image_url: { url: context.imageDataUrl } }
+        ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } }))
       ]
     : context.userPrompt
-  const responsesInput = (context = {}) => context.imageDataUrl
+  }
+  const responsesInput = (context = {}) => {
+    const imageUrls = agentVisionImageUrls(context)
+    return imageUrls.length
     ? [
         {
           role: 'user',
           content: [
             { type: 'input_text', text: context.userPrompt || '' },
-            { type: 'input_image', image_url: context.imageDataUrl }
+            ...imageUrls.map((url) => ({ type: 'input_image', image_url: url }))
           ]
         }
       ]
     : context.userPrompt
+  }
   const maxOutputTokenLimit = (context = {}) => {
     const value = Number(context.maxOutputTokens || context.max_output_tokens || context.maxTokens || context.max_tokens || 0)
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
