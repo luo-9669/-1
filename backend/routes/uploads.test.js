@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { uploadRoutes } from './uploads.js'
+import { advancedUxInteractionLofiCanvasFromPageInteractionDocument } from '../services/advanced-ux-page-interaction.js'
 import { createWorkspaceStore } from '../services/workspace-store.js'
 import { createWorkspaceSetting } from '../models/workspace.js'
 
@@ -1259,6 +1260,47 @@ function legacyPageInteractionMarkdownMissingLatestStage2Gates() {
   ].join('\n')
 }
 
+function stageOneKeyNodeLofiComparisonMarkdown() {
+  return [
+    '# AI视频爆款复刻-页面交互框架与说明',
+    '',
+    '## 第一阶段第 7 块：关键节点低保真对比',
+    '',
+    '第一阶段第 7 块确实应该用方案 A/B/C 分开展示的 ASCII 低保真对比。',
+    '这不是正式低保真页面稿，也不是第二阶段的完整页面交互文档。',
+    '',
+    '### 方案A - 分步拆解页',
+    '',
+    '```text',
+    '┌────────────────────┐',
+    '│ 上传参考视频        │',
+    '├────────────────────┤',
+    '│ AI 拆解爆款结构     │',
+    '└────────────────────┘',
+    '```',
+    '',
+    '### 方案B - 工作台拆解面板',
+    '',
+    '```text',
+    '┌────────────────────┐',
+    '│ 左侧任务列表        │',
+    '├────────────────────┤',
+    '│ 右侧拆解结果        │',
+    '└────────────────────┘',
+    '```',
+    '',
+    '### 方案C - 对话拆解卡片',
+    '',
+    '```text',
+    '┌────────────────────┐',
+    '│ 用户输入需求        │',
+    '├────────────────────┤',
+    '│ Agent 返回拆解卡片   │',
+    '└────────────────────┘',
+    '```'
+  ].join('\n')
+}
+
 function completeDrawioXml(name = '主流程图') {
   return [
     '<mxfile host="app.diagrams.net" modified="2026-07-09T00:00:00.000Z" agent="Codex" version="26.0.0" type="device">',
@@ -2111,6 +2153,31 @@ test('advanced UX interaction lofi stage generates page interaction document and
   assert.match(calls[0].systemPrompt || '', /交互规则表（自有产品）[\s\S]*规则编号、页面编号、区域编号、触发元素/)
 })
 
+test('advanced UX page interaction importer rejects weak page sections before creating canvas nodes', () => {
+  const weakMarkdown = [
+    '# AI视频爆款复刻-页面交互框架与说明',
+    '',
+    '## 1. 文档概述',
+    '弱文档只列出页面名称，没有完整页面框架、交互规则和异常状态。',
+    '',
+    '## 2. 页面总览',
+    '| 编号 | 页面名称 | 类型 | 所属模块 | 入口来源 | 核心职责 | 角色权限 | 数据来源 | 权限规则 | 路由路径 | analyzed |',
+    '|------|----------|------|----------|----------|----------|----------|----------|----------|----------|----------|',
+    '| P01 | 爆款复刻工作台 | page | 核心流程 | 首页入口 | 承接上传与拆解 | user | 任务接口 | 登录可用 | /workspace | true |',
+    '',
+    '## 8. 逐页交互说明',
+    '### P01 爆款复刻工作台',
+    '这里只描述工作台可以上传视频并查看拆解结果，但没有页面框架表格、交互规则表格、异常状态表格和 ASCII 线框图。'
+  ].join('\n')
+
+  const canvas = advancedUxInteractionLofiCanvasFromPageInteractionDocument({
+    fileName: 'AI视频爆款复刻-页面交互框架与说明.md',
+    markdown: weakMarkdown
+  })
+
+  assert.equal(canvas, null)
+})
+
 test('advanced UX interaction lofi stage persists generating state before long page document model returns', async () => {
   const advancedMarkdown = completeAdvancedUxMarkdown([
     '## 原始需求分析',
@@ -2446,6 +2513,10 @@ test('advanced UX page interaction gate accepts per-page tables without repeated
     .replace(/\*\*交互规则\*\*：/g, '')
     .replace(/\*\*异常状态\*\*：/g, '')
     .replace(
+      '| 18 | Draw.io规划完整 | 图类型、节点、路径、格式齐全 |',
+      '| 18 | Draw.io 图规划说明 | 已输出字段完整的规划说明 |'
+    )
+    .replace(
       '| Draw.io 流程图/状态图 | 按需 | 只有流程 >8 步或状态 >5 个时生成真实 .drawio/.xml |',
       '| Draw.io 主流程图/状态图 | 待生成 | 当前未提供真实 .drawio/.xml 文件，不声明已生成 |'
     )
@@ -2681,6 +2752,83 @@ test('advanced UX page interaction document rejects legacy stage two output miss
   const errorEvent = events.find((item) => item.event === 'error')?.data
   assert.equal(errorEvent?.code, 'ADVANCED_UX_MARKDOWN_FAILED')
   assert.match(errorEvent?.message || '', /信息架构实体表|弹窗与抽屉定义表|关键断点|页面3方案|方案验证与收敛|Problem-Solution Fit|推荐决策卡片|后续待确认事项/)
+  assert.equal(events.some((item) => item.event === 'artifact' && item.data?.type === 'advanced-ux-page-interaction-document'), false)
+})
+
+test('advanced UX interaction lofi stage rejects stage one key-node lofi comparison residue', async () => {
+  const advancedMarkdown = completeAdvancedUxMarkdown([
+    '## 原始需求分析',
+    '### 本节点结论',
+    'AI 视频爆款复刻工具需要上传参考视频、拆解脚本和生成复刻视频。',
+    '## 设计问题定义',
+    '### 本节点结论',
+    '核心问题是让用户从爆款参考快速得到可控的生成方案。',
+    '## 用户与场景',
+    '### 本节点结论',
+    '创作者需要低门槛复刻结构，但要避免版权和素材质量风险。',
+    '## 整体交互链路',
+    '### 本节点结论',
+    '主链路围绕上传参考、AI 解析、参数配置、生成任务和结果导出。',
+    '## 三套设计方案',
+    '### 本节点结论',
+    '优先采用工作台式流程，兼顾可控和效率。',
+    '## 异常流补充',
+    '### 本节点结论',
+    '重点覆盖解析失败、生成失败、额度不足和版权提醒。',
+    '## 推荐方案建议',
+    '### 本节点结论',
+    '先交付参考解析、任务生成、结果预览和历史记录闭环。'
+  ].join('\n\n'))
+  const provider = {
+    name: 'openai-compatible',
+    async generate(context = {}) {
+      if (/UX 页面交互文档生成专家/.test(context.systemPrompt || '')) {
+        return {
+          content: stageOneKeyNodeLofiComparisonMarkdown(),
+          provider: 'openai-compatible',
+          model: 'gpt-page-doc',
+          usage: {}
+        }
+      }
+      return { content: advancedMarkdown, usage: {} }
+    }
+  }
+  const routes = uploadRoutes({ agentProvider: provider })
+
+  const result = await routes['POST /api/uploads/documents/analyze/stage/stream']({
+    stageId: 'interaction-lofi',
+    skillSelectionMode: 'manual',
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    input: '做一个AI生成视频拥有爆款复刻功能的web工具',
+    documents: [],
+    currentTotalDesignFlow: {
+      currentStage: 'requirement-dissection',
+      stages: [
+        { id: 'requirement-dissection', name: '需求分析' },
+        { id: 'interaction-lofi', name: '交互低保' }
+      ],
+      advancedUxReport: {
+        status: 'imported',
+        fileName: '高级UX需求分析.md',
+        markdown: advancedMarkdown
+      }
+    }
+  })
+  const events = result.body
+    .trim()
+    .split('\n\n')
+    .map((chunk) => {
+      const [eventLine, dataLine] = chunk.split('\n')
+      return {
+        event: eventLine.replace(/^event:\s*/, ''),
+        data: JSON.parse(dataLine.replace(/^data:\s*/, ''))
+      }
+    })
+
+  const errorEvent = events.find((item) => item.event === 'error')?.data
+  assert.equal(errorEvent?.code, 'ADVANCED_UX_MARKDOWN_FAILED')
+  assert.match(errorEvent?.message || '', /阶段二不能直接输出阶段一第 7 块关键节点低保真对比/)
   assert.equal(events.some((item) => item.event === 'artifact' && item.data?.type === 'advanced-ux-page-interaction-document'), false)
 })
 
@@ -3221,6 +3369,7 @@ test('advanced UX markdown generation fails when model leaves title-only section
   assert.equal(reportEvent?.status, 'quality_failed')
   assert.match(reportEvent?.importError || '', /未符合输出规范|标题无正文/)
   assert.match(reportEvent?.markdown || '', /标题空转的高级 UX 报告/)
+  assert.match(reportEvent?.content || '', /已保留模型返回内容/)
   assert.equal(reportEvent?.repairState?.attempt, 2)
   assert.equal(reportEvent?.repairState?.maxAttempts, 2)
   assert.equal(reportEvent?.repairState?.status, 'failed')

@@ -1059,6 +1059,42 @@ function suppressAdvancedUxPendingInteractionFallbackCanvas(totalFlow = {}, run 
   const existingInteractionNodes = Array.isArray(totalFlow.stageCanvases?.['interaction-lofi']?.nodes)
     ? totalFlow.stageCanvases['interaction-lofi'].nodes
     : []
+  const interactionStatus = String(totalFlow?.stageStatuses?.['interaction-lofi']?.status || '').trim()
+  const hasPendingInteractionCanvas = existingInteractionNodes.some((node) =>
+    node?.loading === true ||
+    String(node?.artifactStatus || '').trim() === 'generating' ||
+    String(node?.contentStatus || '').trim() === 'model-pending' ||
+    String(node?.contentSource || '').trim() === 'model-pending'
+  )
+  const failedStageOneReport = advancedUxFailedReportForHydration(run, totalFlow)
+  if (
+    failedStageOneReport &&
+    (
+      totalFlow?.currentStage === 'interaction-lofi' ||
+      ['generating', 'waiting', 'paused'].includes(interactionStatus) ||
+      hasPendingInteractionCanvas
+    )
+  ) {
+    const canvas = advancedUxStageFailedCanvas(
+      'interaction-lofi',
+      failedStageOneReport.importError || '高级 UX Markdown 未通过质量门禁，无法继续生成交互低保。'
+    )
+    return {
+      ...totalFlow,
+      stageStatuses: {
+        ...(totalFlow.stageStatuses || {}),
+        'interaction-lofi': {
+          ...(totalFlow.stageStatuses?.['interaction-lofi'] || {}),
+          status: 'failed',
+          pendingSummary: false
+        }
+      },
+      stageCanvases: {
+        ...(totalFlow.stageCanvases || {}),
+        'interaction-lofi': canvas
+      }
+    }
+  }
   const hasImportedInteractionCanvas = existingInteractionNodes.some((node) =>
     String(node?.contentStatus || '') !== 'model-pending' &&
     String(node?.contentSource || '') !== 'model-pending' &&
@@ -1071,7 +1107,6 @@ function suppressAdvancedUxPendingInteractionFallbackCanvas(totalFlow = {}, run 
   )
   if (hasImportedInteractionCanvas) return totalFlow
   const reportMarkdown = String(totalFlow?.advancedUxReport?.markdown || run.documentAnalysis?.advancedUxReport?.markdown || '').trim()
-  const interactionStatus = String(totalFlow?.stageStatuses?.['interaction-lofi']?.status || '').trim()
   const shouldShowPendingInteraction = Boolean(
     reportMarkdown ||
     totalFlow?.currentStage === 'interaction-lofi' ||

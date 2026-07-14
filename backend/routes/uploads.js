@@ -1425,11 +1425,34 @@ export function uploadRoutes(options = {}) {
     const lines = text.split(/\r?\n/)
     const claimsGenerated = (line = '') => /(?:已生成|生成完成|已输出|已产出)/.test(line) &&
       !/(?:未生成|待生成|不声明已生成|不得写\s*Draw\.io\s*已生成|尚未生成|无需生成|按需生成)/i.test(line)
-    if (lines.some((line) => /(?:Draw\.io|\.drawio|\.xml)/i.test(line) && claimsGenerated(line))) {
+    const isPlanningLine = (line = '') => /(?:规划|说明|规范|自检|本文|仅规划|建议后续|后续产出|文本定义|ASCII|待生成|未生成|不声明已生成)/i.test(line)
+    const claimsDrawioFileGenerated = (line = '') =>
+      /(?:Draw\.io|\.drawio|\.xml)/i.test(line) &&
+      claimsGenerated(line) &&
+      !isPlanningLine(line) &&
+      /(?:真实文件|文件|\.drawio|\.xml|主流程图|状态图|流程图)/i.test(line)
+    const claimsLowfiImageGenerated = (line = '') =>
+      /(?:低保真|线框图)/.test(line) &&
+      claimsGenerated(line) &&
+      !isPlanningLine(line) &&
+      /(?:真实图片|图片|图像|PNG|JPG|JPEG|WEBP|线框图)/i.test(line)
+    if (lines.some((line) => claimsDrawioFileGenerated(line))) {
       issues.push('Draw.io 未生成真实文件前不得写已生成')
     }
-    if (lines.some((line) => /(?:低保真|线框图)/.test(line) && claimsGenerated(line))) {
+    if (lines.some((line) => claimsLowfiImageGenerated(line))) {
       issues.push('低保真线框图未生成真实图片前不得写已生成')
+    }
+    return issues
+  }
+  const pageInteractionStageOneResidueIssues = (markdown = '') => {
+    const text = String(markdown || '').replace(/\r\n/g, '\n').trim()
+    const issues = []
+    const hasExplicitStageOneKeyNodeLofi = /(?:第一阶段|阶段一)[\s\S]{0,80}(?:第\s*7\s*块|关键节点低保真对比)/.test(text)
+    const admitsNotStageTwoDocument = /不是正式低保真页面稿|不是第二阶段的完整页面交互文档|不是[\s\S]{0,20}完整页面交互文档/.test(text)
+    const hasStageOneSchemeSkeleton = /方案\s*[ABCＡＢＣ][\s\S]{0,40}(?:分步拆解页|工作台拆解面板|对话拆解卡片|ASCII|骨架|低保真对比)/i.test(text)
+    const lacksStageTwoPageDocument = !/^##\s+.*页面总览/m.test(text) || !/^###\s+P\d{2}\s+/m.test(text)
+    if ((hasExplicitStageOneKeyNodeLofi && (lacksStageTwoPageDocument || admitsNotStageTwoDocument)) || (hasStageOneSchemeSkeleton && lacksStageTwoPageDocument)) {
+      issues.push('阶段二不能直接输出阶段一第 7 块关键节点低保真对比，必须生成完整页面交互文档')
     }
     return issues
   }
@@ -1437,6 +1460,7 @@ export function uploadRoutes(options = {}) {
     const text = String(markdown || '').replace(/\r\n/g, '\n').trim()
     const issues = []
     if (!text) return ['页面交互文档为空']
+    issues.push(...pageInteractionStageOneResidueIssues(text))
     if (!/^#\s+.+页面交互框架与说明\s*$/m.test(text)) {
       issues.push('缺少 H1 标题：[产品名]-页面交互框架与说明')
     }
@@ -1545,6 +1569,7 @@ export function uploadRoutes(options = {}) {
       '这份文件是后端产物，文件名必须是“[产品名]-页面交互框架与说明.md”。',
       '不要重新向用户确认；如果上下文缺失，只能在待确认事项或风险中标注，不能兜底编造业务内容。',
       '阶段二结论不得违背阶段一已确认结论；若对话补充与最终文档不一致，以明确的用户/Agent 确认补充为优先，并在文档概述中标明来源。',
+      '阶段一第 7 块“关键节点低保真对比”和方案 A/B/C ASCII 骨架只能作为设计方向参考，禁止直接作为阶段二最终产物输出。',
       '',
       '固定 UX 分析文档输出规范：',
       outputStandardMarkdown,
@@ -1587,6 +1612,7 @@ export function uploadRoutes(options = {}) {
       '- 不要用代码块包裹整篇文档；但页面流转文本流程图、每页文本布局图（ASCII）必须使用 ```text 代码块。',
       '- 不要输出 :::page-layout-artifact。',
       '- 不要写“已生成低保真图”或“已生成 Draw.io”，除非输入中已经提供真实图片 URL 或 .drawio/.xml 文件。',
+      '- 禁止输出或点评“阶段一第 7 块关键节点低保真对比 / 方案A、方案B、方案C ASCII 骨架”来代替阶段二文档；阶段二必须产出页面总览、页面流转、信息架构、状态机、逐页交互说明、交互规则、异常状态、方案验证和交付物清单。',
       '- 必须保留精确二级标题：## 1. 文档概述、## 2. 页面总览、## 3. 页面流转总览、## 4. 信息架构实体表、## 5. 核心用户流程、## 6. 状态机、## 7. 弹窗与抽屉定义表、## 8. 逐页交互说明、## 9. 关键断点与优化节点、## 10. 交互规则表（自有产品）、## 11. 全局交互规范、## 12. 页面3方案、## 13. 方案验证与收敛、## 14. 交付物清单、## 15. 产物规范说明。',
       '- 阶段二核心流程必须覆盖：需求快析 → 页面识别与编号 → 信息架构实体表 → 主流程与状态机 → 弹窗定义 → 逐页交互说明 → 关键断点与优化节点 → 核心页面线框图 → 全局交互规范 → 页面3方案 → 方案验证与收敛 → 文档组装。',
       '- 文档概述必须包含“核心假设清单”，不少于 5 条，表头覆盖：核心假设、依据、风险、验证方式、置信度。',
@@ -2828,6 +2854,7 @@ export function uploadRoutes(options = {}) {
         ? `高级 UX Markdown 文件已生成，但未通过质量门禁：${fileName}`
         : `高级 UX Markdown 文件已生成：${fileName}`,
       failed && issueText ? `门禁原因：${issueText}` : '',
+      failed ? '已保留模型返回内容，可在详情中查看已生成部分，并继续修复缺失项。' : '',
       failed ? '暂未导入需求分析画布，请修复或重新生成后再导入。' : '',
       !failed && drawioArtifacts.length
         ? `Draw.io 文件已生成：${drawioArtifacts.map((artifact) => artifact.fileName || artifact.label || 'Draw.io 文件').join('、')}`
@@ -3640,6 +3667,7 @@ export function uploadRoutes(options = {}) {
         )
         push('artifact', {
           type: 'advanced-ux-markdown-report',
+          content: advancedUxMarkdownReportDisplayText(report),
           ...report
         })
         if (report.status === 'quality_failed') {

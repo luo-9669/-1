@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { initialMaterialsTabFromHash } from '../frontend/src/app/routes.js'
+import { getSidebarNavItems } from '../frontend/src/services/navigation.js'
 import { getCurrentStep } from '../frontend/src/services/workflows.js'
 
 test('sidebar switching restores state from the synced project route', async () => {
@@ -38,6 +39,13 @@ test('sidebar exposes a dedicated competitor analysis entry and project route', 
   assert.match(appSource, /CompetitorAnalysisPage/)
   assert.match(appSource, /activeView === 'competitorAnalysis'/)
   assert.match(appSource, /route === '\/competitor-analysis'/)
+})
+
+test('sidebar navigation uses the product-approved item order', () => {
+  assert.deepEqual(
+    getSidebarNavItems().map((item) => item.label),
+    ['竞品分析', '需求文档', '知识库', '设计方案', '工程开发', '技能中心', '交付资产']
+  )
 })
 
 test('project scoped route cannot switch to a project outside the hydrated account', async () => {

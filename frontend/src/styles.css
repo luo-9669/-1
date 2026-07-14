@@ -1553,13 +1553,6 @@ label {
   font-size: 12px;
 }
 
-.knowledge-markdown-shell {
-  min-height: 620px;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
-}
-
 .knowledge-canvas-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1575,39 +1568,6 @@ label {
 .knowledge-canvas-toolbar span {
   color: #7f8792;
   font-size: 12px;
-}
-
-.knowledge-markdown-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.knowledge-markdown-secondary-tabs {
-  min-width: 0;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: nowrap;
-  flex: 1 1 auto;
-  overflow-x: auto;
-  justify-content: flex-start;
-}
-
-.knowledge-canvas-toolbar.knowledge-markdown-toolbar > .knowledge-markdown-secondary-tabs {
-  display: flex;
-  flex-direction: row;
-  max-width: 100%;
-}
-
-.knowledge-markdown-secondary-tabs .ui-secondary-tab {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.knowledge-markdown-toolbar .ui-button {
-  flex: 0 0 auto;
 }
 
 .knowledge-xmind-viewport,
@@ -3036,20 +2996,6 @@ label {
 .prototype-screen-list span {
   color: #7f8792;
   font-size: 12px;
-}
-
-.knowledge-markdown-view {
-  min-height: 520px;
-  overflow: auto;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: #222529;
-  padding: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  white-space: pre-wrap;
 }
 
 .knowledge-node-modal {

@@ -421,6 +421,17 @@ function asciiLayoutFromBody(body = '') {
   return anyBoxCode || ''
 }
 
+function canImportPageArtifact(artifacts = {}, wireframe = '') {
+  const frameRows = Array.isArray(artifacts.frameRows) ? artifacts.frameRows : []
+  const interactionRows = Array.isArray(artifacts.interactionRows) ? artifacts.interactionRows : []
+  const stateMatrix = Array.isArray(artifacts.stateMatrix) ? artifacts.stateMatrix : []
+  const hasWireframe = /[┌┐└┘│]/.test(String(wireframe || ''))
+  return frameRows.length >= 2 &&
+    interactionRows.length >= 5 &&
+    stateMatrix.length >= 5 &&
+    hasWireframe
+}
+
 function gestureNotes(page = {}, artifacts = {}) {
   const source = [
     page.body,
@@ -446,7 +457,9 @@ export function advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageI
     const areaNames = artifacts.frameRows.map((row) => cleanText(row['区域'] || '')).filter(Boolean)
     const operationNames = artifacts.interactionRows.map((row) => cleanText(row.userAction || row.target || '')).filter(Boolean)
     const stateNames = artifacts.stateMatrix.map((row) => cleanText(row.state || '')).filter(Boolean)
-    const wireframe = asciiLayoutFromBody(page.body) || asciiWireframe({ ...page, pageName }, artifacts.frameRows)
+    const explicitWireframe = asciiLayoutFromBody(page.body)
+    const wireframe = explicitWireframe || (artifacts.frameRows.length >= 2 ? asciiWireframe({ ...page, pageName }, artifacts.frameRows) : '')
+    if (!canImportPageArtifact(artifacts, wireframe)) return null
     return {
       id: `advanced-ux-page-${String(page.pageId || index + 1).toLowerCase()}`,
       stageId: 'interaction-lofi',
@@ -513,7 +526,8 @@ export function advancedUxInteractionLofiCanvasFromPageInteractionDocument(pageI
         pageId: page.pageId
       }
     }
-  })
+  }).filter(Boolean)
+  if (!nodes.length || nodes.length !== pages.length) return null
   return {
     title: '页面交互低保画布',
     summary: '由高级 UX 页面交互框架与说明 Markdown 自动导入。',

@@ -594,7 +594,7 @@
               <div class="competitor-analysis-feature-picker">
                 <div>
                   <h4>选择要分析的功能</h4>
-                  <p>系统会从竞品记录、监控事件和完整框架报告里发现功能；用户只需要点选，不需要输入目标词。</p>
+                  <p>只展示已确认的竞品主功能链路；用户只需要点选，不需要输入目标词。</p>
                 </div>
                 <ElSelect
                   v-if="competitorFeatureMapOptions.length"
@@ -603,7 +603,7 @@
                   popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"
                   aria-label="选择要分析的功能"
                   filterable
-                  placeholder="选择系统发现的功能"
+                  placeholder="选择竞品主功能链路"
                   @change="handleCompetitorFeatureSelect"
                 >
                   <ElOption
@@ -618,7 +618,7 @@
                     </div>
                   </ElOption>
                 </ElSelect>
-                <p v-else class="competitor-analysis-help">暂未发现可点选功能。可以先生成「完整框架」发现功能地图，或上传截图作为参考。</p>
+                <p v-else class="competitor-analysis-help">暂未发现可点选主功能链路。可以先生成「完整框架」，或上传竞品截图作为参考。</p>
               </div>
             </section>
 
@@ -998,6 +998,41 @@ function normalizeFeatureOptionName(value = '') {
     .trim()
 }
 
+const ACTIONABLE_FEATURE_RECORD_KINDS = new Set(['flow', 'framework'])
+const PRIMARY_FEATURE_NAME_PATTERN = /(入口|中心|工作台|平台|模板|创作|灵感|主图|场景图|详情页|营销素材|证件照|形象照|商品|素材|编辑器|生成|去除|移除|改色|打光|特效|抠图|扩图|换背景|海报|视频|图片|设计|AI|智能)/i
+const NON_PRIMARY_FEATURE_NAME_PATTERN = /(今日未发现|本周未发现|未发现明确|暂未发现|没有匹配|全部功能|新功能扫描报告|竞品监控周报|本周概览|当前状态|建议处理|检索识别状态|说明)/i
+
+function isPrimaryCompetitorFeatureCandidate(name = '', source = 'record') {
+  const text = normalizeFeatureOptionName(name)
+  if (!text || text.length < 2 || text.length > 36) return false
+  if (NON_PRIMARY_FEATURE_NAME_PATTERN.test(text)) return false
+  if (source === 'event' || source === 'screenshot') return true
+  return PRIMARY_FEATURE_NAME_PATTERN.test(text)
+}
+
+function isDuplicateCompetitorFeatureName(name = '', record = {}) {
+  const text = normalizeFeatureOptionName(name)
+  if (!text) return false
+  return recordCompetitorNameList(record).some((item) => normalizeFeatureOptionName(item) === text)
+}
+
+function recordHasPrimaryFeature(record = {}) {
+  const recordFeature = recordFeatureLabel(record)
+  return Boolean(
+    ACTIONABLE_FEATURE_RECORD_KINDS.has(record.kind) &&
+    recordFeature &&
+    !['全部功能', '未填写'].includes(recordFeature) &&
+    !isDuplicateCompetitorFeatureName(recordFeature, record) &&
+    isPrimaryCompetitorFeatureCandidate(recordFeature, record.kind === 'framework' ? 'framework' : 'record')
+  )
+}
+
+function recordHasActionableAnalysisValue(record = {}) {
+  if (record.kind !== 'flow') return true
+  if (recordHasPrimaryFeature(record)) return true
+  return (record.featureEvents || []).some((event) => isPrimaryCompetitorFeatureCandidate(featureEventName(event), 'event'))
+}
+
 function featureOptionId(name = '', source = '') {
   return `feature-${String(source || 'record')}-${String(name || 'unknown')
     .toLowerCase()
@@ -1007,7 +1042,7 @@ function featureOptionId(name = '', source = '') {
 
 function makeFeatureOption(name = '', source = 'record', meta = {}) {
   const normalizedName = normalizeFeatureOptionName(name)
-  if (!normalizedName) return null
+  if (!isPrimaryCompetitorFeatureCandidate(normalizedName, source)) return null
   const sourceLabels = {
     event: '监控发现',
     record: '历史分析',
@@ -1039,26 +1074,6 @@ function addFeatureMapOption(map = new Map(), option = null) {
   map.set(key, option)
 }
 
-function markdownFeatureCandidates(markdown = '') {
-  const text = String(markdown || '')
-  const candidates = []
-  const patterns = [
-    /(?:功能模块|页面功能入口|监控发现功能|分析功能|相似功能线索)[:：]\s*([^\n|]+)/g,
-    /^#{2,4}\s+(.{2,28}(?:功能|入口|中心|工作台|平台|模板|创作|发现|灵感).*)$/gm,
-    /^\s*[-*]\s+(.{2,28}(?:功能|入口|中心|工作台|平台|模板|创作|发现|灵感)[^：:\n]*)/gm
-  ]
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const raw = String(match[1] || '')
-      raw.split(/[、,，/|]/).forEach((item) => {
-        const name = normalizeFeatureOptionName(item).slice(0, 36)
-        if (name && !/证据|来源|页面|标题|报告|待补采/.test(name)) candidates.push(name)
-      })
-    }
-  }
-  return [...new Set(candidates)].slice(0, 12)
-}
-
 function recordMatchesSelectedCompetitors(record = {}, selectedNames = []) {
   if (!selectedNames.length) return false
   const names = recordCompetitorNameList(record)
@@ -1070,10 +1085,17 @@ function buildCompetitorFeatureMapOptions() {
   if (!analysisRequiresScopeFields.value) return []
   const selectedNames = selectedCompetitors().map(competitorDisplayName).filter(Boolean)
   const options = new Map()
+  if (analysisForm.referenceScreenshots.length) {
+    addFeatureMapOption(options, makeFeatureOption('截图中的功能入口', 'screenshot', {
+      id: 'screenshot-reference-entry',
+      confidence: 'reference',
+      evidence: analysisForm.referenceScreenshots.map((item) => item.name).filter(Boolean).join('、')
+    }))
+  }
   for (const record of analysisRecords.value) {
     if (!recordMatchesSelectedCompetitors(record, selectedNames)) continue
     const recordFeature = recordFeatureLabel(record)
-    if (recordFeature && !['全部功能', '未填写'].includes(recordFeature)) {
+    if (recordHasPrimaryFeature(record)) {
       addFeatureMapOption(options, makeFeatureOption(recordFeature, record.kind === 'framework' ? 'framework' : 'record', {
         confidence: record.kind === 'framework' ? 'inferred' : 'partial',
         competitorName: recordCompetitorNames(record)
@@ -1087,19 +1109,6 @@ function buildCompetitorFeatureMapOptions() {
         evidence: featureEventSourceText(event)
       }))
     }
-    for (const item of markdownFeatureCandidates([record.markdown, record.summary].filter(Boolean).join('\n'))) {
-      addFeatureMapOption(options, makeFeatureOption(item, record.kind === 'framework' ? 'framework' : 'record', {
-        confidence: record.kind === 'framework' ? 'inferred' : 'partial',
-        competitorName: recordCompetitorNames(record)
-      }))
-    }
-  }
-  if (analysisForm.referenceScreenshots.length) {
-    addFeatureMapOption(options, makeFeatureOption('截图中的功能入口', 'screenshot', {
-      id: 'screenshot-reference-entry',
-      confidence: 'reference',
-      evidence: analysisForm.referenceScreenshots.map((item) => item.name).filter(Boolean).join('、')
-    }))
   }
   return [...options.values()].slice(0, 16)
 }
@@ -1124,11 +1133,18 @@ function handleCompetitorFeatureSelect(featureId = '') {
   if (option) selectCompetitorFeature(option)
 }
 
-function ensureSelectedFeatureStillAvailable() {
+function ensureSelectedFeatureStillAvailable(options = {}) {
   if (!analysisRequiresScopeFields.value) return
-  const options = competitorFeatureMapOptions.value
-  if (analysisForm.selectedFeatureId && options.some((item) => item.id === analysisForm.selectedFeatureId)) return
-  const first = options[0]
+  const featureOptions = competitorFeatureMapOptions.value
+  const preferred = options.preferScreenshot
+    ? featureOptions.find((item) => item.source === 'screenshot')
+    : null
+  if (preferred) {
+    selectCompetitorFeature(preferred)
+    return
+  }
+  if (analysisForm.selectedFeatureId && featureOptions.some((item) => item.id === analysisForm.selectedFeatureId)) return
+  const first = featureOptions[0]
   if (first) {
     selectCompetitorFeature(first)
     return
@@ -1164,7 +1180,7 @@ async function handleReferenceScreenshotUpload(event) {
     })
   }
   analysisForm.referenceScreenshots = existing.slice(0, 4)
-  ensureSelectedFeatureStillAvailable()
+  ensureSelectedFeatureStillAvailable({ preferScreenshot: true })
 }
 
 function removeReferenceScreenshot(id = '') {
@@ -1193,6 +1209,7 @@ function recordMatchesFilters(record = {}) {
   const query = listFilters.query.trim().toLowerCase()
   if (query && !recordSearchText(record).includes(query)) return false
   if (record.kind !== activeKind.value) return false
+  if (!recordHasActionableAnalysisValue(record)) return false
   if (listFilters.status !== 'all' && (record.status || 'pending') !== listFilters.status) return false
   if (listFilters.competitor !== 'all' && !recordCompetitorNameList(record).includes(listFilters.competitor)) return false
   return true
@@ -1761,6 +1778,7 @@ function analysisDialogValidationMessage() {
 async function handleConfirmAnalysis() {
   const kind = currentDialogAnalysisKind()
   analysisForm.kind = kind
+  ensureSelectedFeatureStillAvailable()
   const validationMessage = analysisDialogValidationMessage()
   if (validationMessage) {
     statusTone.value = 'failed'

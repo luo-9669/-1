@@ -1142,7 +1142,8 @@ function buildDailyFeatureEventsMarkdown(events = [], input = {}, today = '') {
 function buildWeeklyNoFindingsMarkdown(input = {}, data = {}, currentDateProvider = () => new Date()) {
   const period = weeklyPeriod(data, currentDateProvider)
   const competitors = normalizeNameList(input.competitorNames || input.competitor || input.productName)
-  return [
+  const diagnostics = weeklySearchDiagnostics(data)
+  const lines = [
     '# 竞品监控周报',
     '',
     `> 报告日期：${period.end || dateString(currentDateProvider())}`,
@@ -1156,12 +1157,27 @@ function buildWeeklyNoFindingsMarkdown(input = {}, data = {}, currentDateProvide
     '## 本周未发现明确的竞品变更',
     '',
     '未采集到发布日期或发现时间落在本周监控周期内、且可作为变更依据的有效信息。',
-    '',
+    ''
+  ]
+  if (diagnostics.length) {
+    lines.push('## 检索识别状态', '')
+    for (const item of diagnostics.slice(0, 8)) {
+      lines.push(`- ${item.competitor}：检索到 ${item.totalCandidates} 条候选，${item.datedCandidates} 条带本周日期。${item.reason}`)
+      for (const entry of item.sampleEntries.slice(0, 2)) {
+        const title = entry.title || entry.url || '未命名候选'
+        const url = entry.url ? `（${entry.url}）` : ''
+        lines.push(`  - 候选：${title}${url}`)
+      }
+    }
+    lines.push('')
+  }
+  lines.push(
     '## 说明',
     '',
     '- 周报只展示监控周期内的明确证据；历史页面、无日期搜索结果和第三方泛化介绍不会作为本周变更展示。',
     '- 如果需要继续确认，可补充官方 changelog、产品公告或截图证据后重新分析。'
-  ].join('\n')
+  )
+  return lines.join('\n')
 }
 
 function buildWeeklyChangesMarkdown(changes = [], input = {}, data = {}, currentDateProvider = () => new Date()) {
@@ -1201,6 +1217,33 @@ function buildWeeklyChangesMarkdown(changes = [], input = {}, data = {}, current
     }
   }
   return lines.join('\n').trim()
+}
+
+function weeklySearchDiagnostics(data = {}) {
+  const structured = normalizePlainObject(data.structured_data || data.structuredData)
+  const rawItems = Array.isArray(data.search_diagnostics)
+    ? data.search_diagnostics
+    : Array.isArray(structured.search_diagnostics)
+      ? structured.search_diagnostics
+      : []
+  return rawItems
+    .map(normalizePlainObject)
+    .map((item) => ({
+      competitor: safeText(item.competitor, '未命名竞品'),
+      totalCandidates: Number.isFinite(Number(item.total_candidates ?? item.totalCandidates)) ? Number(item.total_candidates ?? item.totalCandidates) : 0,
+      datedCandidates: Number.isFinite(Number(item.dated_candidates ?? item.datedCandidates)) ? Number(item.dated_candidates ?? item.datedCandidates) : 0,
+      reason: safeText(item.reason, '候选证据不足，无法判定为本周明确变更。'),
+      sampleEntries: (Array.isArray(item.sample_entries) ? item.sample_entries : Array.isArray(item.sampleEntries) ? item.sampleEntries : [])
+        .map(normalizePlainObject)
+        .map((entry) => ({
+          title: safeText(entry.title, ''),
+          url: String(entry.url || '').trim(),
+          snippet: safeText(entry.snippet, ''),
+          publishedDate: safeText(entry.published_date || entry.publishedDate, '')
+        }))
+        .filter((entry) => entry.title || entry.url)
+    }))
+    .filter((item) => item.totalCandidates > 0 || item.reason)
 }
 
 function buildAnalysisEvidence(jsonText = '', stdout = '', kind = '') {
@@ -1607,11 +1650,66 @@ function buildInteractionArtifactsFromData(kind = '', markdown = '', input = {},
   }
 }
 
-function buildGapAnalysisPrompt(input = {}) {
+function buildGapKnowledgeQuery(input = {}) {
+  return uniqueTextList([
+    input.feature,
+    input.selectedFeature,
+    input.selected_feature,
+    input.goal,
+    input.sourceTitle,
+    input.title,
+    input.competitorNames,
+    input.competitorName,
+    input.productName
+  ])
+    .join(' ')
+    .trim()
+    .slice(0, 240) || '竞品功能 机会点 我方产品 当前项目'
+}
+
+function normalizeGapKnowledgeItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => normalizePlainObject(item))
+    .map((item) => {
+      const score = Number(item.score)
+      const sourceUrl = String(item.sourceUrl || '').trim()
+      return {
+        title: safeText(item.title || item.name, '未命名知识'),
+        snippet: safeText(item.snippet || item.content || item.text || item.summary || item.chunk?.text || '', ''),
+        sourceType: safeText(item.sourceType || item.knowledgeSource || item.category, ''),
+        ...(Number.isFinite(score) ? { score } : {}),
+        materialId: String(item.materialId || item.knowledgeMaterialId || item.id || '').trim(),
+        ...(sourceUrl ? { sourceUrl } : {})
+      }
+    })
+    .filter((item) => item.title || item.snippet)
+    .slice(0, 8)
+}
+
+function formatGapKnowledgeContext(items = []) {
+  const normalizedItems = normalizeGapKnowledgeItems(items)
+  if (!normalizedItems.length) {
+    return [
+      '当前项目知识库检索结果：未检索到可引用的我方产品基线。',
+      '要求：只能标注“当前项目知识库未覆盖该功能/证据不足”，不能推断为“我方没有该功能”，也不能写泛化的“待补充”。'
+    ].join('\n')
+  }
+  const lines = [
+    `当前项目知识库检索结果：共 ${normalizedItems.length} 条。`,
+    ...normalizedItems.map((item, index) => {
+      const source = [item.sourceType, item.materialId, item.sourceUrl].filter(Boolean).join(' / ') || '知识库'
+      return `${index + 1}. ${item.title}（来源：${source}；score：${item.score ?? '-'}）\n   摘要：${truncateEvidenceText(item.snippet, 520)}`
+    })
+  ]
+  return lines.join('\n')
+}
+
+function buildGapAnalysisPrompt(input = {}, projectKnowledge = []) {
   const sourceContent = String(input.sourceContent || '').trim()
   const sourceKind = kindLabel(normalizeKind(input.sourceKind || input.kind || ''))
   const sourceTitle = safeText(input.sourceTitle || input.title || '', '竞品分析报告')
   const subject = competitorSubject(input)
+  const knowledgeContext = formatGapKnowledgeContext(projectKnowledge)
   const lines = [
     `分析类型：机会点分析`,
     `来源报告类型：${sourceKind}`,
@@ -1620,17 +1718,25 @@ function buildGapAnalysisPrompt(input = {}) {
     input.feature ? `分析功能：${input.feature}` : '',
     input.goal ? `分析目标：${input.goal}` : '',
     '',
-    '请基于以下源报告内容，生成一份中文 Markdown 机会点分析报告。要求：',
+    '请基于“竞品源报告内容 + 当前项目知识库基线”，生成一份中文 Markdown 机会点分析报告。要求：',
     '- 只输出 Markdown 正文，不要输出 JSON。',
+    '- 必须先判断我方产品/竞品是否存在该功能，再决定是否进入竞品链路对比。',
+    '- 第一章必须输出“双方功能存在性校验表”，字段包含：功能、我方状态、我方证据、竞品状态、竞品证据、是否允许链路对比、置信度。',
+    '- 我方状态只能基于“当前项目知识库基线”判断；如果知识库没有覆盖，只能写“当前项目知识库未覆盖该功能/证据不足”，不能直接写“我方没有”或泛化写“待补充”。',
+    '- 竞品状态只能基于“源报告内容”判断；竞品证据不足时，不要继续编造链路。',
+    '- 只有竞品证据确认存在该功能时，才分析竞品链路；不能比较链路时标注不可比较，并给出补采建议。',
     '- 机会点分析报告需要包含以下结构化章节：',
-    '  1. 差距矩阵（gap_matrix）：我方产品 vs 竞品的功能差距，表格形式',
-    '  2. 机会点卡片（opportunity_cards）：每个机会点包含 id（OP01格式）、标题、描述、来源竞品、影响范围、优先级（P0/P1/P2）、实施难度（高/中/低）',
-    '  3. 需求卡片（requirement_cards）：每个需求包含 id（RQ01格式）、关联机会点（OP编号）、需求标题、用户故事、验收标准、优先级',
-    '  4. 战略建议（strategic_recommendations）：基于机会点的3-5条战略行动建议',
-    '  5. 数据来源与置信度：标注每个结论的来源报告和分析置信度',
-    '- 所有结论必须基于输入的报告内容，不得编造',
-    '- 缺失信息标注为"待补充"',
+    '  1. 双方功能存在性校验表（feature_parity_check）：先判断双方是否有功能',
+    '  2. 功能差距矩阵（gap_matrix）：我方产品 vs 竞品的功能差距，表格形式',
+    '  3. 链路对比矩阵（chain_comparison_matrix）：仅在证据允许时输出；不可比较时写“不可比较”与原因',
+    '  4. 机会点卡片（opportunity_cards）：每个机会点包含 id（OP01格式）、标题、描述、来源竞品、影响范围、优先级（P0/P1/P2）、实施难度（高/中/低）',
+    '  5. 需求卡片（requirement_cards）：每个需求包含 id（RQ01格式）、关联机会点（OP编号）、需求标题、用户故事、验收标准、优先级',
+    '  6. 战略建议（strategic_recommendations）：基于机会点的3-5条战略行动建议',
+    '  7. 证据与补采建议：标注当前项目知识库引用、来源报告引用、置信度和补采动作',
+    '- 所有结论必须基于输入的报告内容和当前项目知识库基线，不得编造。',
     '- 内容不允许出现内部调试信息、密钥、堆栈、原始网页源码或执行过程。',
+    '',
+    `当前项目知识库基线：\n${knowledgeContext}`,
     '',
     `源报告内容：\n${sourceContent || '未提供源报告内容。'}`
   ]
@@ -1647,6 +1753,9 @@ export function createCompetitorAnalysisEngineService(options = {}) {
     : async () => ({})
   const resolveAgentProvider = typeof options.resolveAgentProvider === 'function'
     ? options.resolveAgentProvider
+    : null
+  const projectKnowledgeProvider = typeof options.projectKnowledgeProvider === 'function'
+    ? options.projectKnowledgeProvider
     : null
 
   async function currentModelSettings(input = {}) {
@@ -1863,7 +1972,25 @@ export function createCompetitorAnalysisEngineService(options = {}) {
 
       // 机会点分析：不走Python脚本，纯LLM分析
       if (kind === 'gap') {
-        const gapPrompt = buildGapAnalysisPrompt(input)
+        let projectKnowledge = []
+        if (projectKnowledgeProvider) {
+          try {
+            const knowledgeResult = await projectKnowledgeProvider({
+              projectId,
+              type: 'knowledge',
+              query: buildGapKnowledgeQuery(input),
+              limit: 8,
+              kind,
+              feature: input.feature || input.selectedFeature || input.selected_feature || '',
+              sourceRecordId: input.sourceRecordId || '',
+              sourceKind: input.sourceKind || ''
+            })
+            projectKnowledge = normalizeGapKnowledgeItems(Array.isArray(knowledgeResult) ? knowledgeResult : knowledgeResult?.results)
+          } catch {
+            projectKnowledge = []
+          }
+        }
+        const gapPrompt = buildGapAnalysisPrompt(input, projectKnowledge)
         let generatedMarkdown = ''
         if (resolveAgentProvider && modelSettings.enabled) {
           let provider = null
@@ -1881,11 +2008,11 @@ export function createCompetitorAnalysisEngineService(options = {}) {
                 responseFormat: 'markdown',
                 actionType: 'competitor-analysis-report',
                 scopeId: input.recordId || input.projectId || '',
-                systemPrompt: '你是流程通后端的竞品分析报告模型，负责基于现有竞品分析报告内容生成机会点分析报告。所有结论必须基于输入的报告内容，不得编造。',
+                systemPrompt: '你是流程通后端的竞品分析报告模型，负责基于现有竞品分析报告内容和当前项目知识库基线生成机会点分析报告。所有结论必须有证据，不得编造。',
                 userPrompt: gapPrompt,
                 timeoutMs: modelSettings.timeoutMs,
                 references: referenceScreenshotsForModel(input.referenceScreenshots || input.reference_screenshots),
-                retrievedKnowledge: []
+                retrievedKnowledge: projectKnowledge
               })
               generatedMarkdown = sanitizeCompetitorAnalysisMarkdown(result?.content || '', '')
             } catch {}

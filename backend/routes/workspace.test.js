@@ -737,6 +737,90 @@ test('workspace route suppresses advanced UX interaction fallback nodes until pa
   assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi'].canvasType, 'advanced-ux-stage-generating')
 })
 
+test('workspace route stops stale advanced UX interaction generating when stage-one quality gate failed', async () => {
+  const failureMessage = '高级 UX Markdown 未符合输出规范：缺少需求冲突识别表'
+  const analysis = analyzeRequirementDocuments({
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    skillSelectionMode: 'auto',
+    demandScope: 'project',
+    input: '我想在蝉镜项目加入爆款跟创的功能',
+    documents: []
+  })
+  const totalFlow = buildTotalDesignFlow(analysis)
+  const staleGeneratingCanvas = {
+    title: '交互低保',
+    summary: '正在生成页面交互框架与说明 Markdown',
+    canvasType: 'advanced-ux-stage-generating',
+    layoutRule: 'single-loading',
+    nodes: [{
+      id: 'advanced-ux-interaction-lofi-generating',
+      stageId: 'interaction-lofi',
+      title: '交互低保',
+      summary: '正在生成页面交互框架与说明 Markdown',
+      loading: true,
+      artifactStatus: 'generating',
+      contentStatus: 'model-pending',
+      contentSource: 'model-pending'
+    }],
+    edges: [],
+    orderedTabs: [{ key: 'advanced-ux-interaction-lofi-generating', label: '交互低保' }]
+  }
+  const failedReport = {
+    status: 'quality_failed',
+    fileName: '高级UX需求分析-20260714-1635.md',
+    markdown: '# 蝉镜爆款跟创功能 - 高级 UX 10 节点分析\n\n## 原始需求分析\n\n已生成但未通过门禁。',
+    importError: failureMessage,
+    qualityIssues: ['缺少需求冲突识别表']
+  }
+  const run = createWorkspaceWorkflowRun({
+    id: 'run-advanced-ux-stage-one-quality-failed-stuck-stage-two',
+    projectId: 'project-chanjing',
+    title: '蝉镜爆款跟创',
+    workflowId: 'advanced-ux-requirement-analysis',
+    skillId: 'advanced-ux-requirement-analysis',
+    requestedSkillId: 'advanced-ux-requirement-analysis',
+    input: '我想在蝉镜项目加入爆款跟创的功能',
+    status: 'failed',
+    documentAnalysis: {
+      ...analysis,
+      status: 'failed',
+      advancedUxReport: failedReport,
+      totalDesignFlow: {
+        ...totalFlow,
+        currentStage: 'interaction-lofi',
+        advancedUxReport: failedReport,
+        stageStatuses: {
+          ...(totalFlow.stageStatuses || {}),
+          'interaction-lofi': { status: 'generating', pendingSummary: true }
+        },
+        stageCanvases: {
+          ...(totalFlow.stageCanvases || {}),
+          'interaction-lofi': staleGeneratingCanvas
+        }
+      }
+    }
+  })
+  const store = createWorkspaceStore({
+    projects: [{ id: 'project-chanjing', name: '蝉镜项目' }],
+    workflowRuns: [run],
+    materials: []
+  })
+  const routes = workspaceRoutes(store)
+
+  const result = await routes['GET /api/workspace/workflow-runs/:id']({ id: run.id })
+  const totalFlowResult = result.run.documentAnalysis.totalDesignFlow
+  const canvas = totalFlowResult.stageCanvases['interaction-lofi']
+
+  assert.equal(canvas.canvasType, 'advanced-ux-stage-failed')
+  assert.equal(canvas.nodes[0].artifactStatus, 'failed')
+  assert.equal(canvas.nodes[0].loading, false)
+  assert.match(canvas.nodes[0].failureReason, /缺少需求冲突识别表/)
+  assert.equal(totalFlowResult.stageStatuses['interaction-lofi'].status, 'failed')
+  assert.equal(totalFlowResult.stageRuntime['interaction-lofi'].state, 'failed')
+  assert.equal(store.workflowRuns[0].documentAnalysis.totalDesignFlow.stageCanvases['interaction-lofi'].canvasType, 'advanced-ux-stage-failed')
+})
+
 test('workspace route imports existing advanced UX page interaction markdown into interaction lofi canvas', async () => {
   const pageInteractionMarkdown = [
     '# 线索跟进Web工具-页面交互框架与说明',

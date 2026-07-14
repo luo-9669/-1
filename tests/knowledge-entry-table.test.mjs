@@ -4,6 +4,7 @@ import test from 'node:test'
 
 test('knowledge entries render as a requirements-style table with pagination', async () => {
   const knowledgeHubSource = await readFile(new URL('../frontend/src/pages/knowledge/KnowledgeHubPanel.vue', import.meta.url), 'utf8')
+  const knowledgeHubService = await readFile(new URL('../frontend/src/services/knowledgeHub.js', import.meta.url), 'utf8')
   const appSource = await readFile(new URL('../frontend/src/App.vue', import.meta.url), 'utf8')
   const styles = await readFile(new URL('../frontend/src/styles.css', import.meta.url), 'utf8')
 
@@ -28,6 +29,13 @@ test('knowledge entries render as a requirements-style table with pagination', a
   assert.match(knowledgeHubSource, />删除</)
   assert.match(appSource, /@delete-knowledge-entry="deleteKnowledgeEntry"/)
   assert.match(appSource, /function deleteKnowledgeEntry/)
+  assert.doesNotMatch(knowledgeHubService, /key:\s*'markdown'/)
+  assert.doesNotMatch(knowledgeHubSource, /knowledgeHubSection === 'markdown'/)
+  assert.doesNotMatch(knowledgeHubSource, /currentKnowledgeMarkdown/)
+  assert.doesNotMatch(knowledgeHubSource, /download-markdown/)
+  assert.doesNotMatch(knowledgeHubSource, /下载 Markdown/)
+  assert.doesNotMatch(appSource, /:current-knowledge-markdown=/)
+  assert.doesNotMatch(appSource, /@download-markdown="downloadMarkdown"/)
   assert.doesNotMatch(knowledgeHubSource, /knowledge-entry-card/)
   assert.doesNotMatch(knowledgeHubSource, /knowledge-entry-grid/)
 
@@ -46,7 +54,7 @@ test('knowledge import file action opens the document file picker only', async (
   assert.match(knowledgeHubSource, /ref="knowledgeFileInputRef"/)
   assert.match(knowledgeHubSource, /knowledgeFileInputRef\.value\?\.click\(\)/)
   assert.match(knowledgeHubSource, /@click="openKnowledgeFilePicker"/)
-  assert.match(knowledgeHubSource, /accept="[^"]*\.pdf[^"]*\.doc[^"]*\.docx[^"]*\.md[^"]*\.markdown[^"]*"/)
+  assert.match(knowledgeHubSource, /accept="[^"]*\.pdf[^"]*\.doc[^"]*\.docx[^"]*\.md[^"]*\.markdown[^"]*\.xlsx[^"]*\.csv[^"]*"/)
   assert.match(knowledgeHubSource, /import-material-files/)
   assert.doesNotMatch(knowledgeHubSource, /导入文件<\/BaseButton>[\s\S]{0,120}\$emit\('open-material-create'\)/)
 })

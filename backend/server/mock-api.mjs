@@ -9,7 +9,7 @@ import { buildVisualVerificationReport } from '../../frontend/src/services/visua
 import { compareImageDataUrls } from '../../frontend/src/services/visualVerification.node.js'
 import { createRestoredPageAsset } from '../../frontend/src/services/factoryWorkspace.js'
 import { createWorkspaceStore, workspaceRoutes } from '../routes/workspace.js'
-import { addModelCallLog, addRestoredPage, getModelSettingsRaw } from '../services/workspace-store.js'
+import { addModelCallLog, addRestoredPage, getModelSettingsRaw, searchMaterials } from '../services/workspace-store.js'
 import { uploadRoutes } from '../routes/uploads.js'
 import { captureRoutes } from '../routes/capture.js'
 import { adminRoutes } from '../routes/admin.js'
@@ -213,7 +213,11 @@ const competitorMonitorService = createCompetitorMonitorService({
 })
 const competitorAnalysisEngineService = createCompetitorAnalysisEngineService({
   modelSettingsProvider: () => getModelSettingsRaw(workspaceStore),
-  resolveAgentProvider: resolveWorkflowAgentProvider
+  resolveAgentProvider: resolveWorkflowAgentProvider,
+  projectKnowledgeProvider: async (payload = {}) => searchMaterials(workspaceStore, {
+    ...payload,
+    type: 'knowledge'
+  })
 })
 const competitorApiRoutes = competitorRoutes({
   getOverview: async (payload = {}) => competitorMonitorService.getOverview(payload),

@@ -112,6 +112,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
     start_date = end_date - timedelta(days=config.WEEKLY_DAYS)
 
     all_changes: List[ChangeRecord] = []
+    search_diagnostics = []
 
     for competitor in competitors:
         logger.info(f"--- 处理竞品: {competitor.name} ---")
@@ -122,6 +123,33 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
             keywords=competitor.keywords,
             days=config.WEEKLY_DAYS,
         )
+        dated_entries = [
+            entry for entry in entries
+            if (entry.published_date or "").strip() and
+            start_date.strftime("%Y-%m-%d") <= (entry.published_date or "")[:10] <= end_date.strftime("%Y-%m-%d")
+        ]
+        search_diagnostics.append({
+            "competitor": competitor.name,
+            "total_candidates": len(entries),
+            "dated_candidates": len(dated_entries),
+            "reason": (
+                "检索到候选结果，但结果未提供发布日期，不能判定为本周更新。"
+                if entries and not dated_entries else
+                "未检索到候选结果。"
+                if not entries else
+                "检索到带日期候选，已进入变更识别。"
+            ),
+            "sample_entries": [
+                {
+                    "title": entry.title,
+                    "url": entry.url,
+                    "snippet": entry.snippet,
+                    "published_date": entry.published_date or "",
+                    "source": entry.source,
+                }
+                for entry in entries[:5]
+            ],
+        })
 
         # 2. 抓取前几个页面的详细内容
         entries = scraper.enrich_entries_with_content(entries, max_pages=10)
@@ -171,6 +199,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
         "period_start": report.period_start,
         "period_end": report.period_end,
         "competitor_count": len(competitors),
+        "search_diagnostics": search_diagnostics,
     }
 
     # 7. 生成报告文件

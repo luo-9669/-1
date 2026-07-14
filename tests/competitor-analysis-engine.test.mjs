@@ -281,6 +281,47 @@ test('weekly reports ignore changes outside the current monitoring period', asyn
   assert.doesNotMatch(response.markdown, /旧功能/)
 })
 
+test('weekly no-findings reports disclose undated search candidates instead of implying no updates', async () => {
+  const service = createCompetitorAnalysisEngineService({
+    currentDateProvider: () => new Date('2026-07-14T08:00:00.000Z'),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, `${args[1]}.md`), '# weekly result\n\n未发现')
+      await writeFile(join(env.OUTPUT_DIR, 'weekly.json'), JSON.stringify({
+        report_date: '2026-07-14',
+        period_start: '2026-07-07',
+        period_end: '2026-07-14',
+        changes: [],
+        structured_data: {
+          search_diagnostics: [{
+            competitor: '稿定设计',
+            total_candidates: 25,
+            dated_candidates: 0,
+            reason: '检索到候选结果，但结果未提供发布日期，不能判定为本周更新。',
+            sample_entries: [{
+              title: '稿定设计 AI 功能介绍',
+              url: 'https://www.gaoding.com/ai',
+              snippet: 'AI 创作能力介绍'
+            }]
+          }]
+        }
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-weekly-search-diagnostics-regression',
+    kind: 'weekly',
+    competitorNames: ['稿定设计']
+  })
+
+  assert.equal(response.ok, true)
+  assert.match(response.markdown, /检索识别状态/)
+  assert.match(response.markdown, /稿定设计：检索到 25 条候选，0 条带本周日期/)
+  assert.match(response.markdown, /不能判定为本周更新/)
+  assert.match(response.markdown, /稿定设计 AI 功能介绍/)
+})
+
 test('createRecord preserves monitor feature events for later deep analysis', async () => {
   const service = createCompetitorAnalysisEngineService({
     pythonRunner: async () => ({ code: 0, stdout: '', stderr: '' })
@@ -1479,6 +1520,70 @@ test('gap analysis uses backend model from source report and persists source met
   assert.match(listed.records[0].markdown, /OP01/)
 })
 
+test('gap analysis retrieves current project knowledge before deciding feature parity and chain comparison', async () => {
+  let providerPayload = null
+  let knowledgeProviderPayload = null
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    projectKnowledgeProvider: async (payload = {}) => {
+      knowledgeProviderPayload = payload
+      return [
+        {
+          title: '蝉镜：三产品全景信息',
+          snippet: '蝉镜当前支持数字人视频生成、项目管理和素材库，但未覆盖一键爆款复刻链路。',
+          sourceType: 'knowledge',
+          score: 3,
+          materialId: 'knowledge-our-product-1'
+        }
+      ]
+    },
+    resolveAgentProvider: async () => ({
+      generate: async (payload = {}) => {
+        providerPayload = payload
+        return {
+          content: '# 机会点分析结果\n\n## 双方功能存在性校验表\n\n| 功能 | 我方 | 竞品 | 是否比较链路 |\n|---|---|---|---|\n| 爆款复刻 | 当前项目知识库未覆盖该功能 | 已确认 | 不可直接比较 |'
+        }
+      }
+    })
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-gap-project-knowledge-regression',
+    kind: 'gap',
+    feature: '爆款复刻',
+    competitorNames: ['HeyGen'],
+    sourceContent: '# 完整框架结果\n\nHeyGen 提供模板化视频生成与导出链路。',
+    sourceRecordId: 'framework-record-project-knowledge',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架结果'
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(knowledgeProviderPayload.projectId, 'competitor-analysis-gap-project-knowledge-regression')
+  assert.equal(knowledgeProviderPayload.type, 'knowledge')
+  assert.match(knowledgeProviderPayload.query, /爆款复刻|HeyGen|完整框架结果/)
+  assert.match(providerPayload.userPrompt, /当前项目知识库基线/)
+  assert.match(providerPayload.userPrompt, /蝉镜当前支持数字人视频生成/)
+  assert.match(providerPayload.userPrompt, /双方功能存在性校验/)
+  assert.match(providerPayload.userPrompt, /先判断我方产品\/竞品是否存在该功能/)
+  assert.match(providerPayload.userPrompt, /不能比较链路时标注不可比较/)
+  assert.deepEqual(providerPayload.retrievedKnowledge, [
+    {
+      title: '蝉镜：三产品全景信息',
+      snippet: '蝉镜当前支持数字人视频生成、项目管理和素材库，但未覆盖一键爆款复刻链路。',
+      sourceType: 'knowledge',
+      score: 3,
+      materialId: 'knowledge-our-product-1'
+    }
+  ])
+  assert.match(response.markdown, /双方功能存在性校验表/)
+})
+
 test('gap analysis keeps source metadata when running an existing created record', async () => {
   const service = createCompetitorAnalysisEngineService({
     modelSettingsProvider: async () => ({
@@ -1840,4 +1945,52 @@ for change in changes:
   assert.match(result.stdout, /^1\n/)
   assert.match(result.stdout, /稿定 AI 本周上线/)
   assert.doesNotMatch(result.stdout, /旧功能/)
+})
+
+test('python weekly monitor saves search diagnostics when candidates have no usable dates', () => {
+  const result = spawnSync('python3', ['-c', `
+import json
+import tempfile
+import config
+import main
+from models import SearchEntry
+
+config.OUTPUT_DIR = tempfile.mkdtemp()
+config.WEEKLY_REPORT_DIR = config.OUTPUT_DIR
+config.LOG_DIR = config.OUTPUT_DIR
+config.LLM_API_KEY = ''
+
+class Competitor:
+    name = '稿定设计'
+    keywords = ['稿定设计 AI']
+
+def fake_search(name, keywords, days=7):
+    return [
+        SearchEntry(title='稿定设计 AI 功能介绍', url='https://example.com/ai', snippet='AI 创作能力介绍'),
+        SearchEntry(title='稿定设计 更新说明', url='https://example.com/update', snippet='更新内容但无日期')
+    ]
+
+def fake_enrich(entries, max_pages=10):
+    return entries
+
+main.scraper.search_competitor = fake_search
+main.scraper.enrich_entries_with_content = fake_enrich
+report = main.run_weekly_monitor([Competitor()])
+diagnostics = report.structured_data.get('search_diagnostics', [])
+print(len(report.changes))
+print(diagnostics[0]['competitor'])
+print(diagnostics[0]['total_candidates'])
+print(diagnostics[0]['dated_candidates'])
+print(diagnostics[0]['sample_entries'][0]['title'])
+`], {
+    cwd: pythonAppDir,
+    encoding: 'utf8'
+  })
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /\n0\n稿定设计\n2\n0\n稿定设计 AI 功能介绍\n?$/)
+  assert.match(result.stdout, /稿定设计/)
+  assert.match(result.stdout, /2/)
+  assert.match(result.stdout, /0/)
+  assert.match(result.stdout, /稿定设计 AI 功能介绍/)
 })

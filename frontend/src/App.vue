@@ -1345,7 +1345,7 @@
           :current-knowledge-hub-section="currentKnowledgeHubSection"
           :current-knowledge-blueprint-workbench="currentKnowledgeBlueprintWorkbench"
           :current-material-status="currentMaterialStatus"
-          :knowledge-hub-section="knowledgeHubSection"
+          :knowledge-hub-section="currentKnowledgeHubSection.key"
           :material-batch-mode="materialBatchMode"
           :knowledge-canvas-zoom="knowledgeCanvasZoom"
           :knowledge-expanded-node-ids="knowledgeExpandedNodeIds"
@@ -1362,7 +1362,6 @@
           :knowledge-prototype-click-path="knowledgePrototypeClickPath"
           :current-knowledge-prototype-demo="currentKnowledgePrototypeDemo"
           :knowledge-prototype-upload-states="knowledgePrototypeUploadStates"
-          :current-knowledge-markdown="currentKnowledgeMarkdown"
           :blueprint-node-kind-label="blueprintNodeKindLabel"
           @open-material-tool="openMaterialTool"
           @open-manual-completion="openKnowledgeManualCompletion"
@@ -1384,7 +1383,6 @@
           @trigger-knowledge-prototype-hotspot="triggerKnowledgePrototypeHotspot"
           @open-knowledge-entry-detail="openKnowledgeEntryDetail"
           @delete-knowledge-entry="deleteKnowledgeEntry"
-          @download-markdown="downloadMarkdown"
         />
         <template v-else-if="materialsTab !== 'requirements'">
         <section v-if="currentMaterialItems.length" class="materials-grid">
@@ -2618,7 +2616,7 @@ import {
   buildBlueprintWorkbench,
   visibleBlueprintFrameNodes
 } from './services/blueprintWorkbench'
-import { buildKnowledgeHubView, buildKnowledgeMaterialsMarkdown, relatedKnowledgeForBlueprintNode } from './services/knowledgeHub'
+import { buildKnowledgeHubView, relatedKnowledgeForBlueprintNode } from './services/knowledgeHub'
 import {
   buildProjectKnowledgeContextDocuments,
   buildProjectVisualContext,
@@ -3214,7 +3212,6 @@ const projectPackageImportScopes = [
 const projectPackageImportOutputs = [
   { key: 'knowledge', label: '写入知识库' },
   { key: 'structure', label: '生成结构树' },
-  { key: 'markdown', label: '生成 Markdown 蓝图' },
   { key: 'flow', label: '尝试生成流程图' },
   { key: 'prototype', label: '生成交互 Demo' }
 ]
@@ -3223,14 +3220,14 @@ const projectPackageImportSteps = [
   '静态扫描目录和依赖',
   '识别页面、组件、路由、样式和原型资产',
   '生成结构化知识块',
-  '写入知识库并生成结构树、流程图、交互 Demo 和 Markdown 蓝图'
+  '写入知识库并生成结构树、流程图和交互 Demo'
 ]
 const projectPackageImportForm = reactive({
   fileName: '',
   fileSize: 0,
   files: [],
   scopes: ['routes', 'components', 'tokens', 'services', 'docs'],
-  outputs: ['knowledge', 'structure', 'markdown', 'prototype']
+  outputs: ['knowledge', 'structure', 'prototype']
 })
 const projectRuntimePreview = reactive({
   runtimeId: '',
@@ -5999,11 +5996,6 @@ const currentKnowledgeBlueprint = computed(() => currentProjectBlueprintAsset.va
 const currentKnowledgeDisplayBlueprint = computed(() =>
   enrichBlueprintWithPrototypeDemo(currentKnowledgeBlueprint.value || {}, currentProjectPrototypeAsset.value)
 )
-const latestKnowledgeMarkdownMaterial = computed(() =>
-  currentKnowledge.value
-    .filter((item) => item?.category === 'markdown-blueprint' && item.content)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0] || null
-)
 const currentKnowledgeBlueprintWorkbench = computed(() => buildBlueprintWorkbench({
   blueprint: currentKnowledgeDisplayBlueprint.value || {},
   knowledge: currentKnowledge.value
@@ -6041,14 +6033,6 @@ const selectedKnowledgeNodeMissingSlots = computed(() =>
     slot,
     hint: knowledgeManualCompletionHint(slot)
   }))
-)
-const currentKnowledgeMarkdown = computed(() =>
-  currentKnowledgeBlueprint.value
-    ? exportBlueprintMarkdown(currentKnowledgeDisplayBlueprint.value)
-    : latestKnowledgeMarkdownMaterial.value?.content || buildKnowledgeMaterialsMarkdown({
-        projectName: displayProjectName(currentProject.value),
-        materials: currentKnowledge.value
-      })
 )
 const designRequirementBlueprintSource = computed(() =>
   activeProjectBlueprint.value || currentKnowledgeBlueprint.value || workflowAnalysisResult.value?.projectBlueprint || {}
@@ -19886,16 +19870,6 @@ async function downloadVueZip() {
   const data = applyApiResult(uxStatus, result, 'Vue 预览生成接口未完成')
   if (data?.files) state.vueFiles = data.files
   await downloadZip('vue-vite-ux-preview', state.vueFiles)
-}
-
-function downloadMarkdown(type) {
-  const content = type === 'pm' ? pmResult.value : '# 产品需求文档\n\n当前 PRD 生成接口待接入。'
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = `${type}-document.md`
-  link.click()
-  URL.revokeObjectURL(link.href)
 }
 
 async function testApiConfig() {

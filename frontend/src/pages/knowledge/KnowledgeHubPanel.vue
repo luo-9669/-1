@@ -25,7 +25,7 @@
         class="hidden-file-input"
         type="file"
         multiple
-        accept=".pdf,.doc,.docx,.md,.markdown,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/x-markdown"
+        accept=".pdf,.doc,.docx,.md,.markdown,.xlsx,.csv,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/markdown,text/x-markdown,text/csv,text/plain"
         @change="$emit('import-material-files', $event)"
       />
       <Notice :result="currentMaterialStatus" floating />
@@ -439,23 +439,6 @@
         </section>
       </section>
 
-      <section v-if="knowledgeHubSection === 'markdown'" class="knowledge-markdown-shell">
-        <div class="knowledge-canvas-toolbar knowledge-markdown-toolbar">
-          <BaseSecondaryTabs
-            v-if="markdownSectionTabs.length > 1"
-            v-model="activeMarkdownSection"
-            class="knowledge-markdown-secondary-tabs"
-            :items="markdownSectionTabItems"
-            label="Markdown 章节"
-          />
-          <BaseButton type="button" :disabled="!currentKnowledgeMarkdown" @click="$emit('download-markdown', 'blueprint')">下载 Markdown</BaseButton>
-        </div>
-        <pre v-if="currentKnowledgeMarkdown" class="knowledge-markdown-view">{{ selectedMarkdownContent }}</pre>
-        <section v-else class="panel materials-empty">
-          <h3>暂无 Markdown 蓝图</h3>
-          <p>导入项目网站或项目蓝图后，这里会展示可复制和交付的完整蓝图文档。</p>
-        </section>
-      </section>
     </section>
     <div
       v-if="knowledgeFlowImagePreview"
@@ -484,8 +467,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Notice from '../../components/Notice.vue'
-import { BaseButton, BaseDataTable, BaseSecondaryTabs, BaseTabs } from '../../components/base'
-import { buildMarkdownSectionTabs } from '../../services/knowledgeHub'
+import { BaseButton, BaseDataTable, BaseTabs } from '../../components/base'
 
 const KNOWLEDGE_WORKFLOW_CANVAS_WIDTH = 24000
 const KNOWLEDGE_WORKFLOW_CANVAS_HEIGHT = 32000
@@ -527,7 +509,6 @@ const props = defineProps({
   knowledgePrototypeClickPath: { type: Array, default: () => [] },
   currentKnowledgePrototypeDemo: { type: Object, required: true },
   knowledgePrototypeUploadStates: { type: Object, default: () => ({}) },
-  currentKnowledgeMarkdown: { type: String, default: '' },
   blueprintNodeKindLabel: { type: Function, required: true }
 })
 
@@ -537,20 +518,7 @@ const knowledgeHubSectionItems = computed(() =>
     label: section.label
   }))
 )
-const activeMarkdownSection = ref('all')
 const knowledgeEntryPage = ref(1)
-const markdownSectionTabs = computed(() => buildMarkdownSectionTabs(props.currentKnowledgeMarkdown))
-const markdownSectionTabItems = computed(() =>
-  markdownSectionTabs.value.map((section) => ({
-    value: section.value,
-    label: section.label
-  }))
-)
-const selectedMarkdownContent = computed(() =>
-  markdownSectionTabs.value.find((section) => section.value === activeMarkdownSection.value)?.content
-    || markdownSectionTabs.value[0]?.content
-    || ''
-)
 const selectedKnowledgePrototypeScreenLiveUrl = computed(() =>
   props.selectedKnowledgePrototypeScreen?.url
     || props.selectedKnowledgePrototypeScreen?.sourceUrl
@@ -1228,12 +1196,6 @@ function setKnowledgeEntryPage(page = 1) {
   knowledgeEntryPage.value = Math.min(Math.max(1, Number(page) || 1), totalPages)
 }
 
-watch(markdownSectionTabs, (tabs) => {
-  if (!tabs.some((section) => section.value === activeMarkdownSection.value)) {
-    activeMarkdownSection.value = tabs[0]?.value || 'all'
-  }
-})
-
 watch(knowledgeEntryItems, () => {
   setKnowledgeEntryPage(knowledgeEntryPage.value)
 })
@@ -1287,7 +1249,6 @@ const emit = defineEmits([
   'switch-to-factory-from-knowledge-demo',
   'trigger-knowledge-prototype-hotspot',
   'open-knowledge-entry-detail',
-  'delete-knowledge-entry',
-  'download-markdown'
+  'delete-knowledge-entry'
 ])
 </script>

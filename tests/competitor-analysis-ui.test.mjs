@@ -41,7 +41,7 @@ test('competitor analysis dialog uses discovered feature selection and screensho
   assert.match(pageSource, /selectCompetitorFeature/)
   assert.match(pageSource, /handleCompetitorFeatureSelect/)
   assert.match(pageSource, /popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"/)
-  assert.match(pageSource, /placeholder="选择系统发现的功能"/)
+  assert.match(pageSource, /placeholder="选择竞品主功能链路"/)
   assert.match(pageSource, /handleReferenceScreenshotUpload/)
   assert.match(pageSource, /analysisForm\.referenceScreenshots/)
   assert.match(pageSource, /截图中的功能入口/)
@@ -61,6 +61,70 @@ test('competitor analysis dialog uses discovered feature selection and screensho
   assert.match(pageSource, /<ElSelect\s+v-model="analysisForm\.kind"/)
   assert.match(pageSource, /<ElOption v-for="item in analysisTabs"/)
   assert.doesNotMatch(pageSource, /class="competitor-analysis-kind-select"/)
+})
+
+test('competitor flow feature selector ignores report conclusions and keeps only primary feature chains', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const builderStart = pageSource.indexOf('function buildCompetitorFeatureMapOptions()')
+  const builderEnd = pageSource.indexOf('function selectCompetitorFeature', builderStart)
+  const builderSource = pageSource.slice(builderStart, builderEnd)
+  const filterStart = pageSource.indexOf('function recordMatchesFilters')
+  const filterEnd = pageSource.indexOf('function competitorSearchText', filterStart)
+  const filterSource = pageSource.slice(filterStart, filterEnd)
+  const primaryFeatureStart = pageSource.indexOf('function recordHasPrimaryFeature')
+  const primaryFeatureEnd = pageSource.indexOf('function recordHasActionableAnalysisValue', primaryFeatureStart)
+  const primaryFeatureSource = pageSource.slice(primaryFeatureStart, primaryFeatureEnd)
+  const deletedNoiseGuardName = ['NOISY', 'FEATURE', 'CANDIDATE', 'PATTERN'].join('_')
+  const deletedMarkdownExtractorName = ['markdown', 'Feature', 'Candidates'].join('')
+  const markdownField = ['record', 'markdown'].join('.')
+  const summaryField = ['record', 'summary'].join('.')
+
+  assert.ok(builderStart >= 0 && builderEnd > builderStart, 'buildCompetitorFeatureMapOptions should be present')
+  assert.ok(filterStart >= 0 && filterEnd > filterStart, 'recordMatchesFilters should be present')
+  assert.ok(primaryFeatureStart >= 0 && primaryFeatureEnd > primaryFeatureStart, 'recordHasPrimaryFeature should be present')
+  assert.match(pageSource, /ACTIONABLE_FEATURE_RECORD_KINDS/)
+  assert.match(pageSource, /isPrimaryCompetitorFeatureCandidate/)
+  assert.match(pageSource, /isDuplicateCompetitorFeatureName/)
+  assert.match(pageSource, /recordHasActionableAnalysisValue/)
+  assert.match(primaryFeatureSource, /ACTIONABLE_FEATURE_RECORD_KINDS\.has\(record\.kind\)/)
+  assert.match(primaryFeatureSource, /!isDuplicateCompetitorFeatureName\(recordFeature,\s*record\)/)
+  assert.match(builderSource, /recordHasPrimaryFeature\(record\)/)
+  assert.match(filterSource, /recordHasActionableAnalysisValue\(record\)/)
+  assert.equal(pageSource.includes(deletedNoiseGuardName), false)
+  assert.equal(pageSource.includes(deletedMarkdownExtractorName), false)
+  assert.equal(builderSource.includes(`${deletedMarkdownExtractorName}([${markdownField}, ${summaryField}]`), false)
+  assert.equal(builderSource.includes(`${deletedMarkdownExtractorName}(${markdownField}`), false)
+  assert.equal(builderSource.includes(`${deletedMarkdownExtractorName}(${summaryField}`), false)
+})
+
+test('competitor flow feature selector prioritizes screenshots and rejects report status conclusions', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const builderStart = pageSource.indexOf('function buildCompetitorFeatureMapOptions()')
+  const builderEnd = pageSource.indexOf('function selectCompetitorFeature', builderStart)
+  const builderSource = pageSource.slice(builderStart, builderEnd)
+  const candidateStart = pageSource.indexOf('function isPrimaryCompetitorFeatureCandidate')
+  const candidateEnd = pageSource.indexOf('function isDuplicateCompetitorFeatureName', candidateStart)
+  const candidateSource = pageSource.slice(candidateStart, candidateEnd)
+  const confirmStart = pageSource.indexOf('async function handleConfirmAnalysis()')
+  const confirmEnd = pageSource.indexOf('async function runAnalysisForRecord', confirmStart)
+  const confirmSource = pageSource.slice(confirmStart, confirmEnd)
+
+  assert.ok(builderStart >= 0 && builderEnd > builderStart, 'feature option builder should be present')
+  assert.ok(candidateStart >= 0 && candidateEnd > candidateStart, 'primary feature candidate checker should be present')
+  assert.ok(confirmStart >= 0 && confirmEnd > confirmStart, 'confirm handler should be present')
+  assert.match(pageSource, /NON_PRIMARY_FEATURE_NAME_PATTERN/)
+  assert.match(candidateSource, /NON_PRIMARY_FEATURE_NAME_PATTERN\.test\(text\)/)
+  assert.match(candidateSource, /return false/)
+  assert.ok(
+    builderSource.indexOf("makeFeatureOption('截图中的功能入口', 'screenshot'") <
+      builderSource.indexOf('for (const record of analysisRecords.value)'),
+    'screenshot reference should be inserted before historical records so upload becomes the default selectable scope'
+  )
+  assert.ok(
+    confirmSource.indexOf('ensureSelectedFeatureStillAvailable()') <
+      confirmSource.indexOf('const validationMessage = analysisDialogValidationMessage()'),
+    'confirm should re-resolve screenshot fallback before validating the dialog'
+  )
 })
 
 test('competitor analysis list does not auto-restore stale latest temp reports into empty projects', async () => {
