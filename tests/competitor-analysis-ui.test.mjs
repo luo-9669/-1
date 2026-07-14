@@ -17,7 +17,7 @@ function cssRule(source, selector) {
   return source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{[\\s\\S]*?\\}`))?.[0] || ''
 }
 
-test('competitor analysis dialog uses the confirmed field order and selectors', async () => {
+test('competitor analysis dialog uses discovered feature selection and screenshot references instead of target text inputs', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
 
   assert.ok(
@@ -25,12 +25,8 @@ test('competitor analysis dialog uses the confirmed field order and selectors', 
     'analysis type should appear before competitor selection'
   )
   assert.ok(
-    pageSource.indexOf('选择分析竞品') < pageSource.indexOf('分析的功能名称'),
-    'competitor selection should appear before feature name'
-  )
-  assert.ok(
-    pageSource.indexOf('分析的功能名称') < pageSource.indexOf('分析的目标'),
-    'feature name should appear before analysis goal'
+    pageSource.indexOf('选择分析竞品') < pageSource.indexOf('选择要分析的功能'),
+    'competitor selection should appear before discovered feature selection'
   )
   assert.match(pageSource, /v-if="analysisRequiresScopeFields"/)
   assert.match(pageSource, /const analysisRequiresScopeFields = computed/)
@@ -40,6 +36,17 @@ test('competitor analysis dialog uses the confirmed field order and selectors', 
   assert.match(pageSource, /multiple/)
   assert.match(pageSource, /collapse-tags/)
   assert.match(pageSource, /<ElOption label="全部" value="__all__" \/>/)
+  assert.match(pageSource, /选择要分析的功能/)
+  assert.match(pageSource, /competitorFeatureMapOptions/)
+  assert.match(pageSource, /selectCompetitorFeature/)
+  assert.match(pageSource, /handleReferenceScreenshotUpload/)
+  assert.match(pageSource, /analysisForm\.referenceScreenshots/)
+  assert.match(pageSource, /截图中的功能入口/)
+  assert.match(pageSource, /截图只作为参考/)
+  assert.doesNotMatch(pageSource, /分析的功能名称/)
+  assert.doesNotMatch(pageSource, /分析的目标/)
+  assert.doesNotMatch(pageSource, /placeholder="例如：agent"/)
+  assert.doesNotMatch(pageSource, /placeholder="描述这次要分析什么功能、范围和判断目标。"/)
   assert.doesNotMatch(pageSource, /pinnedCompetitorOptions/)
   assert.doesNotMatch(pageSource, /togglePinnedCompetitor/)
   assert.doesNotMatch(pageSource, /showAllCompetitors/)
@@ -492,8 +499,10 @@ test('competitor analysis confirm shows validation feedback instead of silently 
 
   assert.ok(validationStart >= 0 && validationEnd > validationStart, 'validation helper should be present')
   assert.match(validationSource, /请选择至少一个竞品/)
-  assert.match(validationSource, /请输入分析的功能名称/)
-  assert.match(validationSource, /请输入分析目标/)
+  assert.match(validationSource, /请选择一个已发现功能/)
+  assert.match(validationSource, /上传截图参考/)
+  assert.doesNotMatch(validationSource, /请输入分析的功能名称/)
+  assert.doesNotMatch(validationSource, /请输入分析目标/)
   assert.match(pageSource, /analysisDialogMessage = ref\(''\)/)
   assert.match(pageSource, /class="competitor-analysis-dialog-message"/)
   assert.match(pageSource, /submittingAnalysis = ref\(false\)/)

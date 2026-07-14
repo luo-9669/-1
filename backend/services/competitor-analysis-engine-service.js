@@ -444,6 +444,48 @@ function normalizeMonitorEvidence(value = {}) {
   }
 }
 
+function normalizeSelectedFeature(value = {}) {
+  const item = normalizePlainObject(value)
+  const name = safeText(item.name || item.feature || item.label, '')
+  if (!name) return null
+  return {
+    id: safeText(item.id, safeSegment(name, 'selected-feature')),
+    name,
+    source: safeText(item.source, 'feature-map'),
+    confidence: safeText(item.confidence, 'partial'),
+    competitorName: safeText(item.competitorName || item.competitor, ''),
+    evidence: safeText(item.evidence || item.summary, '')
+  }
+}
+
+function normalizeReferenceScreenshots(value = []) {
+  return (Array.isArray(value) ? value : [])
+    .map((entry, index) => {
+      const item = normalizePlainObject(entry)
+      const imageDataUrl = String(item.imageDataUrl || item.dataUrl || item.preview || '').trim()
+      if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(imageDataUrl)) return null
+      return {
+        id: safeText(item.id, `reference-screenshot-${index + 1}`),
+        name: safeText(item.name || item.fileName, `参考截图 ${index + 1}`),
+        mimeType: safeText(item.mimeType || item.type, 'image/png'),
+        size: Number.isFinite(Number(item.size)) ? Number(item.size) : 0,
+        imageDataUrl
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+function referenceScreenshotsForModel(value = []) {
+  return normalizeReferenceScreenshots(value).map((item) => ({
+    id: item.id,
+    name: item.name,
+    mimeType: item.mimeType,
+    imageDataUrl: item.imageDataUrl,
+    summary: '用户上传的竞品功能入口参考截图'
+  }))
+}
+
 function analysisRecordTitle(input = {}) {
   const names = normalizeNameList(input.competitorNames || input.competitor || input.productName)
   const subject = names.length ? names.join('、') : '未命名竞品'
@@ -469,6 +511,8 @@ function normalizeRecord(record = {}) {
     productName: safeText(record.productName, ''),
     feature: safeText(record.feature, ''),
     goal: safeText(record.goal, ''),
+    selectedFeature: normalizeSelectedFeature(record.selectedFeature || record.selected_feature),
+    referenceScreenshots: normalizeReferenceScreenshots(record.referenceScreenshots || record.reference_screenshots),
     summary: safeText(record.summary, ''),
     markdown: sanitizeCompetitorAnalysisMarkdown(record.markdown || '', ''),
     interactionArtifacts: normalizeInteractionArtifacts(record),
@@ -662,6 +706,8 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
   const evidenceMode = String(input.evidenceMode || input.evidence_mode || '').trim()
   const evidenceConfidence = String(input.evidenceConfidence || input.evidence_confidence || '').trim()
   const analysisAllowed = normalizeOptionalBoolean(input.analysisAllowed ?? input.analysis_allowed)
+  const selectedFeature = normalizeSelectedFeature(input.selectedFeature || input.selected_feature)
+  const referenceScreenshots = normalizeReferenceScreenshots(input.referenceScreenshots || input.reference_screenshots)
   const isCompositeFlowEvidence = kind === 'flow' &&
     evidenceQuality === 'partial' &&
     evidenceMode === 'composite' &&
@@ -671,7 +717,11 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     `竞品名称：${subject}`,
     input.productUrl ? `官网地址：${input.productUrl}` : '',
     input.feature ? `分析功能：${input.feature}` : '',
+    selectedFeature?.name ? `已选择功能：${selectedFeature.name}` : '',
+    selectedFeature?.source ? `功能来源：${selectedFeature.source}` : '',
+    selectedFeature?.confidence ? `功能发现置信度：${selectedFeature.confidence}` : '',
     input.goal ? `分析目标：${input.goal}` : '',
+    referenceScreenshots.length ? `截图参考：${referenceScreenshots.map((item) => item.name).join('、')}` : '',
     `证据质量：${evidenceQuality}`,
     evidenceMode ? `证据模式：${evidenceMode}` : '',
     evidenceConfidence ? `证据置信度：${evidenceConfidence}` : '',
@@ -687,6 +737,8 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
       : '- evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足/待补采/缺失项”。',
     '- evidenceQuality=full 时才允许输出完整分析结论。',
     '- 每个关键结论后写明依据，例如“依据：页面标题/导航/搜索结果/JSON 字段”。',
+    '- 截图参考只用于理解目标入口、视觉位置和用户想验证的功能；不能单独作为竞品事实结论。',
+    '- 结论仍需按公开证据分级：确认存在 / 相似存在 / 能力存在但入口不明确 / 未找到证据。',
     '- 结论需要面向产品、交互、运营和研发协作，可直接作为详情页报告展示。',
     '- 内容不允许出现内部调试信息、密钥、堆栈、原始网页源码或执行过程。',
     '- 如果证据不足，请把报告重心放在“已知信息、缺口、补采动作”，不要写确定性结论。',
@@ -1165,6 +1217,15 @@ function buildAnalysisEvidence(jsonText = '', stdout = '', kind = '') {
 
 function buildInputMonitorEvidence(input = {}) {
   const lines = []
+  const selectedFeature = normalizeSelectedFeature(input.selectedFeature || input.selected_feature)
+  if (selectedFeature) {
+    pushEvidenceLine(lines, '用户选择功能', `${selectedFeature.name} | 来源：${selectedFeature.source} | 置信度：${selectedFeature.confidence}`)
+    pushEvidenceLine(lines, '功能选择依据', selectedFeature.evidence)
+  }
+  const screenshots = normalizeReferenceScreenshots(input.referenceScreenshots || input.reference_screenshots)
+  for (const screenshot of screenshots) {
+    pushEvidenceLine(lines, '截图参考', `${screenshot.name}；仅用于理解目标入口，不作为单独事实结论。`)
+  }
   const event = normalizeFeatureEvent(input.sourceFeatureEvent || input.source_feature_event)
   if (event) {
     pushEvidenceLine(lines, '监控发现竞品', event.competitorName)
@@ -1563,7 +1624,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         systemPrompt: '你是流程通后端的竞品分析报告模型，负责生成可直接展示的中文 Markdown 报告。',
         userPrompt,
         timeoutMs: settings.timeoutMs,
-        references: [],
+        references: referenceScreenshotsForModel(input.referenceScreenshots || input.reference_screenshots),
         retrievedKnowledge: []
       })
       const markdown = sanitizeCompetitorAnalysisMarkdown(result?.content || '', '')
@@ -1642,6 +1703,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         productName: input.productName,
         feature: input.feature,
         goal: input.goal,
+        selectedFeature: input.selectedFeature || input.selected_feature,
+        referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
         featureEvents: input.featureEvents || input.feature_events,
         sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
         monitorEvidence: input.monitorEvidence || input.monitor_evidence,
@@ -1723,6 +1786,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             summary: response.summary,
             markdown: response.markdown,
             interactionArtifacts: response.interactionArtifacts || input.interactionArtifacts,
+            selectedFeature: input.selectedFeature || input.selected_feature,
+            referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
             durationMs: response.durationMs
           })
         }
@@ -1759,7 +1824,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
                 systemPrompt: '你是流程通后端的竞品分析报告模型，负责基于现有竞品分析报告内容生成机会点分析报告。所有结论必须基于输入的报告内容，不得编造。',
                 userPrompt: gapPrompt,
                 timeoutMs: modelSettings.timeoutMs,
-                references: [],
+                references: referenceScreenshotsForModel(input.referenceScreenshots || input.reference_screenshots),
                 retrievedKnowledge: []
               })
               generatedMarkdown = sanitizeCompetitorAnalysisMarkdown(result?.content || '', '')
@@ -1790,6 +1855,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             summary: response.summary,
             markdown: response.markdown,
             durationMs: response.durationMs,
+            selectedFeature: input.selectedFeature || input.selected_feature,
+            referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
             sourceRecordId: input.sourceRecordId || '',
             sourceKind: input.sourceKind || '',
             sourceTitle: input.sourceTitle || ''
@@ -1809,6 +1876,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             productName: input.productName,
             feature: input.feature,
             goal: input.goal,
+            selectedFeature: input.selectedFeature || input.selected_feature,
+            referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
             summary: response.summary,
             markdown: response.markdown,
             durationMs: response.durationMs,
@@ -1939,6 +2008,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           qualityIssues: response.qualityIssues,
           sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
           monitorEvidence: input.monitorEvidence || input.monitor_evidence,
+          selectedFeature: input.selectedFeature || input.selected_feature,
+          referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
           durationMs: response.durationMs
         })
       } else if (response.markdown) {
@@ -1956,6 +2027,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           productName: input.productName,
           feature: input.feature,
           goal: input.goal,
+          selectedFeature: input.selectedFeature || input.selected_feature,
+          referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
           summary: response.summary,
           markdown: response.markdown,
           interactionArtifacts: response.interactionArtifacts || input.interactionArtifacts,

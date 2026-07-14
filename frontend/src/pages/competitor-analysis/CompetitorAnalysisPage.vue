@@ -549,23 +549,49 @@
 
           <template v-if="analysisRequiresScopeFields">
             <section class="competitor-analysis-dialog-section">
-              <label class="competitor-analysis-field">
-                分析的功能名称
-                <input class="ui-input" :value="analysisForm.feature" placeholder="例如：agent" @input="analysisForm.feature = $event.target.value" />
-              </label>
+              <div class="competitor-analysis-feature-picker">
+                <div>
+                  <h4>选择要分析的功能</h4>
+                  <p>系统会从竞品记录、监控事件和完整框架报告里发现功能；用户只需要点选，不需要输入目标词。</p>
+                </div>
+                <div v-if="competitorFeatureMapOptions.length" class="competitor-analysis-feature-grid" role="listbox" aria-label="选择要分析的功能">
+                  <button
+                    v-for="item in competitorFeatureMapOptions"
+                    :key="item.id"
+                    type="button"
+                    class="competitor-analysis-feature-option"
+                    :class="{ selected: analysisForm.selectedFeatureId === item.id }"
+                    @click="selectCompetitorFeature(item)"
+                  >
+                    <strong>{{ item.name }}</strong>
+                    <span>{{ item.sourceLabel }}</span>
+                    <small>{{ item.confidenceLabel }}</small>
+                  </button>
+                </div>
+                <p v-else class="competitor-analysis-help">暂未发现可点选功能。可以先生成「完整框架」发现功能地图，或上传截图作为参考。</p>
+              </div>
             </section>
 
             <section class="competitor-analysis-dialog-section">
-              <label class="competitor-analysis-field">
-                分析的目标
-                <textarea
-                  class="ui-textarea"
-                  :value="analysisForm.goal"
-                  rows="4"
-                  placeholder="描述这次要分析什么功能、范围和判断目标。"
-                  @input="analysisForm.goal = $event.target.value"
-                ></textarea>
-              </label>
+              <div class="competitor-analysis-screenshot-reference">
+                <div>
+                  <h4>上传截图参考（可选）</h4>
+                  <p>截图只作为参考，用来理解要找的功能入口；最终结论仍按公开页面、导航、URL、监控记录等证据分级。</p>
+                </div>
+                <label class="competitor-analysis-upload-tile">
+                  <input type="file" accept="image/*" multiple @change="handleReferenceScreenshotUpload" />
+                  <span>上传参考截图</span>
+                </label>
+                <div v-if="analysisForm.referenceScreenshots.length" class="competitor-analysis-reference-list">
+                  <figure v-for="item in analysisForm.referenceScreenshots" :key="item.id">
+                    <img :src="item.imageDataUrl" :alt="item.name || '参考截图'" />
+                    <figcaption>
+                      <span>{{ item.name || '参考截图' }}</span>
+                      <button type="button" @click="removeReferenceScreenshot(item.id)">移除</button>
+                    </figcaption>
+                  </figure>
+                </div>
+              </div>
             </section>
           </template>
         </div>
@@ -696,6 +722,9 @@ const analysisForm = reactive({
   goal: '',
   competitorName: '',
   feature: '',
+  selectedFeatureId: '',
+  selectedFeature: null,
+  referenceScreenshots: [],
   productUrl: '',
   productName: ''
 })
@@ -736,6 +765,7 @@ const analysisCompetitorOptions = computed(() => {
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 })
 const analysisRequiresScopeFields = computed(() => analysisForm.kind === 'flow')
+const competitorFeatureMapOptions = computed(() => buildCompetitorFeatureMapOptions())
 const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRecord.value))
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))
@@ -961,6 +991,182 @@ function featureEventOptionLabel(event = {}) {
   const competitorName = featureEventCompetitorName(event)
   const featureName = featureEventName(event)
   return [competitorName, featureName].filter(Boolean).join(' - ') || '未命名功能'
+}
+
+function normalizeFeatureOptionName(value = '') {
+  return String(value || '')
+    .replace(/^[#*\-\d.\s]+/, '')
+    .replace(/[：:]\s*$/, '')
+    .trim()
+}
+
+function featureOptionId(name = '', source = '') {
+  return `feature-${String(source || 'record')}-${String(name || 'unknown')
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')}`
+}
+
+function makeFeatureOption(name = '', source = 'record', meta = {}) {
+  const normalizedName = normalizeFeatureOptionName(name)
+  if (!normalizedName) return null
+  const sourceLabels = {
+    event: '监控发现',
+    record: '历史分析',
+    framework: '完整框架',
+    screenshot: '截图参考'
+  }
+  const confidenceLabels = {
+    confirmed: '确认功能',
+    inferred: '推断功能',
+    reference: '参考识别',
+    partial: '部分证据'
+  }
+  return {
+    id: meta.id || featureOptionId(normalizedName, source),
+    name: normalizedName,
+    source,
+    sourceLabel: sourceLabels[source] || '系统发现',
+    confidence: meta.confidence || (source === 'screenshot' ? 'reference' : 'partial'),
+    confidenceLabel: confidenceLabels[meta.confidence] || confidenceLabels[source === 'screenshot' ? 'reference' : 'partial'],
+    competitorName: meta.competitorName || '',
+    evidence: meta.evidence || ''
+  }
+}
+
+function addFeatureMapOption(map = new Map(), option = null) {
+  if (!option?.name) return
+  const key = option.name.toLowerCase()
+  if (map.has(key)) return
+  map.set(key, option)
+}
+
+function markdownFeatureCandidates(markdown = '') {
+  const text = String(markdown || '')
+  const candidates = []
+  const patterns = [
+    /(?:功能模块|页面功能入口|监控发现功能|分析功能|相似功能线索)[:：]\s*([^\n|]+)/g,
+    /^#{2,4}\s+(.{2,28}(?:功能|入口|中心|工作台|平台|模板|创作|发现|灵感).*)$/gm,
+    /^\s*[-*]\s+(.{2,28}(?:功能|入口|中心|工作台|平台|模板|创作|发现|灵感)[^：:\n]*)/gm
+  ]
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const raw = String(match[1] || '')
+      raw.split(/[、,，/|]/).forEach((item) => {
+        const name = normalizeFeatureOptionName(item).slice(0, 36)
+        if (name && !/证据|来源|页面|标题|报告|待补采/.test(name)) candidates.push(name)
+      })
+    }
+  }
+  return [...new Set(candidates)].slice(0, 12)
+}
+
+function recordMatchesSelectedCompetitors(record = {}, selectedNames = []) {
+  if (!selectedNames.length) return false
+  const names = recordCompetitorNameList(record)
+  if (!names.length) return false
+  return names.some((name) => selectedNames.includes(name))
+}
+
+function buildCompetitorFeatureMapOptions() {
+  if (!analysisRequiresScopeFields.value) return []
+  const selectedNames = selectedCompetitors().map(competitorDisplayName).filter(Boolean)
+  const options = new Map()
+  for (const record of analysisRecords.value) {
+    if (!recordMatchesSelectedCompetitors(record, selectedNames)) continue
+    const recordFeature = recordFeatureLabel(record)
+    if (recordFeature && !['全部功能', '未填写'].includes(recordFeature)) {
+      addFeatureMapOption(options, makeFeatureOption(recordFeature, record.kind === 'framework' ? 'framework' : 'record', {
+        confidence: record.kind === 'framework' ? 'inferred' : 'partial',
+        competitorName: recordCompetitorNames(record)
+      }))
+    }
+    for (const event of record.featureEvents || []) {
+      addFeatureMapOption(options, makeFeatureOption(featureEventName(event), 'event', {
+        id: featureOptionId(featureEventName(event), featureEventKey(event)),
+        confidence: 'confirmed',
+        competitorName: featureEventCompetitorName(event),
+        evidence: featureEventSourceText(event)
+      }))
+    }
+    for (const item of markdownFeatureCandidates([record.markdown, record.summary].filter(Boolean).join('\n'))) {
+      addFeatureMapOption(options, makeFeatureOption(item, record.kind === 'framework' ? 'framework' : 'record', {
+        confidence: record.kind === 'framework' ? 'inferred' : 'partial',
+        competitorName: recordCompetitorNames(record)
+      }))
+    }
+  }
+  if (analysisForm.referenceScreenshots.length) {
+    addFeatureMapOption(options, makeFeatureOption('截图中的功能入口', 'screenshot', {
+      id: 'screenshot-reference-entry',
+      confidence: 'reference',
+      evidence: analysisForm.referenceScreenshots.map((item) => item.name).filter(Boolean).join('、')
+    }))
+  }
+  return [...options.values()].slice(0, 16)
+}
+
+function selectCompetitorFeature(option = {}) {
+  if (!option?.id) return
+  analysisForm.selectedFeatureId = option.id
+  analysisForm.selectedFeature = {
+    id: option.id,
+    name: option.name,
+    source: option.source,
+    confidence: option.confidence,
+    competitorName: option.competitorName || '',
+    evidence: option.evidence || ''
+  }
+  analysisForm.feature = option.name
+  analysisForm.goal = `验证竞品是否存在「${option.name}」，并输出入口路径、交互流程、证据分级和待补采清单。`
+}
+
+function ensureSelectedFeatureStillAvailable() {
+  if (!analysisRequiresScopeFields.value) return
+  const options = competitorFeatureMapOptions.value
+  if (analysisForm.selectedFeatureId && options.some((item) => item.id === analysisForm.selectedFeatureId)) return
+  const first = options[0]
+  if (first) {
+    selectCompetitorFeature(first)
+    return
+  }
+  analysisForm.selectedFeatureId = ''
+  analysisForm.selectedFeature = null
+  analysisForm.feature = ''
+  analysisForm.goal = ''
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('截图读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function handleReferenceScreenshotUpload(event) {
+  const files = Array.from(event?.target?.files || []).filter((file) => file?.type?.startsWith('image/'))
+  event.target.value = ''
+  if (!files.length) return
+  const existing = [...analysisForm.referenceScreenshots]
+  for (const file of files.slice(0, 4)) {
+    const imageDataUrl = await readFileAsDataUrl(file)
+    existing.push({
+      id: `reference-screenshot-${Date.now()}-${existing.length}`,
+      name: file.name || '参考截图',
+      mimeType: file.type || 'image/png',
+      size: file.size || 0,
+      imageDataUrl
+    })
+  }
+  analysisForm.referenceScreenshots = existing.slice(0, 4)
+  ensureSelectedFeatureStillAvailable()
+}
+
+function removeReferenceScreenshot(id = '') {
+  analysisForm.referenceScreenshots = analysisForm.referenceScreenshots.filter((item) => item.id !== id)
+  ensureSelectedFeatureStillAvailable()
 }
 
 function competitorForFeatureEvent(event = {}) {
@@ -1213,6 +1419,8 @@ function normalizeRecord(record = {}) {
     productName: record.productName || '',
     feature: record.feature || '',
     goal: record.goal || '',
+    selectedFeature: record.selectedFeature || record.selected_feature || null,
+    referenceScreenshots: Array.isArray(record.referenceScreenshots) ? record.referenceScreenshots : Array.isArray(record.reference_screenshots) ? record.reference_screenshots : [],
     summary: record.summary || '',
     markdown: record.markdown || '',
     interactionArtifacts: interactionArtifactsForRecord(record),
@@ -1279,6 +1487,7 @@ async function loadRecords() {
   if (result.ok && Array.isArray(result.data?.records)) {
     analysisRecords.value = mergeBackendRecordsWithLocalRunning(result.data.records.map(normalizeRecord))
     persistCachedAnalysis()
+    ensureSelectedFeatureStillAvailable()
   }
 }
 
@@ -1340,13 +1549,14 @@ async function deleteRecord(record = {}) {
 async function openAnalysisDialog() {
   analysisDialogMessage.value = ''
   analysisForm.kind = currentDialogAnalysisKind()
-  await loadCompetitors()
+  await Promise.all([loadCompetitors(), loadRecords()])
   if (!analysisForm.competitorIds.length && analysisCompetitorOptions.value.length) {
     const defaultCompetitor = analysisCompetitorOptions.value[0]
     analysisForm.competitorIds = defaultCompetitor?.id ? [defaultCompetitor.id] : []
   }
   analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => analysisCompetitorOptions.value.some((item) => item.id === id))
   fillDialogDefaults()
+  ensureSelectedFeatureStillAvailable()
   showAnalysisDialog.value = true
 }
 
@@ -1409,6 +1619,7 @@ function pruneDeletedCompetitorReferences(competitor = {}, deletedOptionIds = co
   if (listFilters.competitor === competitor.name) listFilters.competitor = 'all'
   analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => !deletedOptionIds.includes(id))
   fillDialogDefaults()
+  ensureSelectedFeatureStillAvailable()
 }
 
 function handleAnalysisCompetitorChange(value = []) {
@@ -1421,6 +1632,7 @@ function handleAnalysisCompetitorChange(value = []) {
     analysisForm.competitorIds = selectedIds.filter((id) => realIds.includes(id))
   }
   fillDialogDefaults()
+  ensureSelectedFeatureStillAvailable()
 }
 
 function selectedCompetitors() {
@@ -1464,6 +1676,8 @@ function recordsForSelectedCompetitors() {
       productUrls: [websiteUrl],
       feature: analysisRequiresScopeFields.value ? analysisForm.feature?.trim() || '' : '',
       goal: analysisRequiresScopeFields.value ? analysisForm.goal?.trim() || '' : '',
+      selectedFeature: analysisRequiresScopeFields.value ? analysisForm.selectedFeature : null,
+      referenceScreenshots: analysisRequiresScopeFields.value ? analysisForm.referenceScreenshots : [],
       competitorName: name,
       productUrl: websiteUrl,
       productName: name
@@ -1474,6 +1688,7 @@ function recordsForSelectedCompetitors() {
 function setDialogKind(kind = 'daily') {
   analysisDialogMessage.value = ''
   setActiveKind(kind)
+  ensureSelectedFeatureStillAvailable()
 }
 
 function fillDialogDefaults() {
@@ -1502,6 +1717,8 @@ function requestBodyForRecord(record = {}) {
     productUrl: record.productUrl || savedCompetitor.websiteUrl || '',
     productName: record.productName || names[0] || '',
     goal: record.goal || '',
+    selectedFeature: record.selectedFeature || null,
+    referenceScreenshots: record.referenceScreenshots || [],
     sourceFeatureEvent: record.sourceFeatureEvent,
     monitorEvidence: record.monitorEvidence
   }
@@ -1534,8 +1751,7 @@ function clearRecordRunning(id = '') {
 function analysisDialogValidationMessage() {
   if (!analysisForm.kind) return '请选择分析类型。'
   if (!analysisForm.competitorIds.length || !selectedCompetitors().length) return '请选择至少一个竞品。'
-  if (analysisRequiresScopeFields.value && !analysisForm.feature?.trim()) return '请输入分析的功能名称。'
-  if (analysisRequiresScopeFields.value && !analysisForm.goal?.trim()) return '请输入分析目标。'
+  if (analysisRequiresScopeFields.value && !analysisForm.feature?.trim()) return '请选择一个已发现功能；如果暂未发现，可以先生成完整框架或上传截图参考。'
   return ''
 }
 
@@ -3010,6 +3226,121 @@ watch(() => props.projectId, () => {
 .competitor-analysis-help {
   margin: 4px 0 0;
   color: #667085;
+}
+
+.competitor-analysis-feature-picker,
+.competitor-analysis-screenshot-reference {
+  display: grid;
+  gap: 12px;
+}
+
+.competitor-analysis-feature-picker h4,
+.competitor-analysis-screenshot-reference h4 {
+  margin: 0;
+}
+
+.competitor-analysis-feature-picker p,
+.competitor-analysis-screenshot-reference p {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.competitor-analysis-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.competitor-analysis-feature-option {
+  display: grid;
+  gap: 4px;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  background: #fff;
+  color: #1f2329;
+  text-align: left;
+  cursor: pointer;
+}
+
+.competitor-analysis-feature-option:hover,
+.competitor-analysis-feature-option.selected {
+  border-color: #1f2329;
+  background: #f8f9fb;
+}
+
+.competitor-analysis-feature-option span,
+.competitor-analysis-feature-option small {
+  color: #667085;
+  font-size: 12px;
+}
+
+.competitor-analysis-upload-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px dashed #98a2b3;
+  border-radius: 10px;
+  color: #1f2329;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.competitor-analysis-upload-tile input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.competitor-analysis-reference-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.competitor-analysis-reference-list figure {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.competitor-analysis-reference-list img {
+  width: 100%;
+  height: 86px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f2f4f7;
+}
+
+.competitor-analysis-reference-list figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.competitor-analysis-reference-list figcaption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.competitor-analysis-reference-list figcaption button {
+  border: 0;
+  background: transparent;
+  color: #1f2329;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .competitor-analysis-dialog-select {

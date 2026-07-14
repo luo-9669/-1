@@ -1387,6 +1387,74 @@ test('gap analysis keeps source metadata when running an existing created record
   assert.match(listed.records[0].markdown, /OP01/)
 })
 
+test('flow analysis passes selected feature map item and screenshot references to backend model', async () => {
+  let capturedPrompt = ''
+  let capturedReferences = []
+  const service = createCompetitorAnalysisEngineService({
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'flow.md'), '# Python fallback flow')
+      await writeFile(join(env.OUTPUT_DIR, 'flow.json'), JSON.stringify({
+        competitor: '稿定设计',
+        feature: '截图中的功能入口',
+        evidence_status: 'similar',
+        evidence_quality: 'partial',
+        evidence_count: 1,
+        evidence_mode: 'screenshot_reference',
+        evidence_confidence: 'medium',
+        analysis_allowed: true,
+        sources: [{ title: '用户上传截图', url: 'reference://screenshot/homepage' }],
+        similar_features: [{ name: 'AI 创作入口', description: '来自截图参考' }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    },
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      generate: async (payload = {}) => {
+        capturedPrompt = payload.userPrompt
+        capturedReferences = payload.references || []
+        return {
+          content: '# 交互流程分析结果\n\n## 证据校验\n\n- 基于截图参考和公开证据，仍需标注待补采。'
+        }
+      }
+    })
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-flow-feature-map-reference-regression',
+    kind: 'flow',
+    competitorNames: ['稿定设计'],
+    competitorName: '稿定设计',
+    productName: '稿定设计',
+    productUrl: 'https://www.gaoding.com',
+    feature: '截图中的功能入口',
+    selectedFeature: {
+      id: 'screenshot-reference-entry',
+      name: '截图中的功能入口',
+      source: 'screenshot-reference',
+      confidence: 'reference'
+    },
+    referenceScreenshots: [{
+      id: 'screenshot-homepage',
+      name: 'homepage.png',
+      mimeType: 'image/png',
+      imageDataUrl: 'data:image/png;base64,aG9tZXBhZ2U='
+    }]
+  })
+
+  assert.equal(response.ok, true)
+  assert.match(capturedPrompt, /已选择功能：截图中的功能入口/)
+  assert.match(capturedPrompt, /截图参考只用于理解目标入口/)
+  assert.match(capturedPrompt, /结论仍需按公开证据分级/)
+  assert.equal(capturedReferences.length, 1)
+  assert.equal(capturedReferences[0].imageDataUrl, 'data:image/png;base64,aG9tZXBhZ2U=')
+  assert.equal(capturedReferences[0].name, 'homepage.png')
+})
+
 test('python interaction flow serializes normalized evidence quality fields', () => {
   const result = spawnSync('python3', ['-c', `
 from models import InteractionFlow
