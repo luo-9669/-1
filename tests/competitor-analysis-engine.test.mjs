@@ -639,6 +639,84 @@ test('flow evidence_quality partial calls backend model with insufficiency instr
   assert.deepEqual(response.interactionArtifacts.lowFiWireframeImages, [])
 })
 
+test('flow composite evidence allows analysis prompt and preserves generated artifacts', async () => {
+  let providerCalled = false
+  let seenPrompt = ''
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async (payload = {}) => {
+        providerCalled = true
+        seenPrompt = payload.userPrompt
+        return {
+          provider: 'codex-cli',
+          model: payload.model,
+          content: '# 交互流程分析：稿定设计 - AI 生视频\n\n## 功能证据校验\n\n组合证据显示其具备 AI 图片生成与视频编辑/模板链路，可继续分析；直接官方声明待补采。\n\n## 页面总览表\n\n| P编号 | 页面名称 | 类型 | 目的 | 证据置信度 |\n| --- | --- | --- | --- | --- |\n| P01 | AI 图片生成页 | page | 生成素材 | 组合证据 |\n\n## 待补采清单\n\n- 补采直接“AI 生视频”官方声明。'
+        }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'flow.md'), '# 交互流程分析\n\n组合证据可分析。')
+      await writeFile(join(env.OUTPUT_DIR, 'flow.json'), JSON.stringify({
+        competitor: '稿定设计',
+        feature: 'AI 生视频',
+        flow_description: '组合证据可分析。',
+        evidence_quality: 'partial',
+        evidence_count: 2,
+        evidence_status: 'similar',
+        evidence_reason: '发现高置信组合证据。',
+        sources: [
+          { title: 'AI 一键生成图片', url: 'https://www.gaoding.com/ai-image', type: 'composite' },
+          { title: '在线视频剪辑与视频模板', url: 'https://www.gaoding.com/video-editor', type: 'composite' }
+        ],
+        similar_features: [],
+        raw_data: 'AI 一键生成图片\\n在线视频剪辑与视频模板',
+        structured_data: {
+          evidence_mode: 'composite',
+          evidence_confidence: 'high',
+          analysis_allowed: true,
+          capability_signals: ['image_generation', 'video_editing', 'video_template']
+        },
+        main_flow_file: '主流程图.drawio',
+        state_diagram_file: '状态图.drawio',
+        low_fi_wireframe_images: ['P01.png']
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-flow-composite-evidence',
+    kind: 'flow',
+    competitor: '稿定设计',
+    competitorName: '稿定设计',
+    productName: '稿定设计',
+    productUrl: 'https://www.gaoding.com',
+    feature: 'AI 生视频'
+  })
+
+  assert.equal(providerCalled, true)
+  assert.match(seenPrompt, /证据质量：partial/)
+  assert.match(seenPrompt, /证据模式：composite/)
+  assert.match(seenPrompt, /是否允许分析：true/)
+  assert.match(seenPrompt, /高置信组合证据/)
+  assert.doesNotMatch(seenPrompt, /标题、结论和流程都必须明确标注/)
+  assert.equal(response.ok, true)
+  assert.match(response.markdown, /组合证据/)
+  assert.equal(response.interactionArtifacts.evidenceStatus, 'similar')
+  assert.equal(response.interactionArtifacts.evidenceQuality, 'partial')
+  assert.equal(response.interactionArtifacts.evidenceCount, 2)
+  assert.match(response.interactionArtifacts.mainFlowFile.content, /主流程图/)
+  assert.match(response.interactionArtifacts.stateDiagramFile.content, /状态图/)
+  assert.deepEqual(response.interactionArtifacts.lowFiWireframeImages, ['P01.png'])
+})
+
 test('framework evidence_quality none does not call backend model or show fabricated framework report', async () => {
   let providerCalled = false
   const service = createCompetitorAnalysisEngineService({

@@ -171,6 +171,39 @@ function normalizePlainObject(value = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
+function normalizeOptionalBoolean(value) {
+  if (typeof value === 'boolean') return value
+  if (value === 1 || value === '1') return true
+  if (value === 0 || value === '0') return false
+  const text = String(value ?? '').trim().toLowerCase()
+  if (['true', 'yes', 'y'].includes(text)) return true
+  if (['false', 'no', 'n'].includes(text)) return false
+  return null
+}
+
+function flowEvidenceMeta(data = {}) {
+  const item = normalizePlainObject(data)
+  const structured = normalizePlainObject(item.structured_data || item.structuredData)
+  const analysisAllowed = normalizeOptionalBoolean(
+    item.analysis_allowed ?? item.analysisAllowed ?? structured.analysis_allowed ?? structured.analysisAllowed
+  )
+  const capabilitySignals = Array.isArray(item.capability_signals)
+    ? item.capability_signals
+    : Array.isArray(item.capabilitySignals)
+      ? item.capabilitySignals
+      : Array.isArray(structured.capability_signals)
+        ? structured.capability_signals
+        : Array.isArray(structured.capabilitySignals)
+          ? structured.capabilitySignals
+          : []
+  return {
+    evidenceMode: String(item.evidence_mode || item.evidenceMode || structured.evidence_mode || structured.evidenceMode || '').trim(),
+    evidenceConfidence: String(item.evidence_confidence || item.evidenceConfidence || structured.evidence_confidence || structured.evidenceConfidence || structured.confidence || '').trim(),
+    analysisAllowed,
+    capabilitySignals: uniquePlainTextList(capabilitySignals)
+  }
+}
+
 function dateString(value = '') {
   const text = String(value || '').trim()
   const direct = text.match(/\d{4}-\d{2}-\d{2}/)?.[0] || ''
@@ -623,6 +656,13 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
   const evidenceCountText = Number.isFinite(Number(input.evidenceCount ?? input.evidence_count))
     ? String(Number(input.evidenceCount ?? input.evidence_count))
     : '0'
+  const evidenceMode = String(input.evidenceMode || input.evidence_mode || '').trim()
+  const evidenceConfidence = String(input.evidenceConfidence || input.evidence_confidence || '').trim()
+  const analysisAllowed = normalizeOptionalBoolean(input.analysisAllowed ?? input.analysis_allowed)
+  const isCompositeFlowEvidence = kind === 'flow' &&
+    evidenceQuality === 'partial' &&
+    evidenceMode === 'composite' &&
+    analysisAllowed === true
   const lines = [
     `分析类型：${kindLabel(kind)}`,
     `竞品名称：${subject}`,
@@ -630,13 +670,18 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     input.feature ? `分析功能：${input.feature}` : '',
     input.goal ? `分析目标：${input.goal}` : '',
     `证据质量：${evidenceQuality}`,
+    evidenceMode ? `证据模式：${evidenceMode}` : '',
+    evidenceConfidence ? `证据置信度：${evidenceConfidence}` : '',
+    analysisAllowed !== null ? `是否允许分析：${analysisAllowed ? 'true' : 'false'}` : '',
     `证据数量：${evidenceCountText}`,
     '',
     '请基于以上信息生成一份中文 Markdown 竞品分析报告。要求：',
     '- 只输出 Markdown 正文，不要输出 JSON。',
     '- 只能基于证据材料做分析；证据里没有的信息必须标记为“待补采”，不能自行补全。',
     '- evidenceQuality=none 时不应生成结论；只能说明未找到证据和待补采动作。',
-    '- evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足/待补采/缺失项”。',
+    isCompositeFlowEvidence
+      ? '- evidenceQuality=partial 且 evidenceMode=composite、analysisAllowed=true 时，按高置信组合证据继续输出可分析流程；只在证据校验、关键推断和待补采清单中标注“组合证据/直接官方声明待补采”，不要把整份报告降级成仅待补采报告。'
+      : '- evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足/待补采/缺失项”。',
     '- evidenceQuality=full 时才允许输出完整分析结论。',
     '- 每个关键结论后写明依据，例如“依据：页面标题/导航/搜索结果/JSON 字段”。',
     '- 结论需要面向产品、交互、运营和研发协作，可直接作为详情页报告展示。',
@@ -1075,6 +1120,11 @@ function buildAnalysisEvidence(jsonText = '', stdout = '', kind = '') {
     pushEvidenceLine(lines, '证据数量', String(count))
     pushEvidenceLine(lines, '功能证据状态', data.evidence_status || '')
     pushEvidenceLine(lines, '功能证据说明', data.evidence_reason || '')
+    const meta = flowEvidenceMeta(data)
+    pushEvidenceLine(lines, '证据模式', meta.evidenceMode)
+    pushEvidenceLine(lines, '证据置信度', meta.evidenceConfidence)
+    if (meta.analysisAllowed !== null) pushEvidenceLine(lines, '是否允许分析', meta.analysisAllowed ? 'true' : 'false')
+    if (meta.capabilitySignals.length) pushEvidenceLine(lines, '能力信号', meta.capabilitySignals.join('、'))
     for (const source of evidenceSources(data).slice(0, isFramework ? 30 : 10)) {
       pushEvidenceLine(lines, '证据来源', `${source.title || ''} ${source.url || ''} ${source.snippet || ''}`)
     }
@@ -1404,7 +1454,9 @@ function buildInteractionArtifactsFromData(kind = '', markdown = '', input = {},
   if (normalizeKind(kind) !== 'flow') return undefined
   const status = flowEvidenceStatus(data)
   const quality = flowEvidenceQuality(data)
-  if (status && status !== 'exact') {
+  const meta = flowEvidenceMeta(data)
+  const analysisAllowed = status === 'exact' || meta.analysisAllowed === true
+  if (status && status !== 'exact' && !analysisAllowed) {
     return {
       documentMarkdown: markdown || buildUnsupportedFlowMarkdown(input, data),
       mainFlowFile: '',
@@ -1798,6 +1850,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
       const flowStatus = kind === 'flow' ? flowEvidenceStatus(analysisData) : ''
       const evidenceQuality = normalizeEvidenceQuality(analysisData, kind)
       const evidenceCountValue = evidenceCount(analysisData)
+      const flowMeta = kind === 'flow' ? flowEvidenceMeta(analysisData) : {}
       const shouldUseEvidenceModel = kind === 'framework' && evidenceQuality !== 'none' && Boolean(analysisEvidence.trim()) && modelSettings.enabled
       const flowHasEvidenceResult = kind !== 'flow' || Boolean(flowStatus)
       const shouldBlockFlowModel = false  // 不再完全阻止 flow 分析
@@ -1808,13 +1861,19 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         analysisEvidence,
         evidenceQuality,
         evidenceCount: evidenceCountValue,
+        evidenceMode: flowMeta.evidenceMode,
+        evidenceConfidence: flowMeta.evidenceConfidence,
+        analysisAllowed: flowMeta.analysisAllowed,
         frameworkPageUrls
       }, modelSettings, scriptOk ? '' : failureReason) : null
       const partialModelReport = (!modelReport && shouldUsePartialFlowModel) ? await generateBackendModelReport({
         ...input,
         analysisEvidence,
         evidenceQuality,
-        evidenceCount: evidenceCountValue
+        evidenceCount: evidenceCountValue,
+        evidenceMode: flowMeta.evidenceMode,
+        evidenceConfidence: flowMeta.evidenceConfidence,
+        analysisAllowed: flowMeta.analysisAllowed
       }, modelSettings, '') : null
       const rawModelReport = modelReport || partialModelReport
       const frameworkQualityFailed = kind === 'framework' && Boolean(rawModelReport?.qualityFailed)
