@@ -6837,6 +6837,7 @@ function shouldUseAdvancedUxPendingStageCanvas(stageId = '', totalFlow = null) {
   stageId = normalizeWorkflowStageId(stageId)
   if (stageId !== 'interaction-lofi') return false
   if (!workflowIsAdvancedUxTotalFlow(totalFlow)) return false
+  if (!workflowStageHasConfirmedAccess(stageId, totalFlow)) return false
   if (workflowAdvancedUxPageInteractionDocument(totalFlow)) return false
   if (workflowAdvancedUxPageInteractionDocumentFailure(totalFlow)) return false
   const runtimeState = String(totalFlow?.stageRuntime?.[stageId]?.state || '').trim()
@@ -15088,6 +15089,24 @@ function workflowStageRuntime(stageId = '') {
   return runtime && typeof runtime === 'object' ? runtime : null
 }
 
+function workflowStageHasConfirmedAccess(stageId = '', totalFlow = workflowTotalDesignFlow.value) {
+  const normalizedStageId = normalizeWorkflowStageId(stageId)
+  if (!normalizedStageId) return false
+  if (normalizedStageId === 'requirement-dissection') return true
+  const stages = normalizeWorkflowTotalFlowStages(totalFlow?.stages || [])
+  const targetIndex = stages.findIndex((stage) => stage.id === normalizedStageId)
+  if (targetIndex < 0) return false
+  const currentStageId = normalizeWorkflowStageId(totalFlow?.currentStage || workflowCurrentStageId.value)
+  const currentIndex = stages.findIndex((stage) => stage.id === currentStageId)
+  if (currentIndex >= 0 && targetIndex <= currentIndex) return true
+  const confirmations = totalFlow?.stageConfirmations || {}
+  if (confirmations[normalizedStageId]) return true
+  const previousStageId = stages[targetIndex - 1]?.id || ''
+  if (previousStageId && confirmations[previousStageId]) return true
+  const runtime = totalFlow?.stageRuntime?.[normalizedStageId]
+  return Boolean(runtime?.current === true || runtime?.previousConfirmed === true)
+}
+
 function canSelectWorkflowStage(stageId = '') {
   const normalizedStageId = normalizeWorkflowStageId(stageId)
   if (!normalizedStageId || normalizedStageId === 'requirement-dissection') return true
@@ -15097,13 +15116,13 @@ function canSelectWorkflowStage(stageId = '') {
   const currentIndex = workflowStageIndexById(workflowCurrentStageId.value)
   if (currentIndex >= 0 && targetIndex <= currentIndex) return true
   const targetStatus = workflowStageStatusMap.value?.[normalizedStageId]?.status || workflowTotalDesignFlow.value?.stageStatuses?.[normalizedStageId]?.status || ''
-  if (['generating', 'paused'].includes(targetStatus)) return true
+  if (['generating', 'paused'].includes(targetStatus) && workflowStageHasConfirmedAccess(normalizedStageId)) return true
   if (workflowStageCanvasHasRenderedContent(workflowTotalDesignFlow.value?.stageCanvases?.[normalizedStageId], normalizedStageId)) return true
   if (workflowStageConfirmation(normalizedStageId)) return true
   const previousStageId = stageIds[targetIndex - 1]
   if (previousStageId && workflowStageConfirmation(previousStageId)) return true
   const runtime = workflowStageRuntime(normalizedStageId)
-  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
+  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true && workflowStageHasConfirmedAccess(normalizedStageId)
   return false
 }
 

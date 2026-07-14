@@ -1807,12 +1807,12 @@ const canAdvanceWorkflowStage = computed(() => Boolean(props.totalFlow && nextWo
 const loadedStageIds = computed(() => {
   const ids = new Set()
   Object.entries(props.stageStatuses || {}).forEach(([stageId, status]) => {
-    if (['generating', 'paused'].includes(status?.status) || (status?.status === 'completed' && stageCanvasHasRenderedContent(stageId))) {
+    if (stageStatusCanOpen(stageId, status?.status) || (status?.status === 'completed' && stageCanvasHasRenderedContent(stageId))) {
       ids.add(stageId)
     }
   })
   Object.entries(props.totalFlow?.stageStatuses || {}).forEach(([stageId, status]) => {
-    if (['generating', 'paused'].includes(status?.status) || (status?.status === 'completed' && stageCanvasHasRenderedContent(stageId))) {
+    if (stageStatusCanOpen(stageId, status?.status) || (status?.status === 'completed' && stageCanvasHasRenderedContent(stageId))) {
       ids.add(stageId)
     }
   })
@@ -2032,6 +2032,24 @@ function previousStageIdForCanvasStage(stageId = '') {
   const index = totalFlowStages.value.findIndex((stage) => stage.id === stageId)
   if (index <= 0) return ''
   return totalFlowStages.value[index - 1]?.id || ''
+}
+
+function stageHasConfirmedAccess(stageId = '') {
+  if (!stageId) return false
+  const index = totalFlowStages.value.findIndex((stage) => stage.id === stageId)
+  if (index < 0) return false
+  if (index <= 0) return true
+  if (stageId === activeStageId.value) return true
+  if (index < activeStageIndex.value) return true
+  if (stageConfirmation(stageId)) return true
+  const previousStageId = previousStageIdForCanvasStage(stageId)
+  if (previousStageId && stageConfirmation(previousStageId)) return true
+  const runtime = stageRuntime(stageId)
+  return Boolean(runtime?.current === true || runtime?.previousConfirmed === true)
+}
+
+function stageStatusCanOpen(stageId = '', status = '') {
+  return ['generating', 'paused'].includes(String(status || '').trim()) && stageHasConfirmedAccess(stageId)
 }
 
 function isRequirementDissectionStageId(stageId = '') {
@@ -6989,13 +7007,13 @@ function canOpenStage(stageId = '') {
   if (index <= 0) return true
   if (stageId === activeStageId.value) return true
   if (index < activeStageIndex.value) return true
-  if (['generating', 'paused'].includes(stageStatus(stageId))) return true
+  if (['generating', 'paused'].includes(stageStatus(stageId)) && stageStatusCanOpen(stageId, stageStatus(stageId))) return true
   if (loadedStageIds.value.has(stageId)) return true
   if (stageConfirmation(stageId)) return true
   const previousStageId = previousStageIdForCanvasStage(stageId)
   if (previousStageId && stageConfirmation(previousStageId)) return true
   const runtime = stageRuntime(stageId)
-  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true
+  if (runtime && typeof runtime.canOpen === 'boolean') return runtime.canOpen === true && stageHasConfirmedAccess(stageId)
   return false
 }
 

@@ -807,6 +807,51 @@ test('workflow stage selectors ignore stale runtime locks for reached stages', (
   )
 })
 
+test('future generating workflow stages stay locked until previous stage is confirmed', () => {
+  const canSelectSource = appVue.slice(
+    appVue.indexOf("function canSelectWorkflowStage(stageId = '')"),
+    appVue.indexOf("function canAutoGenerateWorkflowStage(stageId = '')")
+  )
+  const pendingAdvancedUxSource = appVue.slice(
+    appVue.indexOf("function shouldUseAdvancedUxPendingStageCanvas(stageId = '', totalFlow = null)"),
+    appVue.indexOf("function shouldResumeAdvancedUxPendingStageGeneration", appVue.indexOf("function shouldUseAdvancedUxPendingStageCanvas(stageId = '', totalFlow = null)"))
+  )
+  const loadedStageSource = canvasVue.slice(
+    canvasVue.indexOf('const loadedStageIds = computed'),
+    canvasVue.indexOf('const activeStageCanvas = computed')
+  )
+  const canOpenSource = canvasVue.slice(
+    canvasVue.indexOf("function canOpenStage(stageId = '')"),
+    canvasVue.indexOf('function layoutCanvasNodes')
+  )
+
+  assert.match(
+    appVue,
+    /function workflowStageHasConfirmedAccess\(stageId = '', totalFlow = workflowTotalDesignFlow\.value\)/,
+    'App should centralize confirmed-stage access instead of trusting stale future generating statuses'
+  )
+  assert.match(
+    canSelectSource,
+    /\['generating', 'paused'\]\.includes\(targetStatus\) && workflowStageHasConfirmedAccess\(normalizedStageId\)/,
+    'future generating or paused stages should only be selectable after the previous stage was confirmed'
+  )
+  assert.match(
+    pendingAdvancedUxSource,
+    /if \(!workflowStageHasConfirmedAccess\(stageId, totalFlow\)\) return false/,
+    'Advanced UX pending downstream placeholders should not render before the user confirms the previous stage'
+  )
+  assert.match(
+    loadedStageSource,
+    /stageStatusCanOpen\(stageId,\s*status\?\.status\)/,
+    'Canvas stage strip should not mark stale future generating statuses as loaded'
+  )
+  assert.match(
+    canOpenSource,
+    /\['generating', 'paused'\]\.includes\(stageStatus\(stageId\)\) && stageStatusCanOpen\(stageId,\s*stageStatus\(stageId\)\)/,
+    'Canvas stage open guard should require confirmed access for future generating statuses'
+  )
+})
+
 test('workflow canvas suppresses stale node generating state after stage completion', () => {
   const loadingSource = canvasVue.slice(
     canvasVue.indexOf("function isNodeActuallyLoading(node = {})"),
@@ -1410,8 +1455,8 @@ test('workflow stage strip keeps all stage entries and disables unreached future
 
   assert.match(
     appVue,
-    /function canSelectWorkflowStage\(stageId = ''\)[\s\S]*if \(currentIndex >= 0 && targetIndex <= currentIndex\) return true[\s\S]*if \(\['generating', 'paused'\]\.includes\(targetStatus\)\) return true[\s\S]*const previousStageId = stageIds\[targetIndex - 1\][\s\S]*if \(previousStageId && workflowStageConfirmation\(previousStageId\)\) return true[\s\S]*const runtime = workflowStageRuntime\(normalizedStageId\)/,
-    'App-level stage guard should unlock reached or actively generating stages before checking sequential confirmation and runtime fallback'
+    /function canSelectWorkflowStage\(stageId = ''\)[\s\S]*if \(currentIndex >= 0 && targetIndex <= currentIndex\) return true[\s\S]*if \(\['generating', 'paused'\]\.includes\(targetStatus\) && workflowStageHasConfirmedAccess\(normalizedStageId\)\) return true[\s\S]*const previousStageId = stageIds\[targetIndex - 1\][\s\S]*if \(previousStageId && workflowStageConfirmation\(previousStageId\)\) return true[\s\S]*const runtime = workflowStageRuntime\(normalizedStageId\)/,
+    'App-level stage guard should unlock reached or confirmed active generation before checking sequential confirmation and runtime fallback'
   )
 })
 
