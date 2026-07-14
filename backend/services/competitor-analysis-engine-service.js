@@ -11,6 +11,14 @@ const PYTHON_APP_DIR = path.join(__dirname, 'competitor-analysis-engine', 'pytho
 const REPORT_STORAGE_DIR = path.join(storageRoot, 'competitor-analysis')
 const SAFE_FAILURE_MESSAGE = '竞品分析暂时无法完成，请检查 Python 依赖或稍后重试。'
 const MODEL_FALLBACK_FAILURE_MESSAGE = '当前后端模型暂时无法生成竞品分析，请检查模型配置后重试。'
+const STALE_RUNNING_RECORD_MS = 15 * 60 * 1000
+const DEFAULT_FRAMEWORK_PYTHON_ENV = {
+  MAX_CRAWL_PAGES: '24',
+  MAX_CRAWL_DEPTH: '2',
+  MAX_RETRIES: '1',
+  FETCH_TIMEOUT: '5',
+  REQUEST_DELAY: '0.1'
+}
 
 function normalizeKind(value = '') {
   return ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(value) ? value : 'daily'
@@ -274,6 +282,17 @@ function resolvePythonModelEnv(input = {}, settings = {}) {
   }
 }
 
+function frameworkPythonRuntimeEnv(input = {}) {
+  if (normalizeKind(input.kind) !== 'framework') return {}
+  return {
+    MAX_CRAWL_PAGES: String(input.maxCrawlPages || process.env.COMPETITOR_FRAMEWORK_MAX_CRAWL_PAGES || DEFAULT_FRAMEWORK_PYTHON_ENV.MAX_CRAWL_PAGES),
+    MAX_CRAWL_DEPTH: String(input.maxCrawlDepth || process.env.COMPETITOR_FRAMEWORK_MAX_CRAWL_DEPTH || DEFAULT_FRAMEWORK_PYTHON_ENV.MAX_CRAWL_DEPTH),
+    MAX_RETRIES: String(input.maxRetries || process.env.COMPETITOR_FRAMEWORK_MAX_RETRIES || DEFAULT_FRAMEWORK_PYTHON_ENV.MAX_RETRIES),
+    FETCH_TIMEOUT: String(input.fetchTimeout || process.env.COMPETITOR_FRAMEWORK_FETCH_TIMEOUT || DEFAULT_FRAMEWORK_PYTHON_ENV.FETCH_TIMEOUT),
+    REQUEST_DELAY: String(input.requestDelay || process.env.COMPETITOR_FRAMEWORK_REQUEST_DELAY || DEFAULT_FRAMEWORK_PYTHON_ENV.REQUEST_DELAY)
+  }
+}
+
 function normalizeArtifactList(value = []) {
   if (Array.isArray(value)) return value.filter(Boolean)
   return value ? [value] : []
@@ -528,6 +547,29 @@ function normalizeRecord(record = {}) {
     createdAt,
     updatedAt
   }
+}
+
+function recoverStaleRunningRecords(records = [], now = new Date()) {
+  const nowMs = Number(now instanceof Date ? now.getTime() : new Date(now).getTime())
+  if (!Number.isFinite(nowMs)) return { records, changed: false }
+  let changed = false
+  const nextRecords = records.map((record) => {
+    if (record.status !== 'running' || record.markdown) return record
+    const updatedMs = Number(new Date(record.updatedAt || record.createdAt || 0).getTime())
+    if (!Number.isFinite(updatedMs) || nowMs - updatedMs < STALE_RUNNING_RECORD_MS) return record
+    changed = true
+    const reason = '这次竞品分析运行中断，未拿到可展示报告；请重新运行，或缩小竞品链接/上传截图作为参考。'
+    return normalizeRecord({
+      ...record,
+      status: 'failed',
+      statusLabel: '未完成',
+      summary: reason,
+      markdown: fallbackMarkdown(record, reason),
+      failureType: 'stale_running',
+      updatedAt: new Date(nowMs).toISOString()
+    })
+  })
+  return { records: nextRecords, changed }
 }
 
 async function readRecords(projectId = '') {
@@ -1482,6 +1524,20 @@ function frameworkReportQualityIssues(markdown = '', options = {}) {
   return issues
 }
 
+function frameworkPlaceholderReportReason(markdown = '') {
+  const text = String(markdown || '').trim()
+  if (!text) return ''
+  const hasFrameworkShape = /完整流程框架|完整框架|完整用户旅程|数据流与状态流转|跨功能关联/.test(text)
+  if (!hasFrameworkShape) return ''
+  const llmUnavailableCount = (text.match(/LLM\s*不可用/g) || []).length
+  const pendingCount = (text.match(/待分析/g) || []).length
+  const unavailableAnalysisCount = (text.match(/LLM\s*不可用[^。\n|]*(无法|不可|未能)/g) || []).length
+  if (llmUnavailableCount >= 2 || pendingCount >= 4 || unavailableAnalysisCount >= 2) {
+    return '完整框架需要后端模型补齐用户旅程、状态流和跨功能关联；当前只得到占位内容，请检查模型配置后重新运行。'
+  }
+  return ''
+}
+
 function navigationEvidenceUrls(navItems = [], limit = 500) {
   const urls = []
   const walk = (items = []) => {
@@ -1678,7 +1734,11 @@ export function createCompetitorAnalysisEngineService(options = {}) {
 
   return {
     async listRecords(input = {}) {
-      const records = await readRecords(input.projectId || 'default')
+      const projectId = input.projectId || 'default'
+      const savedRecords = await readRecords(projectId)
+      const recovered = recoverStaleRunningRecords(savedRecords, currentDateProvider())
+      if (recovered.changed) await writeRecords(projectId, recovered.records)
+      const records = recovered.records
       const kind = input.kind ? normalizeKind(input.kind) : ''
       return {
         ok: true,
@@ -1897,6 +1957,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         OUTPUT_DIR: outputDir,
         SEARCH_ENGINE: input.searchEngine || process.env.SEARCH_ENGINE || 'duckduckgo',
         ...(competitorsConfigPath ? { COMPETITORS_CONFIG: competitorsConfigPath } : {}),
+        ...frameworkPythonRuntimeEnv({ ...input, kind }),
         ...modelEnv
       })
       const markdown = await latestFileText(outputDir, '.md')
@@ -1957,8 +2018,13 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         (kind === 'framework' && evidenceQuality === 'none')
         ? buildNoEvidenceAnalysisMarkdown(kind, input, analysisData)
         : ''
+      const frameworkPlaceholderReason = kind === 'framework' && !effectiveModelReport?.markdown
+        ? frameworkPlaceholderReportReason(markdown)
+        : ''
       const generatedMarkdown = noEvidenceMarkdown
         ? sanitizeCompetitorAnalysisMarkdown(noEvidenceMarkdown, '')
+        : frameworkPlaceholderReason
+          ? ''
         : effectiveModelReport?.markdown
         ? sanitizeCompetitorAnalysisMarkdown(effectiveModelReport.markdown, '')
         : kind === 'daily'
@@ -1973,7 +2039,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
       const ok = kind === 'flow'
         ? ((scriptOk || Boolean(effectiveModelReport) || shouldBlockFlowModel) && flowHasEvidenceResult && Boolean(generatedMarkdown))
         : kind === 'framework'
-          ? (!frameworkQualityFailed && (scriptOk || Boolean(generatedMarkdown)))
+          ? (!frameworkQualityFailed && !frameworkPlaceholderReason && Boolean(generatedMarkdown) && (scriptOk || Boolean(generatedMarkdown)))
           : (scriptOk || Boolean(generatedMarkdown))
 
       const response = {
@@ -1985,8 +2051,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           ? (effectiveModelReport?.markdown ? '已使用当前后端模型基于采集证据生成分析报告。' : '分析报告已生成，可继续复制或沉淀。')
           : frameworkQualityFailed
             ? `完整框架质量门禁未通过：${rawModelReport.qualityIssues.join('；')}`
-            : (failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
-        markdown: generatedMarkdown || fallbackMarkdown(input, failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
+            : (frameworkPlaceholderReason || failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
+        markdown: generatedMarkdown || fallbackMarkdown(input, frameworkPlaceholderReason || failureReason || MODEL_FALLBACK_FAILURE_MESSAGE),
         failureType: frameworkQualityFailed ? 'quality_failed' : '',
         qualityIssues: frameworkQualityFailed ? rawModelReport.qualityIssues : [],
         interactionArtifacts: buildInteractionArtifactsFromData(kind, generatedMarkdown, input, analysisData),

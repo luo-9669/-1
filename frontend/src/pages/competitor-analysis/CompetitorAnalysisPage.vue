@@ -151,13 +151,6 @@
           <button type="button" aria-label="关闭弹窗" @click="closeRecord">×</button>
         </header>
       <section class="competitor-analysis-detail-card">
-        <section v-if="selectedDetailMetaRows.length" class="competitor-analysis-detail-meta" aria-label="报告信息">
-          <article v-for="row in selectedDetailMetaRows" :key="row.label">
-            <span>{{ row.label }}</span>
-            <strong>{{ row.value }}</strong>
-          </article>
-        </section>
-
         <section v-if="selectedFeatureEvents.length" class="competitor-analysis-feature-events">
           <h4>新功能事件</h4>
           <BaseDataTable class="competitor-analysis-feature-event-table" table-class="competitor-analysis-table">
@@ -345,6 +338,55 @@
               </p>
             </div>
           </article>
+        </section>
+        <section v-else-if="selectedRecord?.kind === 'framework' && selectedFrameworkRows.length" class="competitor-analysis-framework-explorer" aria-label="完整框架结构化清单">
+          <header class="competitor-analysis-framework-explorer-header">
+            <div>
+              <h4>结构化清单</h4>
+              <p>已将完整框架报告整理为可筛选阅读的清单；长链接收起为“查看链接”，完整字段可展开查看。</p>
+            </div>
+            <span>{{ selectedFrameworkRows.length }} 条</span>
+          </header>
+          <BaseDataTable class="competitor-analysis-framework-table" table-class="competitor-analysis-table" min-width="1080px">
+            <thead>
+              <tr>
+                <th>编号</th>
+                <th>类型</th>
+                <th>名称</th>
+                <th>所属层级</th>
+                <th>入口路径</th>
+                <th>前置条件</th>
+                <th>完整内容</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in selectedFrameworkRows" :key="row.id">
+                <td><strong>{{ row.code }}</strong></td>
+                <td>{{ row.typeLabel }}</td>
+                <td>
+                  <strong>{{ row.name }}</strong>
+                  <small v-if="row.context">{{ row.context }}</small>
+                </td>
+                <td>{{ row.level || '未标注' }}</td>
+                <td>
+                  <a v-if="row.entryUrl" :href="row.entryUrl" target="_blank" rel="noreferrer">查看链接</a>
+                  <span v-else>{{ row.entry || '未标注' }}</span>
+                </td>
+                <td>{{ row.prerequisite || '未标注' }}</td>
+                <td>
+                  <details class="competitor-analysis-framework-row-detail">
+                    <summary>展开行</summary>
+                    <dl>
+                      <div v-for="detail in row.details" :key="detail.key">
+                        <dt>{{ detail.label }}</dt>
+                        <dd>{{ detail.value }}</dd>
+                      </div>
+                    </dl>
+                  </details>
+                </td>
+              </tr>
+            </tbody>
+          </BaseDataTable>
         </section>
         <section v-else-if="selectedDetailMarkdown" class="competitor-analysis-markdown">
           <template v-for="(block, index) in enhancedMarkdownBlocksFor(selectedDetailMarkdown)" :key="markdownBlockKey(block, index)">
@@ -554,20 +596,28 @@
                   <h4>选择要分析的功能</h4>
                   <p>系统会从竞品记录、监控事件和完整框架报告里发现功能；用户只需要点选，不需要输入目标词。</p>
                 </div>
-                <div v-if="competitorFeatureMapOptions.length" class="competitor-analysis-feature-grid" role="listbox" aria-label="选择要分析的功能">
-                  <button
+                <ElSelect
+                  v-if="competitorFeatureMapOptions.length"
+                  v-model="analysisForm.selectedFeatureId"
+                  class="competitor-analysis-dialog-select competitor-analysis-dialog-select-wide"
+                  popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"
+                  aria-label="选择要分析的功能"
+                  filterable
+                  placeholder="选择系统发现的功能"
+                  @change="handleCompetitorFeatureSelect"
+                >
+                  <ElOption
                     v-for="item in competitorFeatureMapOptions"
                     :key="item.id"
-                    type="button"
-                    class="competitor-analysis-feature-option"
-                    :class="{ selected: analysisForm.selectedFeatureId === item.id }"
-                    @click="selectCompetitorFeature(item)"
+                    :label="item.name"
+                    :value="item.id"
                   >
-                    <strong>{{ item.name }}</strong>
-                    <span>{{ item.sourceLabel }}</span>
-                    <small>{{ item.confidenceLabel }}</small>
-                  </button>
-                </div>
+                    <div class="competitor-analysis-option">
+                      <strong>{{ item.name }}</strong>
+                      <small>{{ item.sourceLabel }} · {{ item.confidenceLabel }}</small>
+                    </div>
+                  </ElOption>
+                </ElSelect>
                 <p v-else class="competitor-analysis-help">暂未发现可点选功能。可以先生成「完整框架」发现功能地图，或上传截图作为参考。</p>
               </div>
             </section>
@@ -767,9 +817,9 @@ const analysisCompetitorOptions = computed(() => {
 const analysisRequiresScopeFields = computed(() => analysisForm.kind === 'flow')
 const competitorFeatureMapOptions = computed(() => buildCompetitorFeatureMapOptions())
 const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRecord.value))
+const selectedFrameworkRows = computed(() => selectedRecord.value?.kind === 'framework' ? frameworkRowsForMarkdown(selectedDetailMarkdown.value) : [])
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))
-const selectedDetailMetaRows = computed(() => detailMetaRowsForRecord(selectedRecord.value))
 const selectedSourceRecord = computed(() => {
   const sourceRecordId = String(selectedRecord.value?.sourceRecordId || '').trim()
   if (!sourceRecordId) return null
@@ -859,58 +909,6 @@ function statusVariant(status = '') {
   if (status === 'succeeded') return 'success'
   if (status === 'failed') return 'error'
   return 'info'
-}
-
-function detailMetaValue(value = '') {
-  const text = String(value || '').trim()
-  return text || ''
-}
-
-function formatDuration(value = 0) {
-  const ms = Number(value)
-  if (!Number.isFinite(ms) || ms <= 0) return ''
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`
-}
-
-function recordEvidenceQuality(record = {}) {
-  const artifacts = interactionArtifactsForRecord(record)
-  return detailMetaValue(
-    artifacts.evidenceQuality ||
-    artifacts.evidence_quality ||
-    record.evidenceQuality ||
-    record.evidence_quality
-  )
-}
-
-function detailMetaRowsForRecord(record = {}) {
-  if (!record?.id) return []
-  const rows = [
-    { label: '标题', value: record.title || getKindLabel(record.kind) },
-    { label: '状态', value: record.statusLabel || statusLabel(record.status) },
-    { label: '分析类型', value: getKindLabel(record.kind) },
-    { label: '耗时', value: formatDuration(record.durationMs) }
-  ]
-  if (record.kind === 'gap') {
-    rows.push(
-      { label: '来源报告', value: record.sourceTitle },
-      { label: '来源类型', value: record.sourceKind ? getKindLabel(record.sourceKind) : '' }
-    )
-  } else {
-    rows.push({ label: '竞品', value: recordCompetitorNames(record) })
-  }
-  if (record.kind === 'flow') {
-    rows.push(
-      { label: '功能', value: recordFeatureLabel(record) },
-      { label: '证据质量', value: recordEvidenceQuality(record) }
-    )
-  }
-  if (record.kind === 'framework') {
-    rows.push({ label: '产品URL', value: record.productUrl })
-  }
-  return rows
-    .map((row) => ({ ...row, value: detailMetaValue(row.value) }))
-    .filter((row) => row.value)
 }
 
 function formatTime(value = '') {
@@ -1119,6 +1117,11 @@ function selectCompetitorFeature(option = {}) {
   }
   analysisForm.feature = option.name
   analysisForm.goal = `验证竞品是否存在「${option.name}」，并输出入口路径、交互流程、证据分级和待补采清单。`
+}
+
+function handleCompetitorFeatureSelect(featureId = '') {
+  const option = competitorFeatureMapOptions.value.find((item) => item.id === featureId)
+  if (option) selectCompetitorFeature(option)
 }
 
 function ensureSelectedFeatureStillAvailable() {
@@ -2240,6 +2243,88 @@ function architectureItemsForBlock(block = {}) {
     .map((line) => ({ title: line, detail: '' }))
 }
 
+function firstUrlInText(value = '') {
+  return String(value || '').match(/https?:\/\/[^\s，；、)）|]+/)?.[0] || ''
+}
+
+function frameworkRowTypeForBlock(block = {}) {
+  const headers = block.headers || []
+  const headingContext = block.headingContext || ''
+  if (markdownHasHeader(headers, ['模块编号']) || markdownHasHeader(headers, ['功能模块'])) return '功能模块'
+  if (markdownHasHeader(headers, ['页面编号', 'P编号']) || markdownHasHeader(headers, ['页面名称'])) return '页面清单'
+  if (markdownHasHeader(headers, ['异常场景'])) return '异常流程'
+  if (markdownHasHeader(headers, ['决策内容', '决策'])) return '决策点'
+  if (markdownHasHeader(headers, ['起始状态', '当前状态']) || markdownHasHeader(headers, ['目标状态'])) return '状态流'
+  if (markdownHasHeader(headers, ['源功能']) || markdownHasHeader(headers, ['目标功能']) || markdownHasHeader(headers, ['关联类型'])) return '跨功能关联'
+  if (markdownHeadingMatches(headingContext, ['信息架构'])) return '信息架构'
+  return '框架条目'
+}
+
+function frameworkRowNameForBlock(block = {}, row = [], fallback = '') {
+  const direct = markdownCell(block, row, [
+    '功能模块',
+    '页面名称',
+    '页面弹窗名称',
+    '名称',
+    '决策内容',
+    '异常场景',
+    '源功能',
+    '目标功能',
+    '实体'
+  ])
+  if (direct) return direct
+  return row
+    .map(cleanMarkdownText)
+    .find((cell) => cell && !/^https?:\/\//.test(cell) && !/^[-—]+$/.test(cell)) || fallback
+}
+
+function frameworkRowFromMarkdownTable(block = {}, row = [], rowIndex = 0, globalIndex = 0) {
+  const headers = block.headers || []
+  const cells = row.map(cleanMarkdownText)
+  const meaningfulCells = cells.filter((cell) => cell && !/^[-—]+$/.test(cell))
+  if (!meaningfulCells.length) return null
+  const joined = meaningfulCells.join(' ')
+  if (/LLM\s*不可用|待分析/.test(joined) && meaningfulCells.length <= 3) return null
+
+  const code = markdownCell(block, row, ['模块编号', '页面编号', 'P编号', '编号', '序号', 'TR编号', 'S编号']) || `R${globalIndex + 1}`
+  const entry = markdownCell(block, row, ['入口路径', 'URL', '链接', '目标地址', '功能入口', '入口'])
+  const entryUrl = firstUrlInText(entry || joined)
+  const typeLabel = frameworkRowTypeForBlock(block)
+  const context = block.headingContext || ''
+  const details = headers
+    .map((header, index) => ({
+      key: `${globalIndex}-${index}-${header}`,
+      label: header || `字段 ${index + 1}`,
+      value: cells[index] || ''
+    }))
+    .filter((item) => item.value)
+
+  return {
+    id: `${typeLabel}-${code}-${rowIndex}-${globalIndex}`,
+    code,
+    typeLabel,
+    name: frameworkRowNameForBlock(block, row, `条目 ${globalIndex + 1}`),
+    level: markdownCell(block, row, ['所属层级', '层级', '页面类型', '类型', '复杂度']),
+    entry,
+    entryUrl,
+    prerequisite: markdownCell(block, row, ['前置条件', '条件', '触发条件', '决策依据']),
+    context,
+    details: details.length ? details : [{ key: `${globalIndex}-raw`, label: '原始内容', value: joined }]
+  }
+}
+
+function frameworkRowsForMarkdown(markdown = '') {
+  const rows = []
+  for (const block of enhancedMarkdownBlocksFor(markdown)) {
+    if (!Array.isArray(block.rows) || !block.rows.length) continue
+    for (const [rowIndex, row] of block.rows.entries()) {
+      const item = frameworkRowFromMarkdownTable(block, row, rowIndex, rows.length)
+      if (item) rows.push(item)
+    }
+  }
+  return rows.slice(0, 300)
+}
+
 function markdownBlockKey(block = {}, index = 0) {
   return `${block.type || 'block'}-${index}-${block.text || block.headers?.join('-') || ''}`
 }
@@ -2690,34 +2775,6 @@ watch(() => props.projectId, () => {
   padding: 0 14px;
 }
 
-.competitor-analysis-detail-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #eef0f3;
-}
-
-.competitor-analysis-detail-meta article {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.competitor-analysis-detail-meta span {
-  color: #667085;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.competitor-analysis-detail-meta strong {
-  min-width: 0;
-  color: #1f2329;
-  font-size: 14px;
-  font-weight: 800;
-  overflow-wrap: anywhere;
-}
-
 .competitor-analysis-feature-events {
   display: grid;
   gap: 12px;
@@ -2922,6 +2979,109 @@ watch(() => props.projectId, () => {
 
 .competitor-analysis-md-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.competitor-analysis-framework-explorer {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.competitor-analysis-framework-explorer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.competitor-analysis-framework-explorer-header h4,
+.competitor-analysis-framework-explorer-header p {
+  margin: 0;
+}
+
+.competitor-analysis-framework-explorer-header h4 {
+  color: #1f2329;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 28px;
+}
+
+.competitor-analysis-framework-explorer-header p {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.competitor-analysis-framework-explorer-header span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.competitor-analysis-framework-table td strong,
+.competitor-analysis-framework-table td small {
+  display: block;
+}
+
+.competitor-analysis-framework-table td small {
+  margin-top: 4px;
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.competitor-analysis-framework-table a {
+  color: #1f2329;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.competitor-analysis-framework-row-detail summary {
+  color: #1f2329;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.competitor-analysis-framework-row-detail dl {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8f9fb;
+}
+
+.competitor-analysis-framework-row-detail dl div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.competitor-analysis-framework-row-detail dt,
+.competitor-analysis-framework-row-detail dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.competitor-analysis-framework-row-detail dt {
+  color: #667085;
+  font-weight: 800;
+}
+
+.competitor-analysis-framework-row-detail dd {
+  color: #344054;
+  overflow-wrap: anywhere;
 }
 
 .competitor-analysis-flow-timeline,
@@ -3247,37 +3407,6 @@ watch(() => props.projectId, () => {
   line-height: 20px;
 }
 
-.competitor-analysis-feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.competitor-analysis-feature-option {
-  display: grid;
-  gap: 4px;
-  min-height: 92px;
-  padding: 12px;
-  border: 1px solid #e4e7ec;
-  border-radius: 10px;
-  background: #fff;
-  color: #1f2329;
-  text-align: left;
-  cursor: pointer;
-}
-
-.competitor-analysis-feature-option:hover,
-.competitor-analysis-feature-option.selected {
-  border-color: #1f2329;
-  background: #f8f9fb;
-}
-
-.competitor-analysis-feature-option span,
-.competitor-analysis-feature-option small {
-  color: #667085;
-  font-size: 12px;
-}
-
 .competitor-analysis-upload-tile {
   display: inline-flex;
   align-items: center;
@@ -3381,23 +3510,33 @@ watch(() => props.projectId, () => {
   padding: 6px 12px;
 }
 
-:global(.competitor-analysis-competitor-popper .competitor-analysis-option) {
+:global(.competitor-analysis-competitor-popper .competitor-analysis-option),
+:global(.competitor-analysis-feature-popper .competitor-analysis-option) {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
 
 :global(.competitor-analysis-competitor-popper .competitor-analysis-option strong),
-:global(.competitor-analysis-competitor-popper .competitor-analysis-option small) {
+:global(.competitor-analysis-competitor-popper .competitor-analysis-option small),
+:global(.competitor-analysis-feature-popper .competitor-analysis-option strong),
+:global(.competitor-analysis-feature-popper .competitor-analysis-option small) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-:global(.competitor-analysis-competitor-popper .competitor-analysis-option small) {
+:global(.competitor-analysis-competitor-popper .competitor-analysis-option small),
+:global(.competitor-analysis-feature-popper .competitor-analysis-option small) {
   color: var(--color-n5);
   font-size: 12px;
   font-weight: 500;
+}
+
+:global(.competitor-analysis-feature-popper .el-select-dropdown__item) {
+  min-height: 48px;
+  height: auto;
+  padding: 6px 12px;
 }
 
 .competitor-analysis-dialog footer {

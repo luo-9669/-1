@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -837,6 +837,143 @@ test('framework evidence_quality none does not call backend model or show fabric
   assert.equal(response.ok, true)
   assert.match(response.markdown, /未找到|待补采|证据质量：none/)
   assert.doesNotMatch(response.markdown, /核心页面、关键任务链路、信息架构/)
+})
+
+test('framework python placeholder report is not marked as a generated framework', async () => {
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: false,
+      provider: '',
+      defaultModel: '',
+      timeoutMs: 0
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), [
+        '# 稿定设计完整流程框架文档',
+        '',
+        '## 一、产品整体信息架构',
+        '',
+        '| 模块编号 | 功能模块 | 所属层级 | 核心用途 |',
+        '|---|---|---|---|',
+        '| M001 | AI图片生成 | L1 | 公开页面线索 |',
+        '',
+        '## 二、完整用户旅程',
+        '',
+        '```',
+        'AI图片生成',
+        '├─ 异常流:',
+        '│   ├── (LLM 不可用，无法提取异常流)',
+        '```',
+        '',
+        '## 三、关键决策点汇总',
+        '',
+        '| 序号 | 所在位置 | 决策内容 |',
+        '|---|---|---|',
+        '| 1 | (待分析) | (LLM 不可用，无法识别决策点) |',
+        '',
+        '## 五、数据流与状态流转',
+        '',
+        '状态流转 - (待分析)',
+        '',
+        '(LLM 不可用) ──[(待分析)]──> (待分析)',
+        '',
+        '## 六、跨功能关联',
+        '',
+        '| 序号 | 源功能 | 目标功能 | 关联类型 |',
+        '|---|---|---|---|',
+        '| 1 | (待分析) | (待分析) | (LLM 不可用，无法分析) |'
+      ].join('\n'))
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '稿定设计',
+        product_url: 'https://www.gaoding.com',
+        evidence_quality: 'full',
+        evidence_count: 12,
+        page_evidence: [{ title: 'AI图片生成', url: 'https://www.gaoding.com/editor' }],
+        crawler_features: [{ name: 'AI图片生成', url: 'https://www.gaoding.com/editor' }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-placeholder-regression',
+    kind: 'framework',
+    productName: '稿定设计',
+    productUrl: 'https://www.gaoding.com'
+  })
+
+  assert.equal(response.ok, false)
+  assert.equal(response.statusLabel, '未完成')
+  assert.match(response.summary, /模型|占位|重新运行/)
+  assert.doesNotMatch(response.markdown, /LLM 不可用|待分析/)
+})
+
+test('framework python runs with interactive crawl limits so blocked sites do not hang the UI', async () => {
+  let capturedEnv = null
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: false,
+      provider: '',
+      defaultModel: '',
+      timeoutMs: 0
+    }),
+    pythonRunner: async (args, env) => {
+      capturedEnv = env
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# 创客贴完整框架')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '创客贴',
+        product_url: 'https://www.chuangkit.com',
+        evidence_quality: 'none',
+        evidence_count: 0
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  await service.run({
+    projectId: 'competitor-analysis-framework-runtime-limits-regression',
+    kind: 'framework',
+    productName: '创客贴',
+    productUrl: 'https://www.chuangkit.com'
+  })
+
+  assert.equal(capturedEnv.MAX_CRAWL_PAGES, '24')
+  assert.equal(capturedEnv.MAX_CRAWL_DEPTH, '2')
+  assert.equal(capturedEnv.MAX_RETRIES, '1')
+  assert.equal(capturedEnv.FETCH_TIMEOUT, '5')
+  assert.equal(capturedEnv.REQUEST_DELAY, '0.1')
+})
+
+test('stale empty running framework records are recovered as failed records on list', async () => {
+  const projectId = 'competitor-analysis-stale-running-regression'
+  const staleTime = '2026-07-14T08:00:00.000Z'
+  await mkdir('backend/storage/competitor-analysis', { recursive: true })
+  await writeFile(join('backend/storage/competitor-analysis', `${projectId}.records.json`), JSON.stringify({
+    records: [{
+      id: 'stale-framework-record',
+      projectId,
+      kind: 'framework',
+      title: '完整框架：创客贴',
+      status: 'running',
+      statusLabel: '分析中',
+      productName: '创客贴',
+      productUrl: 'https://www.chuangkit.com',
+      summary: '',
+      markdown: '',
+      createdAt: staleTime,
+      updatedAt: staleTime
+    }]
+  }, null, 2))
+
+  const service = createCompetitorAnalysisEngineService({
+    currentDateProvider: () => new Date('2026-07-14T08:20:01.000Z')
+  })
+  const result = await service.listRecords({ projectId })
+
+  assert.equal(result.records[0].status, 'failed')
+  assert.equal(result.records[0].statusLabel, '未完成')
+  assert.match(result.records[0].summary, /运行中断|重新运行/)
+  assert.match(result.records[0].markdown, /运行中断|重新运行/)
 })
 
 test('framework model receives the complete visible page inventory and strict output contract', async () => {
