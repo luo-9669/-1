@@ -287,6 +287,10 @@ test('competitor analysis list shows feature display and markdown detail renderi
 
   assert.match(pageSource, /<th>功能展示<\/th>/)
   assert.match(pageSource, /recordFeatureLabel\(record\)/)
+  assert.match(pageSource, /record\.kind === 'framework'[\s\S]*产品完整框架/)
+  assert.match(pageSource, /class="competitor-analysis-quality-panel"/)
+  assert.match(pageSource, /qualityIssues/)
+  assert.match(pageSource, /failureType/)
   assert.match(pageSource, /names\.join\('、'\)/)
   assert.match(pageSource, /markdownBlocksFor/)
   assert.match(pageSource, /competitor-analysis-md-table/)

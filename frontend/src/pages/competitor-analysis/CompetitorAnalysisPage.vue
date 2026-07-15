@@ -151,6 +151,13 @@
           <button type="button" aria-label="关闭弹窗" @click="closeRecord">×</button>
         </header>
       <section class="competitor-analysis-detail-card">
+        <section v-if="selectedRecordFailureReason" class="competitor-analysis-quality-panel">
+          <strong>{{ selectedRecordFailureTitle }}</strong>
+          <p>{{ selectedRecordFailureReason }}</p>
+          <ul v-if="selectedRecordQualityIssues.length">
+            <li v-for="issue in selectedRecordQualityIssues" :key="issue">{{ issue }}</li>
+          </ul>
+        </section>
         <section v-if="selectedFeatureEvents.length" class="competitor-analysis-feature-events">
           <h4>新功能事件</h4>
           <BaseDataTable class="competitor-analysis-feature-event-table" table-class="competitor-analysis-table">
@@ -820,6 +827,19 @@ const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRe
 const selectedFrameworkRows = computed(() => selectedRecord.value?.kind === 'framework' ? frameworkRowsForMarkdown(selectedDetailMarkdown.value) : [])
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))
+const selectedRecordQualityIssues = computed(() =>
+  Array.isArray(selectedRecord.value?.qualityIssues)
+    ? selectedRecord.value.qualityIssues.filter(Boolean)
+    : []
+)
+const selectedRecordFailureTitle = computed(() => {
+  if (selectedRecord.value?.failureType === 'quality_failed') return '质量门禁未通过'
+  return '分析未完成'
+})
+const selectedRecordFailureReason = computed(() => {
+  if (!selectedRecord.value || selectedRecord.value.status !== 'failed') return ''
+  return selectedRecord.value.summary || selectedRecord.value.statusLabel || '分析失败，请重新运行或补充更明确的竞品链接/截图。'
+})
 const selectedSourceRecord = computed(() => {
   const sourceRecordId = String(selectedRecord.value?.sourceRecordId || '').trim()
   if (!sourceRecordId) return null
@@ -936,6 +956,8 @@ function recordFeatureLabel(record = {}) {
   if (label) return label
   const event = Array.isArray(record.featureEvents) ? record.featureEvents.find((item) => featureEventName(item)) : null
   if (event) return featureEventName(event)
+  if (record.kind === 'framework') return '产品完整框架'
+  if (record.kind === 'gap') return '机会点对比'
   if (['daily', 'weekly'].includes(record.kind)) return '全部功能'
   return '未填写'
 }
@@ -1451,6 +1473,12 @@ function normalizeRecord(record = {}) {
     sourceRecordId: record.sourceRecordId || '',
     sourceKind: record.sourceKind || '',
     sourceTitle: record.sourceTitle || '',
+    failureType: record.failureType || record.failure_type || '',
+    qualityIssues: Array.isArray(record.qualityIssues)
+      ? record.qualityIssues
+      : Array.isArray(record.quality_issues)
+        ? record.quality_issues
+        : [],
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || record.createdAt || new Date().toISOString()
   }
@@ -2786,6 +2814,31 @@ watch(() => props.projectId, () => {
 
 .competitor-analysis-table td {
   overflow-wrap: anywhere;
+}
+
+.competitor-analysis-quality-panel {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #ffd1d1;
+  border-radius: var(--radius-large);
+  background: #fff7f7;
+  color: #d92d20;
+}
+
+.competitor-analysis-quality-panel strong {
+  color: #b42318;
+  font-size: 15px;
+}
+
+.competitor-analysis-quality-panel p,
+.competitor-analysis-quality-panel ul {
+  margin: 0;
+}
+
+.competitor-analysis-quality-panel ul {
+  padding-left: 18px;
+  color: #912018;
 }
 
 .competitor-analysis-inline-button {

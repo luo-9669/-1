@@ -812,6 +812,7 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     lines.push('- 完整框架必须覆盖以下结构，不得只列核心页面或几个示例页面：')
     lines.push('  1. 产品定位与分析边界：产品定位、目标用户、核心价值、公开证据覆盖范围。')
     lines.push('  2. 产品整体信息架构：顶层导航、功能模块划分、完整站点页面清单/站点地图、页面层级树。')
+    lines.push('- 【强制要求】报告必须包含"完整站点页面清单"章节，将证据中"完整站点页面清单（报告必须原样包含以下清单，不得省略）"标记下的全部内容原样复制到报告中，不得省略、合并或只列部分页面。此章节是站点地图，不是摘要。')
     lines.push('  3. 用户角色与使用场景：基于证据归纳角色、目标、入口和典型场景。')
     lines.push('  4. 完整用户旅程：按已识别核心功能逐项输出，并分别写明主路径、分支路径、异常路径。')
     lines.push('  5. 关键决策点：位置、选项、判断依据、认知负荷和改进建议。')
@@ -913,6 +914,90 @@ function collectNavigationEvidence(lines = [], navItems = [], options = {}) {
   } else {
     pushEvidenceLine(lines, '导航结构', labels.join(' / '))
   }
+}
+
+function frameworkPageLevel(url = '') {
+  try {
+    const parsed = new URL(String(url || '').trim())
+    return parsed.pathname.split('/').filter(Boolean).length
+  } catch {
+    return String(url || '').split(/[?#]/)[0].split('/').filter(Boolean).length
+  }
+}
+
+function frameworkPageSortKey(url = '') {
+  try {
+    const parsed = new URL(String(url || '').trim())
+    const pathText = parsed.pathname.replace(/\/+$/, '') || '/'
+    return `${parsed.origin}|${String(frameworkPageLevel(url)).padStart(4, '0')}|${pathText}|${parsed.search}`
+  } catch {
+    return `${String(frameworkPageLevel(url)).padStart(4, '0')}|${String(url || '')}`
+  }
+}
+
+function collectFrameworkPageListingEntries(entries = [], source = 'page') {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (typeof entry === 'string') return { title: '', url: entry, source }
+      const item = normalizePlainObject(entry)
+      return {
+        title: safeText(item.title || item.name || item.label, ''),
+        url: String(item.url || item.href || '').trim(),
+        source
+      }
+    })
+    .filter((entry) => entry.url)
+}
+
+function collectFrameworkNavigationListingEntries(navItems = [], source = 'navigation') {
+  const entries = []
+  const walk = (items = []) => {
+    for (const item of Array.isArray(items) ? items : []) {
+      const node = normalizePlainObject(item)
+      if (node.url) entries.push({ title: safeText(node.name || node.title || node.label, ''), url: String(node.url).trim(), source })
+      if (Array.isArray(node.children)) walk(node.children)
+    }
+  }
+  walk(navItems)
+  return entries
+}
+
+function frameworkPageTitle(entry = {}) {
+  const direct = safeText(entry.title, '')
+  if (direct) return direct
+  try {
+    const parsed = new URL(String(entry.url || '').trim())
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    return segments.length ? decodeURIComponent(segments.at(-1)).replace(/[-_]+/g, ' ') : '首页'
+  } catch {
+    return String(entry.url || '').trim() || '未命名页面'
+  }
+}
+
+function buildFrameworkPageListing(data = {}) {
+  const item = normalizePlainObject(data)
+  const entries = [
+    ...collectFrameworkPageListingEntries(item.page_evidence || item.pageEvidence, 'page_evidence'),
+    ...collectFrameworkPageListingEntries(item.pages, 'pages'),
+    ...collectFrameworkPageListingEntries(item.source_urls || item.sourceUrls, 'source_urls'),
+    ...collectFrameworkPageListingEntries(item.sources, 'sources'),
+    ...collectFrameworkNavigationListingEntries(item.navigation_tree || item.navigationTree, 'navigation_tree'),
+    ...collectFrameworkNavigationListingEntries(item.sitemap_navigation || item.sitemapNavigation, 'sitemap_navigation')
+  ]
+  const entryMap = new Map()
+  for (const entry of entries) {
+    const url = String(entry.url || '').trim()
+    if (!url || entryMap.has(url)) continue
+    entryMap.set(url, { ...entry, url })
+  }
+  const sorted = [...entryMap.values()].sort((left, right) =>
+    frameworkPageSortKey(left.url).localeCompare(frameworkPageSortKey(right.url), 'zh-CN')
+  )
+  if (!sorted.length) return ''
+  return [
+    '=== 完整站点页面清单（报告必须原样包含以下清单，不得省略） ===',
+    ...sorted.map((entry) => `L${frameworkPageLevel(entry.url)} | ${frameworkPageTitle(entry)} | ${entry.url}`)
+  ].join('\n')
 }
 
 function collectFeatureModuleEvidence(lines = [], features = [], label = '功能模块', limit = 12) {
@@ -1277,6 +1362,8 @@ function buildAnalysisEvidence(jsonText = '', stdout = '', kind = '') {
     collectFlowStepEvidence(lines, data.steps)
     if (isFramework) {
       const pages = Array.isArray(data.page_evidence) && data.page_evidence.length ? data.page_evidence : data.pages
+      const frameworkPageListing = buildFrameworkPageListing(data)
+      if (frameworkPageListing) lines.push(frameworkPageListing)
       collectPageEvidence(lines, pages, { limit: 180, detailLimit: 30, summaryLength: 400 })
       collectNavigationEvidence(lines, data.navigation_tree, { itemLimit: 180, childLimit: 200, maxDepth: 4, totalNodeLimit: 500, lineMode: true })
       collectNavigationEvidence(lines, data.sitemap_navigation, { itemLimit: 500, childLimit: 200, maxDepth: 4, totalNodeLimit: 500, lineMode: true })

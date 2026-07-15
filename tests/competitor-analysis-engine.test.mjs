@@ -1104,6 +1104,10 @@ test('framework model receives the complete visible page inventory and strict ou
 
   assert.equal(response.ok, true)
   assert.match(capturedPrompt, /完整站点页面清单|完整页面清单/)
+  assert.match(capturedPrompt, /=== 完整站点页面清单（报告必须原样包含以下清单，不得省略） ===/)
+  assert.match(capturedPrompt, /L1 \| 页面 95 \| https:\/\/example\.com\/page-95/)
+  assert.match(capturedPrompt, /L1 \| Sitemap 独有页 300 \| https:\/\/example\.com\/sitemap-only-300/)
+  assert.match(capturedPrompt, /报告必须包含"完整站点页面清单"章节[\s\S]*全部内容原样复制到报告中，不得省略、合并或只列部分页面/)
   assert.match(capturedPrompt, /不得只列核心页面/)
   assert.match(capturedPrompt, /主路径/)
   assert.match(capturedPrompt, /分支路径/)
