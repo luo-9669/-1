@@ -1546,38 +1546,83 @@ function changeEvidenceText(change = {}) {
 }
 
 function sourceBackedOperationPath(change = {}) {
-  const text = changeEvidenceText(change).toLowerCase()
-  const steps = []
-  const push = (label, pattern) => {
-    if (pattern.test(text) && !steps.includes(label)) steps.push(label)
-  }
-  push('进入功能入口', /入口|打开|进入|官网|公告|release|changelog/)
-  push('输入需求', /输入需求|需求输入|输入.*需求|提示词|prompt|brief/)
-  push('上传/导入素材', /上传|导入|素材|图片|视频|文件/)
-  push('生成视觉方案', /生成视觉方案|生成.*方案|创意生成|生成.*设计|ai.*生成/)
-  push('编辑器调整', /编辑器|智能编辑|调整|继续调整|编辑|修改/)
-  push('协作确认', /协作|团队|评论|审批/)
-  push('导出', /导出|下载|发布|分发|交付/)
-  if (steps.length >= 2) {
+  const nodes = sourceBackedOperationNodes(change)
+  if (nodes.length >= 2) {
     return {
       status: 'source_backed',
-      text: steps.join(' -> ')
-    }
-  }
-  const fallbackSteps = candidateJourneySteps({
-    title: '',
-    snippet: changeEvidenceText(change)
-  })
-  if (fallbackSteps.length >= 2) {
-    return {
-      status: 'source_backed',
-      text: fallbackSteps.join(' -> ')
+      text: nodes.map((node) => node.action).join(' -> ')
     }
   }
   return {
     status: 'needs_deep_analysis',
     text: '待点击深度分析抓取真实页面入口、触发操作和页面流转'
   }
+}
+
+function sourceBackedOperationNodes(change = {}) {
+  const text = changeEvidenceText(change).toLowerCase()
+  const steps = []
+  const push = (touchpoint, action, pattern) => {
+    if (pattern.test(text) && !steps.some((step) => step.action === action)) {
+      steps.push({ touchpoint, action, status: '来源线索' })
+    }
+  }
+  push(`${featureNameFromChange(change)}入口`, '进入功能入口', /入口|打开|进入|官网|公告|release|changelog/)
+  push(`${featureNameFromChange(change)}入口`, '输入需求', /输入需求|需求输入|输入.*需求|提示词|prompt|brief/)
+  push('素材面板', '上传/导入素材', /上传|导入|素材|图片|视频|文件/)
+  push('生成结果页/方案页', '生成视觉方案', /生成视觉方案|生成.*方案|创意生成|生成.*设计|ai.*生成/)
+  push('编辑器', '编辑器调整', /编辑器|智能编辑|调整|继续调整|编辑|修改/)
+  push('协作空间', '协作确认', /协作|团队|评论|审批/)
+  push('导出/交付页', '导出', /导出|下载|发布|分发|交付/)
+  if (steps.length >= 2) return steps
+  const fallbackSteps = candidateJourneySteps({
+    title: '',
+    snippet: changeEvidenceText(change)
+  })
+  return fallbackSteps.map((step) => ({
+    touchpoint: `${featureNameFromChange(change)}相关触点`,
+    action: step,
+    status: '来源线索'
+  }))
+}
+
+function sourceLinkText(urls = []) {
+  const items = uniquePlainTextList(urls)
+  return items.length ? items.slice(0, 2).map((url) => `[来源](${url})`).join('、') : '待补采'
+}
+
+function buildConfirmedFeatureLinkFrameworkSection(changes = [], kind = 'weekly') {
+  const meta = periodicReportMeta(kind)
+  const featureChanges = (Array.isArray(changes) ? changes : [])
+    .map(normalizePlainObject)
+    .filter(isFeatureChange)
+  if (!featureChanges.length) return []
+  const lines = [
+    `## ${meta.periodLabel}真实链路框架`,
+    ''
+  ]
+  for (const change of featureChanges.slice(0, 8)) {
+    const featureName = featureNameFromChange(change)
+    const competitor = safeText(change.competitor || change.competitorName, '未命名竞品')
+    const urls = changeSourceUrls(change)
+    const nodes = sourceBackedOperationNodes(change)
+    lines.push(`### ${competitor}｜${featureName}`, '')
+    lines.push(`- **证据入口**：${sourceLinkText(urls)}`)
+    lines.push(`- **证据日期**：${dateString(change.discovered_at || change.discoveredAt || change.published_date || change.publishedDate || change.date) || '未确认'}`)
+    lines.push('- **链路说明**：以下节点来自来源标题、摘要或详情中的可见动作线索；未抓到页面级交互前，不补写按钮、弹窗和登录后状态。')
+    lines.push('')
+    lines.push('| 节点 | 页面/触点 | 触发操作 | 证据来源 | 状态 |')
+    lines.push('|---|---|---|---|---|')
+    if (nodes.length) {
+      nodes.slice(0, 8).forEach((node, index) => {
+        lines.push(`| S${index + 1} | ${markdownTableCell(node.touchpoint)} | ${markdownTableCell(node.action)} | ${sourceLinkText(urls)} | ${markdownTableCell(node.status)} |`)
+      })
+    } else {
+      lines.push(`| S1 | 待补采 | 点击“深度分析”抓取真实页面入口和操作路径 | ${sourceLinkText(urls)} | 待深度分析 |`)
+    }
+    lines.push('')
+  }
+  return lines
 }
 
 function buildConfirmedFeatureSection(changes = [], kind = 'weekly') {
@@ -1594,9 +1639,7 @@ function buildConfirmedFeatureSection(changes = [], kind = 'weekly') {
   ]
   for (const change of featureChanges.slice(0, 12)) {
     const urls = changeSourceUrls(change)
-    const sourceText = urls.length
-      ? urls.slice(0, 2).map((url) => `[来源](${url})`).join('、')
-      : '未提供来源链接'
+    const sourceText = sourceLinkText(urls)
     const path = sourceBackedOperationPath(change)
     const pathText = path.status === 'source_backed'
       ? path.text
@@ -1641,6 +1684,7 @@ function buildPeriodicChangesMarkdown(changes = [], input = {}, data = {}, curre
     ''
   ]
   lines.push(...buildConfirmedFeatureSection(changes, kind))
+  lines.push(...buildConfirmedFeatureLinkFrameworkSection(changes, kind))
   lines.push(
     '## 竞品详情',
     ''
