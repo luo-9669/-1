@@ -1169,14 +1169,17 @@ function featureNameFromChange(change = {}) {
   const summary = safeText(item.summary || item.details, '')
   if (!summary) return ''
   const patterns = [
-    /上线[了\s“"']*([^，。；、\n]+?)(?:功能|能力|模块|$)/,
-    /发布[了\s“"']*([^，。；、\n]+?)(?:功能|能力|模块|$)/,
-    /推出[了\s“"']*([^，。；、\n]+?)(?:功能|能力|模块|$)/,
-    /新增[了\s“"']*([^，。；、\n]+?)(?:功能|能力|模块|$)/
+    /上线[了\s“"']*([^，。；、\n]+?)(?:新?功能|能力|模块|$)/,
+    /发布[了\s“"']*([^，。；、\n]+?)(?:新?功能|能力|模块|$)/,
+    /推出[了\s“"']*([^，。；、\n]+?)(?:新?功能|能力|模块|$)/,
+    /新增[了\s“"']*([^，。；、\n]+?)(?:新?功能|能力|模块|$)/
   ]
   for (const pattern of patterns) {
     const match = summary.match(pattern)
-    if (match?.[1]) return safeText(match[1].replace(/[“”"']/g, '').trim(), summary)
+    if (match?.[1]) {
+      const name = match[1].replace(/[“”"']/g, '').replace(/\s*新$/, '').trim()
+      return safeText(name, summary)
+    }
   }
   return summary
 }
@@ -1225,6 +1228,7 @@ function extractFeatureEventsFromAnalysisData(kind = '', data = {}, input = {}, 
         featureName: featureNameFromChange(item),
         discoveredAt: item.discovered_at || item.discoveredAt || data.report_date || data.generated_at || '',
         sourceUrls: item.source_urls || item.sourceUrls,
+        sourceEntries: item.source_entries || item.sourceEntries,
         evidenceStatus: 'reported',
         rawEvidence: item.summary || item.details || ''
       })
@@ -1512,6 +1516,108 @@ function buildPeriodicNoFindingsMarkdown(input = {}, data = {}, currentDateProvi
   return lines.join('\n')
 }
 
+function changeSourceEntries(change = {}) {
+  const item = normalizePlainObject(change)
+  const entries = Array.isArray(item.source_entries)
+    ? item.source_entries
+    : Array.isArray(item.sourceEntries)
+      ? item.sourceEntries
+      : []
+  return normalizeEvidenceEntries(entries)
+}
+
+function changeSourceUrls(change = {}) {
+  const item = normalizePlainObject(change)
+  return uniquePlainTextList([
+    ...(Array.isArray(item.source_urls) ? item.source_urls : []),
+    ...(Array.isArray(item.sourceUrls) ? item.sourceUrls : []),
+    ...changeSourceEntries(item).map((entry) => entry.url)
+  ])
+}
+
+function changeEvidenceText(change = {}) {
+  const item = normalizePlainObject(change)
+  const entries = changeSourceEntries(item)
+  return [
+    item.summary,
+    item.details,
+    ...entries.flatMap((entry) => [entry.title, entry.snippet])
+  ].filter(Boolean).join(' ')
+}
+
+function sourceBackedOperationPath(change = {}) {
+  const text = changeEvidenceText(change).toLowerCase()
+  const steps = []
+  const push = (label, pattern) => {
+    if (pattern.test(text) && !steps.includes(label)) steps.push(label)
+  }
+  push('进入功能入口', /入口|打开|进入|官网|公告|release|changelog/)
+  push('输入需求', /输入需求|需求输入|输入.*需求|提示词|prompt|brief/)
+  push('上传/导入素材', /上传|导入|素材|图片|视频|文件/)
+  push('生成视觉方案', /生成视觉方案|生成.*方案|创意生成|生成.*设计|ai.*生成/)
+  push('编辑器调整', /编辑器|智能编辑|调整|继续调整|编辑|修改/)
+  push('协作确认', /协作|团队|评论|审批/)
+  push('导出', /导出|下载|发布|分发|交付/)
+  if (steps.length >= 2) {
+    return {
+      status: 'source_backed',
+      text: steps.join(' -> ')
+    }
+  }
+  const fallbackSteps = candidateJourneySteps({
+    title: '',
+    snippet: changeEvidenceText(change)
+  })
+  if (fallbackSteps.length >= 2) {
+    return {
+      status: 'source_backed',
+      text: fallbackSteps.join(' -> ')
+    }
+  }
+  return {
+    status: 'needs_deep_analysis',
+    text: '待点击深度分析抓取真实页面入口、触发操作和页面流转'
+  }
+}
+
+function buildConfirmedFeatureSection(changes = [], kind = 'weekly') {
+  const meta = periodicReportMeta(kind)
+  const featureChanges = (Array.isArray(changes) ? changes : [])
+    .map(normalizePlainObject)
+    .filter(isFeatureChange)
+  if (!featureChanges.length) return []
+  const lines = [
+    `## ${meta.periodLabel}确认上线功能`,
+    '',
+    '| 竞品 | 上线功能 | 日期 | 来源 | 证据摘要 | 真实链路操作路径 |',
+    '|---|---|---|---|---|---|'
+  ]
+  for (const change of featureChanges.slice(0, 12)) {
+    const urls = changeSourceUrls(change)
+    const sourceText = urls.length
+      ? urls.slice(0, 2).map((url) => `[来源](${url})`).join('、')
+      : '未提供来源链接'
+    const path = sourceBackedOperationPath(change)
+    const pathText = path.status === 'source_backed'
+      ? path.text
+      : `${path.text}，并生成可复核的链路表`
+    lines.push([
+      markdownTableCell(change.competitor || change.competitorName || '未命名竞品'),
+      markdownTableCell(featureNameFromChange(change)),
+      markdownTableCell(dateString(change.discovered_at || change.discoveredAt || change.published_date || change.publishedDate || change.date) || '未确认'),
+      sourceText,
+      truncateMarkdownCell(change.details || change.summary || '', 120),
+      markdownTableCell(pathText)
+    ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'))
+  }
+  lines.push(
+    '',
+    '> 说明：上表只展示带周期内日期证据的上线功能；“真实链路操作路径”优先使用来源标题/摘要/详情中可验证的动作线索，完整页面流转请点击对应新功能事件的“深度分析”继续生成。',
+    ''
+  )
+  return lines
+}
+
 function buildPeriodicChangesMarkdown(changes = [], input = {}, data = {}, currentDateProvider = () => new Date(), kind = 'weekly') {
   if (!changes.length) return buildPeriodicNoFindingsMarkdown(input, data, currentDateProvider, kind)
   const meta = periodicReportMeta(kind)
@@ -1532,10 +1638,13 @@ function buildPeriodicChangesMarkdown(changes = [], input = {}, data = {}, curre
     '',
     `- 共监控到 **${changes.length}** 条周期内明确变更`,
     `- 涉及 **${grouped.size}** 个竞品`,
-    '',
-    '## 竞品详情',
     ''
   ]
+  lines.push(...buildConfirmedFeatureSection(changes, kind))
+  lines.push(
+    '## 竞品详情',
+    ''
+  )
   for (const [competitor, items] of grouped.entries()) {
     lines.push(`### ${competitor}`, '')
     for (const change of items) {
@@ -1544,7 +1653,7 @@ function buildPeriodicChangesMarkdown(changes = [], input = {}, data = {}, curre
       lines.push(`#### [${category}] ${summary}`, '')
       if (change.details) lines.push(`${change.details}`, '')
       if (change.discovered_at || change.discoveredAt) lines.push(`- **发现时间**: ${change.discovered_at || change.discoveredAt}`)
-      const urls = Array.isArray(change.source_urls) ? change.source_urls : Array.isArray(change.sourceUrls) ? change.sourceUrls : []
+      const urls = changeSourceUrls(change)
       if (urls.length) lines.push(`- **信息来源**: ${urls.slice(0, 3).join(', ')}`)
       lines.push('')
     }

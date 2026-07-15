@@ -438,6 +438,62 @@ test('monthly no-findings reports use a monthly title and 30-day monitoring peri
   assert.match(response.markdown, /创意生成 -> 智能编辑 -> 团队协作 -> 场景交付/)
 })
 
+test('monthly reports surface confirmed launched features with source backed path analysis entry', async () => {
+  const projectId = 'competitor-analysis-monthly-confirmed-feature-regression'
+  const service = createCompetitorAnalysisEngineService({
+    currentDateProvider: () => new Date('2026-07-15T08:00:00.000Z'),
+    pythonRunner: async (args, env) => {
+      assert.equal(args[1], 'monthly')
+      await writeFile(join(env.OUTPUT_DIR, 'monthly.md'), '# monthly result\n\n确认上线')
+      await writeFile(join(env.OUTPUT_DIR, 'monthly.json'), JSON.stringify({
+        report_date: '2026-07-15',
+        period_start: '2026-06-15',
+        period_end: '2026-07-15',
+        changes: [{
+          competitor: '稿定设计',
+          category: '功能更新',
+          summary: '稿定设计上线 AI 设计助手新功能',
+          details: '官方公告显示 AI 设计助手支持输入需求、生成视觉方案、进入编辑器继续调整并导出。',
+          impact: '高',
+          source_urls: ['https://www.gaoding.com/release/ai-design-assistant'],
+          source_entries: [{
+            title: '稿定设计 AI 设计助手上线',
+            url: 'https://www.gaoding.com/release/ai-design-assistant',
+            snippet: '从 AI 设计助手入口输入需求，生成视觉方案后进入编辑器调整并导出。',
+            published_date: '2026-07-10',
+            source: 'official'
+          }],
+          discovered_at: '2026-07-10T10:00:00.000Z'
+        }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId,
+    kind: 'monthly',
+    competitorNames: ['稿定设计'],
+    productName: '稿定设计',
+    productUrl: 'https://www.gaoding.com/'
+  })
+  const listed = await service.listRecords({ projectId })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.featureEvents.length, 1)
+  assert.equal(response.featureEvents[0].competitorName, '稿定设计')
+  assert.equal(response.featureEvents[0].featureName, 'AI 设计助手')
+  assert.deepEqual(response.featureEvents[0].sourceUrls, ['https://www.gaoding.com/release/ai-design-assistant'])
+  assert.equal(response.featureEvents[0].sourceEntries[0].publishedDate, '2026-07-10')
+  assert.match(response.markdown, /## 本月确认上线功能/)
+  assert.match(response.markdown, /AI 设计助手/)
+  assert.match(response.markdown, /https:\/\/www\.gaoding\.com\/release\/ai-design-assistant/)
+  assert.match(response.markdown, /真实链路操作路径/)
+  assert.match(response.markdown, /输入需求 -> 生成视觉方案 -> 编辑器调整 -> 导出/)
+  assert.match(response.markdown, /深度分析/)
+  assert.ok(listed.records.some((record) => record.kind === 'monthly' && record.featureEvents?.[0]?.featureName === 'AI 设计助手'))
+})
+
 test('python weekly diagnostics keeps enough candidate samples for report review', async () => {
   const mainSource = await readFile(new URL('../backend/services/competitor-analysis-engine/python/竞品监控系统/main.py', import.meta.url), 'utf8')
 
