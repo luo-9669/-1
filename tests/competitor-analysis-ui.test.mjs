@@ -17,7 +17,7 @@ function cssRule(source, selector) {
   return source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{[\\s\\S]*?\\}`))?.[0] || ''
 }
 
-test('competitor analysis dialog uses discovered feature selection and screenshot references instead of target text inputs', async () => {
+test('competitor analysis dialog uses feature text input without helper subtitle', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
 
   assert.ok(
@@ -25,8 +25,8 @@ test('competitor analysis dialog uses discovered feature selection and screensho
     'analysis type should appear before competitor selection'
   )
   assert.ok(
-    pageSource.indexOf('选择分析竞品') < pageSource.indexOf('选择要分析的功能'),
-    'competitor selection should appear before discovered feature selection'
+    pageSource.indexOf('选择分析竞品') < pageSource.indexOf('输入要分析的功能'),
+    'competitor selection should appear before feature input'
   )
   assert.match(pageSource, /v-if="analysisRequiresScopeFields"/)
   assert.match(pageSource, /const analysisRequiresScopeFields = computed/)
@@ -36,19 +36,20 @@ test('competitor analysis dialog uses discovered feature selection and screensho
   assert.match(pageSource, /multiple/)
   assert.match(pageSource, /collapse-tags/)
   assert.match(pageSource, /<ElOption label="全部" value="__all__" \/>/)
-  assert.match(pageSource, /选择要分析的功能/)
-  assert.match(pageSource, /competitorFeatureMapOptions/)
-  assert.match(pageSource, /selectCompetitorFeature/)
-  assert.match(pageSource, /handleCompetitorFeatureSelect/)
-  assert.match(pageSource, /popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"/)
-  assert.match(pageSource, /placeholder="选择竞品主功能链路"/)
+  assert.match(pageSource, /输入要分析的功能/)
+  assert.match(pageSource, /<ElInput\s+v-model="analysisForm\.feature"/)
+  assert.match(pageSource, /placeholder="例如：登录注册、AI 对话、作品发布流程"/)
   assert.match(pageSource, /handleReferenceScreenshotUpload/)
   assert.match(pageSource, /analysisForm\.referenceScreenshots/)
   assert.match(pageSource, /截图中的功能入口/)
   assert.match(pageSource, /截图只作为参考/)
+  assert.doesNotMatch(pageSource, /只展示已确认的竞品主功能链路/)
+  assert.doesNotMatch(pageSource, /暂未发现可点选主功能链路/)
+  assert.doesNotMatch(pageSource, /选择要分析的功能/)
+  assert.doesNotMatch(pageSource, /popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"/)
+  assert.doesNotMatch(pageSource, /placeholder="选择竞品主功能链路"/)
   assert.doesNotMatch(pageSource, /competitor-analysis-feature-grid/)
   assert.doesNotMatch(pageSource, /competitor-analysis-feature-option/)
-  assert.doesNotMatch(pageSource, /分析的功能名称/)
   assert.doesNotMatch(pageSource, /分析的目标/)
   assert.doesNotMatch(pageSource, /placeholder="例如：agent"/)
   assert.doesNotMatch(pageSource, /placeholder="描述这次要分析什么功能、范围和判断目标。"/)
@@ -66,7 +67,7 @@ test('competitor analysis dialog uses discovered feature selection and screensho
 test('competitor flow feature selector ignores report conclusions and keeps only primary feature chains', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const builderStart = pageSource.indexOf('function buildCompetitorFeatureMapOptions()')
-  const builderEnd = pageSource.indexOf('function selectCompetitorFeature', builderStart)
+  const builderEnd = pageSource.indexOf('function readFileAsDataUrl', builderStart)
   const builderSource = pageSource.slice(builderStart, builderEnd)
   const filterStart = pageSource.indexOf('function recordMatchesFilters')
   const filterEnd = pageSource.indexOf('function competitorSearchText', filterStart)
@@ -74,6 +75,9 @@ test('competitor flow feature selector ignores report conclusions and keeps only
   const primaryFeatureStart = pageSource.indexOf('function recordHasPrimaryFeature')
   const primaryFeatureEnd = pageSource.indexOf('function recordHasActionableAnalysisValue', primaryFeatureStart)
   const primaryFeatureSource = pageSource.slice(primaryFeatureStart, primaryFeatureEnd)
+  const actionableStart = pageSource.indexOf('function recordHasActionableAnalysisValue')
+  const actionableEnd = pageSource.indexOf('function featureOptionId', actionableStart)
+  const actionableSource = pageSource.slice(actionableStart, actionableEnd)
   const deletedNoiseGuardName = ['NOISY', 'FEATURE', 'CANDIDATE', 'PATTERN'].join('_')
   const deletedMarkdownExtractorName = ['markdown', 'Feature', 'Candidates'].join('')
   const markdownField = ['record', 'markdown'].join('.')
@@ -82,14 +86,21 @@ test('competitor flow feature selector ignores report conclusions and keeps only
   assert.ok(builderStart >= 0 && builderEnd > builderStart, 'buildCompetitorFeatureMapOptions should be present')
   assert.ok(filterStart >= 0 && filterEnd > filterStart, 'recordMatchesFilters should be present')
   assert.ok(primaryFeatureStart >= 0 && primaryFeatureEnd > primaryFeatureStart, 'recordHasPrimaryFeature should be present')
+  assert.ok(actionableStart >= 0 && actionableEnd > actionableStart, 'recordHasActionableAnalysisValue should be present')
   assert.match(pageSource, /ACTIONABLE_FEATURE_RECORD_KINDS/)
   assert.match(pageSource, /isPrimaryCompetitorFeatureCandidate/)
   assert.match(pageSource, /isDuplicateCompetitorFeatureName/)
+  assert.match(pageSource, /function recordIsStale/)
   assert.match(pageSource, /recordHasActionableAnalysisValue/)
   assert.match(primaryFeatureSource, /ACTIONABLE_FEATURE_RECORD_KINDS\.has\(record\.kind\)/)
   assert.match(primaryFeatureSource, /!isDuplicateCompetitorFeatureName\(recordFeature,\s*record\)/)
   assert.match(builderSource, /recordHasPrimaryFeature\(record\)/)
   assert.match(filterSource, /recordHasActionableAnalysisValue\(record\)/)
+  assert.doesNotMatch(
+    actionableSource,
+    /recordIsStale/,
+    'stale records should remain visible in the list so users can see the expired status and rerun them'
+  )
   assert.equal(pageSource.includes(deletedNoiseGuardName), false)
   assert.equal(pageSource.includes(deletedMarkdownExtractorName), false)
   assert.equal(builderSource.includes(`${deletedMarkdownExtractorName}([${markdownField}, ${summaryField}]`), false)
@@ -97,10 +108,10 @@ test('competitor flow feature selector ignores report conclusions and keeps only
   assert.equal(builderSource.includes(`${deletedMarkdownExtractorName}(${summaryField}`), false)
 })
 
-test('competitor flow feature selector prioritizes screenshots and rejects report status conclusions', async () => {
+test('competitor flow feature option builder keeps screenshots as references without auto-filling input', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const builderStart = pageSource.indexOf('function buildCompetitorFeatureMapOptions()')
-  const builderEnd = pageSource.indexOf('function selectCompetitorFeature', builderStart)
+  const builderEnd = pageSource.indexOf('function readFileAsDataUrl', builderStart)
   const builderSource = pageSource.slice(builderStart, builderEnd)
   const candidateStart = pageSource.indexOf('function isPrimaryCompetitorFeatureCandidate')
   const candidateEnd = pageSource.indexOf('function isDuplicateCompetitorFeatureName', candidateStart)
@@ -118,12 +129,12 @@ test('competitor flow feature selector prioritizes screenshots and rejects repor
   assert.ok(
     builderSource.indexOf("makeFeatureOption('截图中的功能入口', 'screenshot'") <
       builderSource.indexOf('for (const record of analysisRecords.value)'),
-    'screenshot reference should be inserted before historical records so upload becomes the default selectable scope'
+    'screenshot reference should be kept before historical records for downstream context'
   )
-  assert.ok(
-    confirmSource.indexOf('ensureSelectedFeatureStillAvailable()') <
-      confirmSource.indexOf('const validationMessage = analysisDialogValidationMessage()'),
-    'confirm should re-resolve screenshot fallback before validating the dialog'
+  assert.doesNotMatch(
+    confirmSource,
+    /ensureSelectedFeatureStillAvailable/,
+    'confirm should validate the user-entered feature instead of auto-filling a discovered option'
   )
 })
 
@@ -168,6 +179,7 @@ test('competitor analysis uses two-level tabs with monitor reports under competi
   assert.match(pageSource, /label="竞品监控二级分类"/)
   assert.match(monitorTabsSource, /\{ value: 'competitors', label: '竞品表' \}/)
   assert.match(monitorTabsSource, /\{ value: 'daily', label: '每日生成' \}/)
+  assert.match(monitorTabsSource, /\{ value: 'monthly', label: '月报生成' \}/)
   assert.ok(
     primaryTabsSource.indexOf("value: 'monitor'") < primaryTabsSource.indexOf("value: 'gap'"),
     'primary tabs should be competitor monitor before opportunity analysis'
@@ -175,21 +187,23 @@ test('competitor analysis uses two-level tabs with monitor reports under competi
   assert.ok(
     monitorTabsSource.indexOf("value: 'competitors'") < monitorTabsSource.indexOf("value: 'daily'") &&
     monitorTabsSource.indexOf("value: 'daily'") < monitorTabsSource.indexOf("value: 'weekly'") &&
-    monitorTabsSource.indexOf("value: 'weekly'") < monitorTabsSource.indexOf("value: 'flow'") &&
+    monitorTabsSource.indexOf("value: 'weekly'") < monitorTabsSource.indexOf("value: 'monthly'") &&
+    monitorTabsSource.indexOf("value: 'monthly'") < monitorTabsSource.indexOf("value: 'flow'") &&
     monitorTabsSource.indexOf("value: 'flow'") < monitorTabsSource.indexOf("value: 'framework'"),
-    'monitor secondary tabs should be competitor table, daily, weekly, flow, framework'
+    'monitor secondary tabs should be competitor table, daily, weekly, monthly, flow, framework'
   )
   assert.doesNotMatch(primaryTabsSource, /value: 'competitors'/)
   assert.doesNotMatch(primaryTabsSource, /value: 'daily'/)
   assert.doesNotMatch(primaryTabsSource, /value: 'weekly'/)
+  assert.doesNotMatch(primaryTabsSource, /value: 'monthly'/)
   assert.doesNotMatch(primaryTabsSource, /value: 'flow'/)
   assert.doesNotMatch(primaryTabsSource, /value: 'framework'/)
   assert.match(pageSource, /const activeKind = ref\('competitors'\)/)
   assert.match(pageSource, /const activePrimaryTab = ref\('monitor'\)/)
   assert.match(pageSource, /kind: 'daily'/)
   assert.match(pageSource, /record\.kind !== activeKind\.value/)
-  assert.match(pageSource, /if \(\['daily', 'weekly'\]\.includes\(record\.kind\)\) return '全部功能'/)
-  assert.match(pageSource, /kind:\s*\['daily', 'weekly', 'flow', 'framework', 'gap'\]\.includes\(record\.kind\)/)
+  assert.match(pageSource, /if \(\['daily', 'weekly', 'monthly'\]\.includes\(record\.kind\)\) return '全部功能'/)
+  assert.match(pageSource, /kind:\s*\['daily', 'weekly', 'monthly', 'flow', 'framework', 'gap'\]\.includes\(record\.kind\)/)
   assert.match(pageSource, /:items="primaryTabs"/)
   assert.match(pageSource, /<ElOption v-for="item in analysisTabs"/)
   assert.doesNotMatch(pageSource, /<ElOption[^>]+label="竞品表"/)
@@ -291,9 +305,18 @@ test('competitor analysis list shows feature display and markdown detail renderi
   assert.match(pageSource, /class="competitor-analysis-quality-panel"/)
   assert.match(pageSource, /qualityIssues/)
   assert.match(pageSource, /failureType/)
+  assert.match(pageSource, /analysisVersion/)
+  assert.match(pageSource, /isStaleAnalysis/)
+  assert.match(pageSource, /记录已过期/)
+  assert.match(pageSource, /selectedRecordIsStale/)
   assert.match(pageSource, /names\.join\('、'\)/)
   assert.match(pageSource, /markdownBlocksFor/)
+  assert.match(pageSource, /markdownInlineParts/)
+  assert.match(pageSource, /safeExternalMarkdownUrl/)
   assert.match(pageSource, /competitor-analysis-md-table/)
+  assert.match(pageSource, /class="competitor-analysis-md-link"/)
+  assert.match(pageSource, /target="_blank"/)
+  assert.match(pageSource, /rel="noreferrer"/)
   assert.match(pageSource, /class="competitor-analysis-row-actions"/)
   assert.match(pageSource, /@click\.stop="deleteRecord\(record\)"/)
   assert.match(pageSource, /class="competitor-analysis-delete-button"/)
@@ -302,9 +325,22 @@ test('competitor analysis list shows feature display and markdown detail renderi
   assert.match(apiSource, /deleteRecord\(config, payload = \{\}\)/)
   assert.match(apiSource, /method:\s*'DELETE'/)
   assert.match(backendServiceSource, /async deleteRecord\(input = \{\}\)/)
+  assert.match(backendServiceSource, /analysisVersion/)
+  assert.match(backendServiceSource, /isStaleAnalysis/)
   assert.match(mockApiSource, /DELETE \/api\/competitor-analysis\/records\/:id/)
   assert.doesNotMatch(pageSource, /<pre v-else-if="selectedDetailMarkdown" class="competitor-analysis-markdown">/)
   assert.doesNotMatch(pageSource, /<pre class="competitor-analysis-markdown">\{\{ selectedInteractionArtifacts\.documentMarkdown \}\}<\/pre>/)
+})
+
+test('competitor analysis disables report reuse actions for stale records', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const quickAnalyzeStart = pageSource.indexOf('const canQuickAnalyzeSelectedRecord = computed')
+  const quickAnalyzeEnd = pageSource.indexOf('const selectedFeatureEventForAction', quickAnalyzeStart)
+  const quickAnalyzeSource = pageSource.slice(quickAnalyzeStart, quickAnalyzeEnd)
+
+  assert.match(pageSource, /:disabled="!selectedReportCopyText \|\| selectedRecordIsStale"/)
+  assert.match(quickAnalyzeSource, /!selectedRecordIsStale\.value/)
+  assert.match(pageSource, /return selectedRecord\.value\?\.staleReason/)
 })
 
 test('competitor analysis detail renders fenced markdown code blocks as code blocks', async () => {
@@ -320,6 +356,8 @@ test('competitor analysis detail renders fenced markdown code blocks as code blo
   assert.match(pageSource, /block\.type === 'code'/)
   assert.match(pageSource, /class="competitor-analysis-md-code"/)
   assert.match(pageSource, /\.competitor-analysis-md-code/)
+  assert.match(pageSource, /\.competitor-analysis-md-table[\s\S]*overflow-x:\s*auto/)
+  assert.match(pageSource, /\.competitor-analysis-md-table th:nth-child\(2\)/)
 })
 
 test('competitor analysis detail enhances structured markdown tables without changing raw markdown', async () => {
@@ -356,8 +394,22 @@ test('competitor framework detail uses table explorer with expandable rows inste
 
   assert.ok(frameworkStart >= 0 && frameworkEnd > frameworkStart, 'framework row helpers should be present')
   assert.match(pageSource, /selectedFrameworkRows/)
+  assert.match(pageSource, /selectedFrameworkDashboard/)
   assert.match(pageSource, /class="competitor-analysis-framework-explorer"/)
   assert.match(pageSource, /完整框架结构化清单/)
+  assert.match(pageSource, /框架可视化总览/)
+  assert.match(pageSource, /低保线框图/)
+  assert.match(pageSource, /结构树/)
+  assert.match(pageSource, /链路总览图/)
+  assert.match(pageSource, /class="competitor-analysis-framework-dashboard"/)
+  assert.match(pageSource, /competitor-analysis-framework-map/)
+  assert.match(pageSource, /competitor-analysis-framework-tree/)
+  assert.match(pageSource, /competitor-analysis-framework-wireframes/)
+  assert.match(frameworkSource, /frameworkDashboardForRows/)
+  assert.match(frameworkSource, /frameworkLayerCatalog/)
+  assert.match(frameworkSource, /frameworkWireframeForLayer/)
+  assert.match(pageSource, /class="[^"]*competitor-analysis-framework-overview/)
+  assert.match(pageSource, /selectedFrameworkOverviewBlocks/)
   assert.match(pageSource, /class="competitor-analysis-framework-table"/)
   assert.match(pageSource, /class="competitor-analysis-framework-row-detail"/)
   assert.match(pageSource, />查看链接</)
@@ -463,7 +515,7 @@ test('competitor analysis creates combined monitor records and per competitor de
   const recordDraftSource = pageSource.slice(recordDraftStart, recordDraftEnd)
 
   assert.match(recordDraftSource, /const selected = selectedCompetitors\(\)/)
-  assert.match(recordDraftSource, /if \(\['daily', 'weekly'\]\.includes\(analysisForm\.kind\)\)/)
+  assert.match(recordDraftSource, /if \(\['daily', 'weekly', 'monthly'\]\.includes\(analysisForm\.kind\)\)/)
   assert.match(recordDraftSource, /competitorIds:\s*selected\.map\(\(item\) => item\.id\)\.filter\(Boolean\)/)
   assert.match(recordDraftSource, /competitorNames:\s*selected\.map\(competitorDisplayName\)/)
   assert.match(recordDraftSource, /productUrls:\s*selected\.map\(competitorWebsiteUrl\)/)
@@ -513,9 +565,21 @@ test('competitor analysis refresh preserves local running gap records until back
 
   assert.ok(loadRecordsStart >= 0 && loadRecordsEnd > loadRecordsStart, 'loadRecords should be present')
   assert.match(pageSource, /function mergeBackendRecordsWithLocalRunning/)
-  assert.match(loadRecordsSource, /mergeBackendRecordsWithLocalRunning\(result\.data\.records\.map\(normalizeRecord\)\)/)
+  assert.match(loadRecordsSource, /const normalizedRecords = result\.data\.records\.map\(normalizeRecord\)/)
+  assert.match(loadRecordsSource, /mergeBackendRecordsWithLocalRunning\(normalizedRecords\)/)
   assert.match(pageSource, /runningRecordIds\.value\.has\(record\.id\)/)
   assert.match(pageSource, /backendIds\.has\(record\.id\)/)
+})
+
+test('competitor analysis polls backend while analysis records are running', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+
+  assert.match(pageSource, /let runningRecordsPollTimer/)
+  assert.match(pageSource, /function startRunningRecordsPolling/)
+  assert.match(pageSource, /function stopRunningRecordsPolling/)
+  assert.match(pageSource, /setInterval\(\(\) => \{\s*void loadRecords\(\)\s*\},\s*5000\)/)
+  assert.match(pageSource, /watch\(runningRecordIds,[\s\S]*startRunningRecordsPolling\(\)/)
+  assert.match(pageSource, /onBeforeUnmount\(\(\) => \{\s*stopRunningRecordsPolling\(\)\s*\}\)/)
 })
 
 test('competitor analysis keeps gap draft visible before switching to the gap tab', async () => {
@@ -584,8 +648,9 @@ test('competitor analysis confirm shows validation feedback instead of silently 
 
   assert.ok(validationStart >= 0 && validationEnd > validationStart, 'validation helper should be present')
   assert.match(validationSource, /请选择至少一个竞品/)
-  assert.match(validationSource, /请选择一个已发现功能/)
-  assert.match(validationSource, /上传截图参考/)
+  assert.match(validationSource, /请输入要分析的功能/)
+  assert.doesNotMatch(validationSource, /请选择一个已发现功能/)
+  assert.doesNotMatch(validationSource, /上传截图参考/)
   assert.doesNotMatch(validationSource, /请输入分析的功能名称/)
   assert.doesNotMatch(validationSource, /请输入分析目标/)
   assert.match(pageSource, /analysisDialogMessage = ref\(''\)/)

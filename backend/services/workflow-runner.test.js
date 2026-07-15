@@ -2851,7 +2851,8 @@ test('HTML canvas artifact uses the model provider and carries upstream context'
                       componentChecklist: ['门店胶囊栏', '智能推荐商品卡', '悬浮购物车']
                     },
                     visualPreview: {
-                      imagePrompt: '移动端茶饮点单首页，高保真截图质感。'
+                      imagePrompt: '移动端茶饮点单首页，高保真截图质感。',
+                      imageDataUrl: 'data:image/png;base64,dWktdmlzdWFsLXAx'
                     }
                   }
                 ],
@@ -2919,6 +2920,14 @@ test('HTML canvas artifact uses the model provider and carries upstream context'
   assert.match(seenContexts[0].userPrompt, /浅色品牌底/)
   assert.match(seenContexts[0].userPrompt, /下拉刷新触发菜单接口刷新/)
   assert.match(seenContexts[0].userPrompt, /移动端.*375px|375px.*移动端/)
+  assert.match(seenContexts[0].userPrompt, /先.*视觉取证/)
+  assert.match(seenContexts[0].userPrompt, /视觉图优先于/)
+  assert.match(seenContexts[0].userPrompt, /不得仅按低保文字自由发挥/)
+  assert.equal(seenContexts[0].sourceVisualReferenceImages.length, 1)
+  assert.equal(seenContexts[0].sourceVisualReferenceImages[0].imageDataUrl, 'data:image/png;base64,dWktdmlzdWFsLXAx')
+  assert.equal(seenContexts[0].referenceImages.length, 1)
+  assert.equal(seenContexts[0].referenceImages[0].imageDataUrl, 'data:image/png;base64,dWktdmlzdWFsLXAx')
+  assert.equal(seenContexts[0].imageDataUrl, 'data:image/png;base64,dWktdmlzdWFsLXAx')
   assert.doesNotMatch(html, /mobile-screen|会员中心/)
 })
 
@@ -2938,12 +2947,34 @@ test('HTML canvas artifact rejects empty model output instead of marking it gene
           canvas: { nodes: [], edges: [] },
           totalDesignFlow: {
             currentStage: 'html-output',
-            stages: [{ id: 'html-output', name: 'HTML' }],
+            stages: [
+              { id: 'ui-visual', name: 'UI视觉' },
+              { id: 'html-output', name: 'HTML' }
+            ],
             stageCanvases: {
+              'ui-visual': {
+                nodes: [
+                  {
+                    id: 'ui-empty',
+                    pageId: 'empty',
+                    sourcePageId: 'empty',
+                    stageId: 'ui-visual',
+                    title: '空响应 UI视觉',
+                    visualPreview: {
+                      imagePrompt: '后台管理 Web 空响应页面高保真图。',
+                      imageDataUrl: 'data:image/png;base64,dWktZW1wdHk='
+                    }
+                  }
+                ],
+                edges: [],
+                orderedTabs: ['ui-empty']
+              },
               'html-output': {
                 nodes: [
                   {
                     id: 'html-empty',
+                    pageId: 'empty',
+                    sourcePageId: 'empty',
                     stageId: 'html-output',
                     title: '空响应 HTML',
                     targetGenerator: 'html',
@@ -3144,15 +3175,51 @@ test('html stage artifact generation processes all pending nodes without creatin
           canvas: { nodes: [], edges: [] },
           totalDesignFlow: {
             currentStage: 'html-output',
-            stages: [{ id: 'html-output', name: 'HTML' }],
+            stages: [
+              { id: 'ui-visual', name: 'UI视觉' },
+              { id: 'html-output', name: 'HTML' }
+            ],
             stageStatuses: {
               'html-output': { status: 'completed', completedAt: '2026-07-13T00:00:00.000Z' }
             },
             stageCanvases: {
+              'ui-visual': {
+                nodes: [
+                  {
+                    id: 'ui-home',
+                    pageId: 'home',
+                    sourcePageId: 'home',
+                    stageId: 'ui-visual',
+                    title: '复刻首页 UI视觉',
+                    visualPreview: {
+                      imagePrompt: 'AI 视频爆款复刻首页 Web 高保真图。',
+                      imageDataUrl: 'data:image/png;base64,dWktaG9tZQ=='
+                    }
+                  },
+                  {
+                    id: 'ui-progress',
+                    pageId: 'progress',
+                    sourcePageId: 'progress',
+                    stageId: 'ui-visual',
+                    title: '任务进度页 UI视觉',
+                    visualPreview: {
+                      imagePrompt: 'AI 视频爆款复刻任务进度页 Web 高保真图。',
+                      imageDataUrl: 'data:image/png;base64,dWktcHJvZ3Jlc3M='
+                    }
+                  }
+                ],
+                edges: [],
+                orderedTabs: [
+                  { key: 'ui-home', label: '复刻首页 UI视觉' },
+                  { key: 'ui-progress', label: '任务进度页 UI视觉' }
+                ]
+              },
               'html-output': {
                 nodes: [
                   {
                     id: 'html-home',
+                    pageId: 'home',
+                    sourcePageId: 'home',
                     stageId: 'html-output',
                     title: '复刻首页 HTML',
                     summary: '展示爆款视频复刻入口。',
@@ -3162,6 +3229,8 @@ test('html stage artifact generation processes all pending nodes without creatin
                   },
                   {
                     id: 'html-progress',
+                    pageId: 'progress',
+                    sourcePageId: 'progress',
                     stageId: 'html-output',
                     title: '任务进度页 HTML',
                     summary: '展示复刻任务生成状态。',
@@ -3221,6 +3290,14 @@ test('html stage artifact generation processes all pending nodes without creatin
   assert.equal(result.status.totalCount, 2)
   assert.equal(result.analysis.totalDesignFlow.stageStatuses['html-output'].status, 'completed')
   assert.equal(capturedContexts.length, 2)
+  assert.deepEqual(
+    capturedContexts.map((context) => context.referenceImages?.[0]?.imageDataUrl),
+    ['data:image/png;base64,dWktaG9tZQ==', 'data:image/png;base64,dWktcHJvZ3Jlc3M=']
+  )
+  assert.deepEqual(
+    capturedContexts.map((context) => context.node.sourcePageId),
+    ['home', 'progress']
+  )
   const secondNodeGeneratingStatus = persistedHtmlStatuses.find((status) =>
     status.status === 'generating' &&
     status.currentNodeId === 'html-progress'
@@ -3251,10 +3328,28 @@ test('html stage artifact generation uses the default md reference when project 
           totalDesignFlow: {
             currentStage: 'html-output',
             stageCanvases: {
+              'ui-visual': {
+                nodes: [
+                  {
+                    id: 'ui-dashboard',
+                    pageId: 'dashboard',
+                    sourcePageId: 'dashboard',
+                    stageId: 'ui-visual',
+                    title: '数据看板 UI视觉',
+                    visualPreview: {
+                      imagePrompt: '后台数据看板 Web 高保真图。',
+                      imageDataUrl: 'data:image/png;base64,dWktZGFzaGJvYXJk'
+                    }
+                  }
+                ],
+                edges: []
+              },
               'html-output': {
                 nodes: [
                   {
                     id: 'html-dashboard',
+                    pageId: 'dashboard',
+                    sourcePageId: 'dashboard',
                     stageId: 'html-output',
                     title: '数据看板 HTML',
                     targetGenerator: 'html',

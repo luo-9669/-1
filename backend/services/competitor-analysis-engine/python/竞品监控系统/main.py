@@ -1,8 +1,9 @@
 """
 竞品监控 - CLI 入口
 
-支持四种执行模式：
+支持五种执行模式：
 - weekly: 全量监控（搜索 → 分析 → 生成周报）
+- monthly: 月度监控（搜索 → 分析 → 生成月报）
 - daily: 每日扫描（搜索 → 判断新功能 → 输出报告）
 - flow: 交互流程梳理（搜索 → 抓取 → 提取流程 → 输出文档）
 - framework: 完整流程框架（深度爬取 → AI 分析 → 生成框架文档）
@@ -93,23 +94,28 @@ def setup_logging(output_dir: str = None, verbose: bool = False):
     )
 
 
-def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
+def run_periodic_monitor(competitors: List[Competitor], days: int, report_kind: str = "weekly") -> WeeklyReport:
     """
-    执行全量监控流程。
+    执行周期监控流程。
 
-    流程：搜索各竞品动态 → AI 分析变更 → 评估影响 → 生成周报
+    流程：搜索各竞品动态 → AI 分析变更 → 评估影响 → 生成周期报告
 
     Args:
         competitors: 竞品列表
+        days: 搜索天数范围
+        report_kind: 报告类型，weekly 或 monthly
 
     Returns:
-        周报数据
+        周期报告数据
     """
-    logger = logging.getLogger("weekly")
-    logger.info(f"===== 开始全量监控，共 {len(competitors)} 个竞品 =====")
+    is_monthly = report_kind == "monthly"
+    period_text = "本月" if is_monthly else "本周"
+    report_text = "月报" if is_monthly else "周报"
+    logger = logging.getLogger(report_kind)
+    logger.info(f"===== 开始{report_text}监控，共 {len(competitors)} 个竞品 =====")
 
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=config.WEEKLY_DAYS)
+    start_date = end_date - timedelta(days=days)
 
     all_changes: List[ChangeRecord] = []
     search_diagnostics = []
@@ -121,7 +127,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
         entries = scraper.search_competitor(
             name=competitor.name,
             keywords=competitor.keywords,
-            days=config.WEEKLY_DAYS,
+            days=days,
         )
         dated_entries = [
             entry for entry in entries
@@ -133,7 +139,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
             "total_candidates": len(entries),
             "dated_candidates": len(dated_entries),
             "reason": (
-                "检索到候选结果，但结果未提供发布日期，不能判定为本周更新。"
+                f"检索到候选结果，但结果未提供发布日期，不能判定为{period_text}更新。"
                 if entries and not dated_entries else
                 "未检索到候选结果。"
                 if not entries else
@@ -147,7 +153,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
                     "published_date": entry.published_date or "",
                     "source": entry.source,
                 }
-                for entry in entries[:5]
+                for entry in entries[:30]
             ],
         })
 
@@ -172,7 +178,7 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
         all_changes.extend(changes)
         logger.info(f"竞品 [{competitor.name}] 发现 {len(changes)} 条变更")
 
-    # 5. 生成周报摘要（如有 LLM）
+    # 5. 生成周期摘要（如有 LLM）
     summary = ""
     key_highlights = []
     recommendations = []
@@ -180,13 +186,13 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
     if config.LLM_API_KEY and all_changes:
         summary, key_highlights, recommendations = _generate_weekly_summary(all_changes)
 
-    # 6. 构建周报数据
+    # 6. 构建周期报告数据
     report = WeeklyReport(
         report_date=end_date.strftime("%Y-%m-%d"),
         period_start=start_date.strftime("%Y-%m-%d"),
         period_end=end_date.strftime("%Y-%m-%d"),
         changes=all_changes,
-        summary=summary or f"本周共监控到 {len(all_changes)} 条变更动态，涉及 {len(competitors)} 个竞品。",
+        summary=summary or f"{period_text}共监控到 {len(all_changes)} 条变更动态，涉及 {len(competitors)} 个竞品。",
         key_highlights=key_highlights,
         recommendations=recommendations,
     )
@@ -206,18 +212,31 @@ def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
     report_path = reporter.generate_weekly_report(report)
 
     # 同时保存 JSON 数据
+    data_filename = (
+        f"monthly_data_{report.report_date}.json"
+        if is_monthly else
+        f"weekly_data_{report.report_date}.json"
+    )
     reporter.save_raw_data(
         report.to_dict(),
-        f"weekly_data_{report.report_date}.json",
+        data_filename,
         config.WEEKLY_REPORT_DIR,
     )
 
-    logger.info(f"全量监控完成！报告已保存: {report_path}")
-    print(f"\n✅ 全量监控完成")
+    logger.info(f"{report_text}监控完成！报告已保存: {report_path}")
+    print(f"\n✅ {report_text}监控完成")
     print(f"   共发现 {len(all_changes)} 条变更")
     print(f"   报告路径: {report_path}\n")
 
     return report
+
+
+def run_weekly_monitor(competitors: List[Competitor]) -> WeeklyReport:
+    return run_periodic_monitor(competitors, days=config.WEEKLY_DAYS, report_kind="weekly")
+
+
+def run_monthly_monitor(competitors: List[Competitor]) -> WeeklyReport:
+    return run_periodic_monitor(competitors, days=config.MONTHLY_DAYS, report_kind="monthly")
 
 
 def _generate_weekly_summary(changes: List[ChangeRecord]) -> tuple:
@@ -561,6 +580,7 @@ def main():
         epilog="""
 使用示例:
   python main.py weekly                                  # 全量监控
+  python main.py monthly                                 # 月度监控
   python main.py daily                                   # 每日扫描
   python main.py flow --competitor HeyGen --feature "AI Avatar"  # 交互流程梳理
   python main.py framework --url https://www.heygen.com --name "HeyGen"  # 完整流程框架
@@ -573,8 +593,8 @@ def main():
     # 模式选择
     parser.add_argument(
         "mode",
-        choices=["weekly", "daily", "flow", "framework"],
-        help="执行模式: weekly=全量监控, daily=每日扫描, flow=交互流程梳理, framework=完整流程框架",
+        choices=["weekly", "monthly", "daily", "flow", "framework"],
+        help="执行模式: weekly=全量监控, monthly=月度监控, daily=每日扫描, flow=交互流程梳理, framework=完整流程框架",
     )
 
     # 交互流程模式专用参数
@@ -621,6 +641,9 @@ def main():
     try:
         if args.mode == "weekly":
             run_weekly_monitor(competitors)
+
+        elif args.mode == "monthly":
+            run_monthly_monitor(competitors)
 
         elif args.mode == "daily":
             run_daily_scan(competitors)

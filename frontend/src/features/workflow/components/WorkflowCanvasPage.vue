@@ -238,7 +238,7 @@
                       ></iframe>
                       <div v-else class="preview-code-card-placeholder">
                         <strong>待生成 HTML</strong>
-                        <span>{{ codePreview(node).previewSummary || '生成后在这里展示页面效果。' }}</span>
+                        <span>{{ codePreviewEmptySummary(node, '生成后在这里展示页面效果。') }}</span>
                       </div>
                     </div>
                   </section>
@@ -1416,7 +1416,7 @@
               <header class="preview-code-result-head">
                 <div class="preview-code-result-title">
                   <strong>HTML 渲染</strong>
-                  <small>{{ codePreview(fullscreenNode).previewSummary || '可检索布局 HTML，不是截图' }}</small>
+                  <small>{{ codePreviewEmptySummary(fullscreenNode, '可检索布局 HTML，不是截图') }}</small>
                 </div>
                 <div class="preview-code-tabs" role="tablist" aria-label="HTML 详情切换">
                   <button
@@ -2477,6 +2477,7 @@ function isNodeActuallyLoading(node = {}) {
   if (node.artifactStatus === 'failed') return false
   const owningStageId = nodeWorkflowStageId(node)
   if (owningStageId && stageStatus(owningStageId) === 'completed' && isAdvancedUxGeneratingNode(node)) return false
+  if (isPreviewCodeDetail(node) && codePreviewFiles(node).length && node.artifactStatus === 'generating') return false
   return Boolean(
     node.refreshing ||
     isAdvancedUxGeneratingNode(node) ||
@@ -2601,6 +2602,19 @@ function visualQuickGenerationAction(node = {}, action = '') {
   return generationActions(node)[0] || null
 }
 
+function fallbackCodeGenerationAction(node = {}, action = '') {
+  const label = String(action || '').trim()
+  if (!isPreviewCodeDetail(node) || !/生成\s*(HTML|Vue)|生成页面代码|重新生成/.test(label)) return null
+  const targetGenerator = node.stageId === 'vue-output' || /vue/i.test(label) ? 'vue' : 'html'
+  return {
+    id: `fallback-${targetGenerator}-generation`,
+    label: label || (targetGenerator === 'vue' ? '生成 Vue' : '生成 HTML'),
+    description: '',
+    targetGenerator,
+    status: node.artifactStatus || 'pending'
+  }
+}
+
 function codeQuickGenerationAction(node = {}, action = '') {
   const label = String(action || '').trim()
   if (!isPreviewCodeDetail(node)) return null
@@ -2608,7 +2622,7 @@ function codeQuickGenerationAction(node = {}, action = '') {
   return generationActions(node).find((item) => {
     const target = String(item?.targetGenerator || node.targetGenerator || '').trim().toLowerCase()
     return target === 'html' || target === 'vue'
-  }) || null
+  }) || fallbackCodeGenerationAction(node, label)
 }
 
 function visibleNodeQuickActionLabel(node = {}, action = '') {
@@ -6066,6 +6080,34 @@ function lofiRegionGridArea(role = 'support', index = 0, archetype = 'document')
   return index % 2 === 0 ? 'main' : 'side'
 }
 
+function lofiRegionCode(value = '') {
+  const match = String(value || '').match(/\b(A\d{1,2})\b/i)
+  return match?.[1]?.toUpperCase() || ''
+}
+
+function lofiAsciiRegionPlacements(asciiWireframe = '') {
+  const rows = []
+  String(asciiWireframe || '').split('\n').forEach((line) => {
+    const codes = [...line.matchAll(/\b(A\d{1,2})\b/gi)]
+      .map((match) => match[1].toUpperCase())
+      .filter(Boolean)
+    if (codes.length) rows.push([...new Set(codes)])
+  })
+  const placements = {}
+  rows.forEach((codes, rowIndex) => {
+    const columnCount = codes.length
+    codes.forEach((code, columnIndex) => {
+      placements[code] = {
+        rowIndex,
+        columnIndex,
+        columnCount,
+        gridArea: columnCount > 1 ? `ascii-r${rowIndex + 1}-c${columnIndex + 1}` : `ascii-r${rowIndex + 1}`
+      }
+    })
+  })
+  return placements
+}
+
 function lofiRegionBadge(role = '', shape = '') {
   if (role === 'top') return '固定'
   if (role === 'bottom') return '底部'
@@ -6106,20 +6148,25 @@ function lofiBlueprintRegionFallback(node = {}, archetype = 'document') {
   return pageLofiPrototypeSections(node)
 }
 
-function lofiBlueprintRegions(node = {}, sections = [], archetype = 'document') {
+function lofiBlueprintRegions(node = {}, sections = [], archetype = 'document', asciiWireframe = '') {
   const sourceSections = sections.length ? sections : lofiBlueprintRegionFallback(node, archetype)
+  const asciiPlacements = lofiAsciiRegionPlacements(asciiWireframe)
   const regions = sourceSections
     .map((section, index) => {
+      const code = lofiRegionCode(section.title || section.key)
+      const asciiPlacement = code ? asciiPlacements[code] : null
       const role = lofiRegionRole(section, index, archetype)
       const shape = lofiRegionShape(section, role, archetype)
-      const gridArea = lofiRegionGridArea(role, index, archetype)
+      const gridArea = asciiPlacement?.gridArea || lofiRegionGridArea(role, index, archetype)
       const items = lofiRegionItems(section, node, role)
       return {
         key: section.key || `region-${index + 1}`,
         title: section.title || `区域 ${index + 1}`,
+        code,
         role,
         shape,
         gridArea,
+        asciiPlacement,
         badge: lofiRegionBadge(role, shape),
         showPlaceholder: ['main', 'preview', 'editor', 'list', 'modal', 'progress'].includes(role) || ['video', 'list', 'form', 'modal', 'progress'].includes(shape),
         primaryLabel: items[0]?.label || section.title || `区域 ${index + 1}`,
@@ -6154,7 +6201,28 @@ function lofiBlueprintRegions(node = {}, sections = [], archetype = 'document') 
   }]
 }
 
-function lofiRegionMapStyle(archetype = 'document') {
+function lofiRegionMapStyle(archetype = 'document', regions = []) {
+  const asciiRegions = regions.filter((region) => region.asciiPlacement?.gridArea)
+  if (asciiRegions.length) {
+    const maxColumns = Math.max(1, ...asciiRegions.map((region) => Number(region.asciiPlacement?.columnCount) || 1))
+    const rows = [...new Set(asciiRegions.map((region) => Number(region.asciiPlacement?.rowIndex) || 0))]
+      .sort((a, b) => a - b)
+    const asciiAreas = rows.map((rowIndex) => {
+      const rowRegions = asciiRegions
+        .filter((region) => Number(region.asciiPlacement?.rowIndex) === rowIndex)
+        .sort((a, b) => Number(a.asciiPlacement?.columnIndex) - Number(b.asciiPlacement?.columnIndex))
+      if (rowRegions.length === 1) {
+        const area = rowRegions[0].asciiPlacement.gridArea
+        return `"${Array.from({ length: maxColumns }, () => area).join(' ')}"`
+      }
+      const areas = Array.from({ length: maxColumns }, (_, index) => rowRegions[index]?.asciiPlacement?.gridArea || '.')
+      return `"${areas.join(' ')}"`
+    })
+    return {
+      gridTemplateColumns: Array.from({ length: maxColumns }, () => 'minmax(0, 1fr)').join(' '),
+      gridTemplateAreas: asciiAreas.join(' ')
+    }
+  }
   if (archetype === 'modal') {
     return {
       gridTemplateColumns: 'minmax(0, 1fr)',
@@ -6195,7 +6263,7 @@ function pageLofiPrototypeBlueprint(node = {}) {
   const wireframeLines = lofiCleanWireframeLines(artifact.asciiWireframe)
   const title = node?.title || artifact.pageName || artifact.title || '页面'
   const archetype = lofiPageArchetype(node, sections, wireframeLines)
-  const regions = lofiBlueprintRegions(node, sections, archetype)
+  const regions = lofiBlueprintRegions(node, sections, archetype, artifact.asciiWireframe)
   const topbarSection = sections.find((section) => section.kind === 'navigation' || lofiSectionMatches(section, /顶部|导航|入口|header|nav/i)) || sections[0] || {}
   const footerSection = sections.find((section) => section.kind === 'footer' || lofiSectionMatches(section, /底部|固定|操作栏|footer|action/i)) || null
   const interactionItems = lofiInteractionItems(node, 6)
@@ -6220,7 +6288,7 @@ function pageLofiPrototypeBlueprint(node = {}) {
     tone: pageLofiPrototypeTone(node),
     layout: regions.some((region) => region.gridArea === 'side') ? 'with-side-panel' : 'region-driven',
     archetype,
-    regionMapStyle: lofiRegionMapStyle(archetype),
+    regionMapStyle: lofiRegionMapStyle(archetype, regions),
     regions,
     topbar: {
       title: topbarSection?.title || '顶部固定导航',
@@ -6695,19 +6763,87 @@ function isLikelyEscapedPlaceholderCode(value = '') {
   return false
 }
 
+function normalizedPreviewSummaryText(value = '') {
+  return String(value || '')
+    .replace(/\\r\\n|\\n|\\r/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+}
+
+function previewSummaryLooksPlaceholder(value = '') {
+  const raw = String(value || '')
+  const text = normalizedPreviewSummaryText(raw)
+  if (!text) return true
+  if (/\\[rn]/.test(raw) && !/[<>]/.test(raw)) return true
+  return /^(等待|待生成|生成后|请先生成|HTML 生成模型未配置|HTML 生成失败)/.test(text)
+}
+
+function codePreviewEmptySummary(node = {}, fallback = '生成后在这里展示页面效果。') {
+  if (!codePreviewFiles(node).length) return fallback
+  const rawSummary = codePreview(node).previewSummary
+  if (previewSummaryLooksPlaceholder(rawSummary)) return fallback
+  const summary = normalizedPreviewSummaryText(rawSummary)
+  return summary.length > 90 ? `${summary.slice(0, 90).trim()}...` : summary
+}
+
+function hasEscapedHtmlVisibleTextNoise(html = '') {
+  const source = String(html || '')
+  if (!source) return false
+  const visibleText = source
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+  const literalBreakCount = (visibleText.match(/\\n/g) || []).length
+  return literalBreakCount >= 12
+}
+
+function isCompleteGeneratedHtmlDocument(value = '') {
+  const text = String(value || '').trim()
+  if (!text) return false
+  return /<!doctype\s+html/i.test(text) &&
+    /<html[\s>]/i.test(text) &&
+    /<\/html>/i.test(text)
+}
+
 function isUsableCodeContent(value = '', language = 'text', node = {}) {
   const text = String(value || '').trim()
   if (!text || isLikelyEscapedPlaceholderCode(text)) return false
   const normalizedLanguage = String(language || '').trim().toLowerCase()
   if (normalizedLanguage === 'html' || node.stageId === 'html-output') {
-    return /<!doctype\s+html/i.test(text) ||
-      /<html[\s>]/i.test(text) ||
-      /<(main|section|div|article|body|head|style|script)[\s>]/i.test(text)
+    return isCompleteGeneratedHtmlDocument(normalizedGeneratedCodeContent(text, normalizedLanguage, node)) &&
+      !hasEscapedHtmlVisibleTextNoise(text)
   }
   if (normalizedLanguage === 'vue' || node.stageId === 'vue-output') {
     return /<template[\s>]/i.test(text) || /<script[\s>]/i.test(text) || /<style[\s>]/i.test(text)
   }
   return true
+}
+
+function looksLikeEscapedGeneratedDocument(value = '', language = 'text', node = {}) {
+  const text = String(value || '')
+  const normalizedLanguage = String(language || '').trim().toLowerCase()
+  if (!(normalizedLanguage === 'html' || normalizedLanguage === 'vue' || node.stageId === 'html-output' || node.stageId === 'vue-output')) return false
+  const escapedBreakCount = (text.match(/\\[nr]/g) || []).length
+  if (escapedBreakCount < 3) return false
+  const actualBreakCount = (text.match(/[\r\n]/g) || []).length
+  if (actualBreakCount > escapedBreakCount) return false
+  return /<!doctype\s+html/i.test(text) ||
+    /<html[\s>]/i.test(text) ||
+    /<template[\s>]/i.test(text)
+}
+
+function normalizedGeneratedCodeContent(value = '', language = 'text', node = {}) {
+  const text = String(value || '')
+  if (!looksLikeEscapedGeneratedDocument(text, language, node)) return text
+  return text
+    .replace(/\\r\\n|\\n|\\r/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
 }
 
 function codePreviewFiles(node = {}) {
@@ -6726,7 +6862,7 @@ function codePreviewFiles(node = {}) {
       .map((file) => ({
         path: String(file.path || '').trim(),
         language: file.language || preview.codeLanguage || 'text',
-        content: String(file.content || '')
+        content: normalizedGeneratedCodeContent(file.content, file.language || preview.codeLanguage, node)
       }))
   }
   const previewCode = String(preview.code || '').trim()
@@ -6734,7 +6870,7 @@ function codePreviewFiles(node = {}) {
     return [{
       path: preview.filePath || preview.codeLanguage || '代码',
       language: preview.codeLanguage || 'text',
-      content: previewCode
+      content: normalizedGeneratedCodeContent(previewCode, preview.codeLanguage, node)
     }]
   }
   const artifactHtml = String(node.artifact?.html || '').trim()
@@ -6742,7 +6878,7 @@ function codePreviewFiles(node = {}) {
     return [{
       path: preview.filePath || 'index.html',
       language: 'html',
-      content: artifactHtml
+      content: normalizedGeneratedCodeContent(artifactHtml, 'html', node)
     }]
   }
   const artifactCode = String(node.artifact?.code || node.code || '').trim()
@@ -6750,7 +6886,7 @@ function codePreviewFiles(node = {}) {
     return [{
       path: preview.filePath || preview.codeLanguage || '代码',
       language: preview.codeLanguage || 'text',
-      content: artifactCode
+      content: normalizedGeneratedCodeContent(artifactCode, preview.codeLanguage, node)
     }]
   }
   return []

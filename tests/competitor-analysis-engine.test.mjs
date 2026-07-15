@@ -19,7 +19,7 @@ test('daily python report preserves complete search snippets and all entries', a
   assert.match(reporterSource, /md_lines\.append\(f"  > \{entry\.snippet\}"\)/)
 })
 
-test('daily and weekly runs use selected competitors instead of python defaults', async () => {
+test('daily weekly and monthly runs use selected competitors instead of python defaults', async () => {
   const capturedConfigs = []
   const service = createCompetitorAnalysisEngineService({
     pythonRunner: async (args, env) => {
@@ -45,14 +45,23 @@ test('daily and weekly runs use selected competitors instead of python defaults'
     productName: 'Heygen',
     productUrl: 'https://www.heygen.com/'
   })
+  await service.run({
+    projectId: 'competitor-analysis-selected-competitor-regression',
+    kind: 'monthly',
+    competitorNames: ['创客贴'],
+    productName: '创客贴',
+    productUrl: 'https://www.chuangkit.com/'
+  })
 
-  assert.equal(capturedConfigs.length, 2)
-  assert.deepEqual(capturedConfigs.map((item) => item.args[1]), ['daily', 'weekly'])
+  assert.equal(capturedConfigs.length, 3)
+  assert.deepEqual(capturedConfigs.map((item) => item.args[1]), ['daily', 'weekly', 'monthly'])
   assert.deepEqual(capturedConfigs[0].config.competitors.map((item) => item.name), ['稿定设计'])
   assert.deepEqual(capturedConfigs[1].config.competitors.map((item) => item.name), ['Heygen'])
+  assert.deepEqual(capturedConfigs[2].config.competitors.map((item) => item.name), ['创客贴'])
   assert.equal(capturedConfigs[0].config.competitors[0].url, 'https://www.gaoding.art/creation')
   assert.equal(capturedConfigs[1].config.competitors[0].url, 'https://www.heygen.com/')
-  assert.doesNotMatch(JSON.stringify(capturedConfigs), /创客贴|Higgsfield AI|Riverside/)
+  assert.equal(capturedConfigs[2].config.competitors[0].url, 'https://www.chuangkit.com/')
+  assert.doesNotMatch(JSON.stringify(capturedConfigs), /Higgsfield AI|Riverside/)
 })
 
 test('newly added competitor names and urls are passed into python competitor config', async () => {
@@ -124,6 +133,54 @@ test('analysis records preserve multiple competitor urls for combined monitor re
   assert.equal(created.ok, true)
   assert.deepEqual(created.record.productUrls, ['https://www.gaoding.art/creation', 'https://www.heygen.com/'])
   assert.deepEqual(listed.records[0].productUrls, ['https://www.gaoding.art/creation', 'https://www.heygen.com/'])
+})
+
+test('legacy analysis records stay visible but are marked stale while new records use current version', async () => {
+  const projectId = 'competitor-analysis-legacy-version-regression'
+  const recordTime = '2026-07-15T08:00:00.000Z'
+  await mkdir('backend/storage/competitor-analysis', { recursive: true })
+  await writeFile(join('backend/storage/competitor-analysis', `${projectId}.records.json`), JSON.stringify({
+    records: [{
+      id: 'legacy-framework-record',
+      projectId,
+      kind: 'framework',
+      title: '完整框架：旧版结果',
+      status: 'succeeded',
+      statusLabel: '已生成',
+      competitorNames: ['旧版竞品'],
+      productName: '旧版竞品',
+      productUrl: 'https://legacy.example.com',
+      summary: '旧版规则下生成的完整框架。',
+      markdown: '# 旧版完整框架',
+      createdAt: recordTime,
+      updatedAt: recordTime
+    }]
+  }, null, 2))
+
+  const service = createCompetitorAnalysisEngineService({
+    pythonRunner: async () => ({ code: 0, stdout: '', stderr: '' })
+  })
+  const created = await service.createRecord({
+    projectId,
+    kind: 'framework',
+    competitorNames: ['新版竞品'],
+    productName: '新版竞品',
+    productUrl: 'https://current.example.com'
+  })
+  const listed = await service.listRecords({ projectId })
+  const legacyRecord = listed.records.find((record) => record.id === 'legacy-framework-record')
+  const currentRecord = listed.records.find((record) => record.id === created.record.id)
+
+  assert.equal(created.record.analysisVersion, '2026-07-15-competitor-analysis-v3')
+  assert.equal(created.record.isStaleAnalysis, false)
+  assert.ok(legacyRecord)
+  assert.equal(legacyRecord.analysisVersion, 'legacy')
+  assert.equal(legacyRecord.isStaleAnalysis, true)
+  assert.equal(legacyRecord.failureType, 'stale_version')
+  assert.match(legacyRecord.staleReason, /已升级|重新分析/)
+  assert.ok(currentRecord)
+  assert.equal(currentRecord.analysisVersion, '2026-07-15-competitor-analysis-v3')
+  assert.equal(currentRecord.isStaleAnalysis, false)
 })
 
 test('daily and weekly reports persist structured feature events from python evidence', async () => {
@@ -297,11 +354,11 @@ test('weekly no-findings reports disclose undated search candidates instead of i
             total_candidates: 25,
             dated_candidates: 0,
             reason: '检索到候选结果，但结果未提供发布日期，不能判定为本周更新。',
-            sample_entries: [{
-              title: '稿定设计 AI 功能介绍',
-              url: 'https://www.gaoding.com/ai',
-              snippet: 'AI 创作能力介绍'
-            }]
+            sample_entries: Array.from({ length: 6 }, (_, index) => ({
+              title: `稿定设计候选 ${index + 1}`,
+              url: `https://www.gaoding.com/candidate-${index + 1}`,
+              snippet: `候选 ${index + 1} 的公开摘要`
+            }))
           }]
         }
       }))
@@ -317,9 +374,82 @@ test('weekly no-findings reports disclose undated search candidates instead of i
 
   assert.equal(response.ok, true)
   assert.match(response.markdown, /检索识别状态/)
-  assert.match(response.markdown, /稿定设计：检索到 25 条候选，0 条带本周日期/)
+  assert.match(response.markdown, /\| 竞品 \| 候选数 \| 带本周日期候选 \| 识别状态 \|/)
+  assert.match(response.markdown, /\| 稿定设计 \| 25 \| 0 \| 检索到候选结果，但结果未提供发布日期，不能判定为本周更新。 \|/)
   assert.match(response.markdown, /不能判定为本周更新/)
-  assert.match(response.markdown, /稿定设计 AI 功能介绍/)
+  assert.match(response.markdown, /## 候选粗读总览/)
+  assert.match(response.markdown, /\| 竞品 \| 候选数 \| 可确认本周更新 \| 疑似功能主题 \| 疑似功能解读 \| 粗略链路框架 \| 粗读结论 \| 建议动作 \|/)
+  assert.match(response.markdown, /## 候选明细表/)
+  assert.match(response.markdown, /稿定设计候选 1/)
+  assert.match(response.markdown, /稿定设计候选 6/)
+})
+
+test('monthly no-findings reports use a monthly title and 30-day monitoring period', async () => {
+  const service = createCompetitorAnalysisEngineService({
+    currentDateProvider: () => new Date('2026-07-15T08:00:00.000Z'),
+    pythonRunner: async (args, env) => {
+      assert.equal(args[1], 'monthly')
+      await writeFile(join(env.OUTPUT_DIR, `${args[1]}.md`), '# monthly result\n\n未发现')
+      await writeFile(join(env.OUTPUT_DIR, 'monthly.json'), JSON.stringify({
+        report_date: '2026-07-15',
+        period_start: '2026-06-15',
+        period_end: '2026-07-15',
+        changes: [],
+        search_diagnostics: [{
+          competitor: '稿定设计',
+          total_candidates: 18,
+          dated_candidates: 0,
+          reason: '检索到候选结果，但结果未提供发布日期，不能判定为本月更新。',
+          sample_entries: [{
+            title: '稿定设计 AI 创作 2.0：AI设计、智能编辑、协作交付重塑全链路智创',
+            url: 'https://www.gaoding.com/release',
+            snippet: '推出 AI 设计模型、全新全场景智能编辑器、智能团队协作等能力，覆盖创意生成到全场景应用。'
+          }]
+        }]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-monthly-no-findings-regression',
+    kind: 'monthly',
+    competitorNames: ['稿定设计'],
+    productName: '稿定设计',
+    productUrl: 'https://www.gaoding.com/'
+  })
+
+  assert.equal(response.ok, true)
+  assert.match(response.title, /月报生成结果/)
+  assert.match(response.markdown, /# 竞品监控月报/)
+  assert.match(response.markdown, /监控周期：2026-06-15 ~ 2026-07-15/)
+  assert.match(response.markdown, /本月概览/)
+  assert.match(response.markdown, /本月未发现明确的竞品变更/)
+  assert.match(response.markdown, /\| 竞品 \| 候选数 \| 带本月日期候选 \| 识别状态 \|/)
+  assert.match(response.markdown, /\| 稿定设计 \| 18 \| 0 \| 检索到候选结果，但结果未提供发布日期，不能判定为本月更新。 \|/)
+  assert.match(response.markdown, /## 候选粗读总览/)
+  assert.match(response.markdown, /\| 竞品 \| 候选数 \| 可确认本月更新 \| 疑似功能主题 \| 疑似功能解读 \| 粗略链路框架 \| 粗读结论 \| 建议动作 \|/)
+  assert.match(response.markdown, /\| 稿定设计 \| 18 \| 0 \| AI 设计、智能编辑、协作交付 \| AI 设计模型、智能编辑器、团队协作\/协作交付 \| 创意生成 -> 智能编辑 -> 团队协作 -> 场景交付 \| 候选待确认 \| 补采官方公告或可用发布日期 \|/)
+  assert.match(response.markdown, /## 候选明细表/)
+  assert.match(response.markdown, /\| 竞品 \| 候选标题 \| 疑似功能主题 \| 候选提到的功能 \| 粗略链路位置 \| 日期 \| 来源 \| 摘要 \|/)
+  assert.match(response.markdown, /稿定设计 AI 创作 2\.0/)
+  assert.match(response.markdown, /AI 设计、智能编辑、协作交付/)
+  assert.match(response.markdown, /AI 设计模型、智能编辑器、团队协作\/协作交付/)
+  assert.match(response.markdown, /创意生成 -> 智能编辑 -> 团队协作 -> 场景交付/)
+})
+
+test('python weekly diagnostics keeps enough candidate samples for report review', async () => {
+  const mainSource = await readFile(new URL('../backend/services/competitor-analysis-engine/python/竞品监控系统/main.py', import.meta.url), 'utf8')
+
+  assert.match(mainSource, /for entry in entries\[:30\]/)
+})
+
+test('python monthly monitor uses 30 days and writes monthly raw data', async () => {
+  const mainSource = await readFile(new URL('../backend/services/competitor-analysis-engine/python/竞品监控系统/main.py', import.meta.url), 'utf8')
+
+  assert.match(mainSource, /def run_monthly_monitor\(competitors: List\[Competitor\]\) -> WeeklyReport:/)
+  assert.match(mainSource, /return run_periodic_monitor\(competitors,\s*days=config\.MONTHLY_DAYS,\s*report_kind="monthly"/)
+  assert.match(mainSource, /monthly_data_\{report\.report_date\}\.json/)
 })
 
 test('createRecord preserves monitor feature events for later deep analysis', async () => {
@@ -1031,6 +1161,28 @@ test('framework model receives the complete visible page inventory and strict ou
   }))
   const completeReport = [
     '# 示例产品完整流程框架',
+    '## 结构化节点树',
+    '```text',
+    '示例产品 / 产品框架',
+    '1. 产品矩阵层',
+    '- 示例产品 Web',
+    '2. 顶层导航层',
+    '- 产品 / 解决方案 / 帮助',
+    '3. 创作模式/核心工作台层',
+    '- 创建工具',
+    '4. 核心能力层',
+    '- 模板创建 / 在线编辑',
+    '5. 重点场景层',
+    '- 内容创建',
+    '6. 模板与资产层',
+    '- 模板库',
+    '7. 协作与商业化层',
+    '- 团队协作 / 订阅',
+    '8. 核心任务链路',
+    '- 进入官网 -> 选择工具 -> 编辑 -> 完成',
+    '```',
+    '## Markdown 报告版',
+    '示例产品是一套围绕公开导航、创建工具和模板资产组织的内容创建平台。',
     '## 零、产品定位与分析边界',
     '示例产品面向公开网站访客，分析范围为本次采集到的页面和导航证据。',
     '## 一、产品整体信息架构',
@@ -1109,6 +1261,10 @@ test('framework model receives the complete visible page inventory and strict ou
   assert.match(capturedPrompt, /L1 \| Sitemap 独有页 300 \| https:\/\/example\.com\/sitemap-only-300/)
   assert.match(capturedPrompt, /报告必须包含"完整站点页面清单"章节[\s\S]*全部内容原样复制到报告中，不得省略、合并或只列部分页面/)
   assert.match(capturedPrompt, /不得只列核心页面/)
+  assert.match(capturedPrompt, /结构化节点树/)
+  assert.match(capturedPrompt, /Markdown 报告版/)
+  assert.match(capturedPrompt, /产品矩阵层/)
+  assert.match(capturedPrompt, /核心任务链路/)
   assert.match(capturedPrompt, /主路径/)
   assert.match(capturedPrompt, /分支路径/)
   assert.match(capturedPrompt, /异常路径/)
@@ -1118,10 +1274,130 @@ test('framework model receives the complete visible page inventory and strict ou
   assert.ok(capturedPrompt.length < 120000)
 })
 
+test('framework partial coverage keeps public page evidence usable instead of globally downgrading report', async () => {
+  let capturedPrompt = ''
+  const completeReport = [
+    '# 示例产品完整流程框架',
+    '## 结构化节点树',
+    '```text',
+    '示例产品 / 产品框架',
+    '1. 产品矩阵层',
+    '- 示例产品 Web',
+    '2. 顶层导航层',
+    '- 首页 / 创建',
+    '3. 创作模式/核心工作台层',
+    '- 创建工具',
+    '4. 核心能力层',
+    '- 在线编辑',
+    '5. 重点场景层',
+    '- 内容创建',
+    '6. 模板与资产层',
+    '- 模板库',
+    '7. 协作与商业化层',
+    '- 订阅',
+    '8. 核心任务链路',
+    '- 进入首页 -> 选择创建 -> 编辑 -> 导出',
+    '```',
+    '## Markdown 报告版',
+    '示例产品的公开页面证据可以确认首页和创建入口，未抓取正文的 sitemap 页面单独列为待补采。',
+    '## 零、产品定位与分析边界',
+    '基于公开 URL、页面标题和导航入口还原产品框架。',
+    '## 一、产品整体信息架构',
+    '### 完整站点页面清单',
+    '| 页面 | URL | 层级 | 目的 | 置信度 |\n|---|---|---|---|---|\n| 首页 | https://example.com | L1 | 公开入口 | full |\n| 创建 | https://example.com/create | L1 | 创建入口 | full |',
+    '## 二、用户角色与使用场景',
+    '内容创建者从公开入口进入创建工具。',
+    '## 三、完整用户旅程',
+    '### 主路径',
+    '首页 → 创建 → 编辑 → 导出。',
+    '### 分支路径',
+    '选择模板 → 回到编辑。',
+    '### 异常路径',
+    '导出失败 → 重试。',
+    '## 四、关键决策点',
+    '用户在模板创建和空白创建之间选择。',
+    '## 五、状态与异常',
+    '编辑中 → 导出中 → 成功/失败。',
+    '## 六、跨功能关联',
+    '模板资产进入编辑器复用。',
+    '## 七、可复用 UX 洞察',
+    '公开入口应直达核心创建任务。',
+    '## 八、证据与待补采',
+    '已确认：首页、创建公开 URL；待补采：登录后工作台细节。'
+  ].join('\n\n')
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async (payload = {}) => {
+        capturedPrompt = payload.userPrompt
+        return { content: completeReport }
+      }
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python partial framework result')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '示例产品',
+        product_url: 'https://example.com',
+        evidence_quality: 'partial',
+        evidence_count: 3,
+        page_evidence: [
+          { title: '首页', url: 'https://example.com', content: '公开首页' },
+          { title: '创建', url: 'https://example.com/create', content: '公开创建入口' }
+        ],
+        sitemap_navigation: [
+          { name: '首页', url: 'https://example.com', children: [] },
+          { name: '创建', url: 'https://example.com/create', children: [] },
+          { name: '登录后工作台', url: 'https://example.com/workspace', children: [] }
+        ]
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  await service.run({
+    projectId: 'competitor-analysis-framework-partial-public-evidence',
+    kind: 'framework',
+    productName: '示例产品',
+    productUrl: 'https://example.com'
+  })
+
+  assert.match(capturedPrompt, /公开 URL、页面标题、导航入口、页面清单都是可用于确认产品框架的有效公开证据/)
+  assert.match(capturedPrompt, /不要把报告标题、产品定位、公开页面清单整体标成“证据不足”/)
+  assert.doesNotMatch(capturedPrompt, /evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足\/待补采\/缺失项”/)
+})
+
 test('framework quality gate repairs an incomplete model report once', async () => {
   const prompts = []
   const completeReport = [
     '# 示例产品完整流程框架',
+    '## 结构化节点树',
+    '```text',
+    '示例产品 / 产品框架',
+    '1. 产品矩阵层',
+    '- 示例产品 Web',
+    '2. 顶层导航层',
+    '- 首页',
+    '3. 核心工作台层',
+    '- 创建工具',
+    '4. 核心能力层',
+    '- 模板创建 / 在线编辑',
+    '5. 场景层',
+    '- 内容创建',
+    '6. 模板与资产层',
+    '- 模板库',
+    '7. 协作与商业化层',
+    '- 团队空间',
+    '8. 核心任务链路',
+    '- 发现入口 -> 进入模板 -> 编辑 -> 导出',
+    '```',
+    '## Markdown 报告版',
+    '示例产品是一套面向内容创建的公开产品平台。',
     '## 零、产品定位与分析边界',
     '示例产品定位和本次公开证据分析边界。',
     '## 一、产品整体信息架构',
@@ -1184,7 +1460,13 @@ test('framework quality gate repairs an incomplete model report once', async () 
   assert.equal(prompts.length, 2)
   assert.match(prompts[1], /质量门禁未通过/)
   assert.match(prompts[1], /缺失章节/)
+  assert.match(prompts[1], /结构化节点树/)
+  assert.match(prompts[1], /Markdown 报告版/)
+  assert.match(prompts[1], /产品矩阵层/)
+  assert.match(prompts[1], /核心任务链路/)
   assert.ok(prompts[1].length <= 100000)
+  assert.match(response.markdown, /结构化节点树/)
+  assert.match(response.markdown, /Markdown 报告版/)
   assert.match(response.markdown, /完整页面清单/)
   assert.match(response.markdown, /分支路径/)
   assert.match(response.markdown, /异常路径/)
@@ -1522,6 +1804,66 @@ test('gap analysis uses backend model from source report and persists source met
   assert.equal(listed.records[0].sourceRecordId, 'framework-record-1')
   assert.equal(listed.records[0].sourceKind, 'framework')
   assert.match(listed.records[0].markdown, /OP01/)
+})
+
+test('gap analysis rejects stale source reports even if source content is present', async () => {
+  const projectId = 'competitor-analysis-stale-source-gap-regression'
+  const sourceRecordTime = '2026-07-15T08:00:00.000Z'
+  await mkdir('backend/storage/competitor-analysis', { recursive: true })
+  await writeFile(join('backend/storage/competitor-analysis', `${projectId}.records.json`), JSON.stringify({
+    records: [{
+      id: 'legacy-source-framework-record',
+      projectId,
+      kind: 'framework',
+      title: '完整框架：旧版来源',
+      status: 'succeeded',
+      statusLabel: '已生成',
+      competitorNames: ['旧版竞品'],
+      productName: '旧版竞品',
+      productUrl: 'https://legacy.example.com',
+      summary: '旧版来源报告',
+      markdown: '# 旧版完整框架来源',
+      createdAt: sourceRecordTime,
+      updatedAt: sourceRecordTime
+    }]
+  }, null, 2))
+
+  let providerCalls = 0
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({ enabled: true, provider: 'codex-cli', defaultModel: 'gpt-5.5', timeoutMs: 0 }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async () => {
+        providerCalls += 1
+        return { content: '# 不应该触发机会点分析' }
+      }
+    }),
+    pythonRunner: async () => ({ code: 0, stdout: '', stderr: '' })
+  })
+
+  const created = await service.createRecord({
+    projectId,
+    kind: 'gap',
+    sourceRecordId: 'legacy-source-framework-record',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架：旧版来源',
+    sourceContent: '# 旧版完整框架来源'
+  })
+  const response = await service.run({
+    projectId,
+    recordId: created.record.id,
+    kind: 'gap',
+    sourceRecordId: 'legacy-source-framework-record',
+    sourceKind: 'framework',
+    sourceTitle: '完整框架：旧版来源',
+    sourceContent: '# 旧版完整框架来源'
+  })
+  const listed = await service.listRecords({ projectId })
+
+  assert.equal(providerCalls, 0)
+  assert.equal(response.ok, false)
+  assert.match(response.summary, /已升级|重新分析/)
+  assert.equal(listed.records.find((record) => record.id === created.record.id)?.status, 'failed')
 })
 
 test('gap analysis retrieves current project knowledge before deciding feature parity and chain comparison', async () => {

@@ -1863,6 +1863,7 @@ function htmlReferencePromptSection(reference = {}) {
 
 function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReference = {}) {
   const context = htmlCanvasArtifactContext(node, run)
+  const referenceImages = context.sourceVisualReferenceImages
   const logicalWidth = htmlTargetLogicalWidth(node, run)
   const surfaceLabel = logicalWidth >= 1440 ? 'Web/桌面' : '移动端/H5'
   const layoutItems = context.layoutItems.length ? context.layoutItems : context.fallbackItems
@@ -1880,8 +1881,8 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReferen
     context.componentItems.length ? `UI 组件清单：${context.componentItems.join('；')}` : '',
     context.visualFocus ? `视觉方向：${context.visualFocus}` : '',
     context.visualPrompt ? `上游视觉提示词：${compactPromptText(context.visualPrompt, 1200)}` : '',
-    context.sourceVisualReferenceImages.length
-      ? `上一阶段 UI 视觉图是本次 HTML 生成的主参考：${context.sourceVisualReferenceImages.map((image) => image.sourceUrl || image.title).join('；')}`
+    referenceImages.length
+      ? `上一阶段对应 UI 视觉画布图片是本次 HTML 生成的主参考：${referenceImages.map((image) => image.sourceUrl || image.title).join('；')}`
       : '上一阶段 UI 视觉图：未生成，不能仅凭低保文字自由生成 HTML。'
   ].filter(Boolean).join('\n')
   return {
@@ -1895,12 +1896,15 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReferen
     model: payload.model || run.model || 'gpt-5.5',
     timeoutMs: payload.timeoutMs,
     maxOutputTokens: 12000,
-    sourceVisualReferenceImages: context.sourceVisualReferenceImages,
+    sourceVisualReferenceImages: referenceImages,
+    referenceImages,
+    imageDataUrl: referenceImages[0]?.imageDataUrl || '',
     systemPrompt: [
       '你是资深前端工程师和产品 UI 还原专家。只输出一个可直接运行的单文件 HTML，不要输出 Markdown 解释。',
       '必须遵守传入的 HTML 参考规范 md；如果项目知识库规范和默认规范冲突，优先使用项目知识库规范。',
       '本次生成只写回工作流 HTML 画布节点，不创建网页工程资产、还原资产、restoredPage 或项目素材记录。',
-      '必须优先依据上一阶段已生成 UI 视觉图还原 HTML；交互低保、区域、状态和提示词只作为辅助约束。',
+      '必须先对上一阶段对应 UI 视觉画布图片做视觉取证，提取布局层级、相对位置、间距、字号、控件尺寸、背景、密度、组件状态和视觉层级，再生成 HTML。',
+      '视觉图优先于交互低保文字；低保、区域、状态和提示词只作为语义与交互补充，不得仅按低保文字自由发挥。',
       '必须严格基于上游交互低保、UI视觉说明和状态说明生成；不要编造无关业务页面，不要使用会员中心、余额、积分、优惠券等通用兜底内容，除非上游明确要求。',
       'HTML 必须包含完整 <!doctype html>、<html>、<head>、<body>、CSS 和必要 JS。'
     ].join('\n'),
@@ -1911,6 +1915,9 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReferen
       '',
       '生成约束：',
       `- ${surfaceLabel} 页面按 ${logicalWidth}px 逻辑宽度优先设计。`,
+      '- 先做视觉取证并内化到代码：页面框架、区域比例、组件真实位置、间距、字号、圆角、阴影、背景、图片槽位、按钮/表单/标签/导航状态都要按对应 UI 视觉图还原。',
+      '- 视觉图优先于 ASCII/低保文字；当二者冲突时按视觉图还原，低保文字只补充语义、控件意图和交互状态，不得仅按低保文字自由发挥。',
+      '- 每个 HTML 画布节点只能参考其 sourcePageId/pageId 对应的 UI 视觉画布图片，不要借用其他页面的视觉结构。',
       '- 页面高度按内容自然增长；图片、截图、媒体区域保持比例，使用 width/max-width/aspect-ratio/object-fit，不要拉伸或压扁。',
       '- Web/后台页面需要利用 1920 宽屏空间；移动端/H5 页面需要按 375 宽度组织信息，不要把桌面侧边栏硬塞进移动端。',
       '- 使用语义化结构、真实可点击状态、可读字号、4px 栅格、紧凑控件、清晰 hover/focus/disabled/loading/empty/error 状态。',

@@ -1570,6 +1570,10 @@ def _add_feature_module_if_missing(framework, name: str, url: str = "", purpose:
         level=level,
         purpose=purpose or f"基于爬虫证据识别的产品功能: {clean_name}",
         entry_path=url,
+        structured_data={
+            "confidence": "full" if url else "partial",
+            "data_sources": ["公开页面 URL/导航入口"] if url else ["公开页面文本线索"],
+        },
     ))
 
 

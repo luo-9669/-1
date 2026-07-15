@@ -57,6 +57,9 @@ LOG_DIR: str = os.path.join(OUTPUT_DIR, "logs")
 # 全量监控 - 搜索天数范围
 WEEKLY_DAYS: int = 7
 
+# 月度监控 - 搜索天数范围
+MONTHLY_DAYS: int = 30
+
 # 每日扫描 - 搜索天数范围
 DAILY_DAYS: int = 2
 

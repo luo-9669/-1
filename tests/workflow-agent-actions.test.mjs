@@ -863,6 +863,12 @@ test('workflow canvas suppresses stale node generating state after stage complet
     /const owningStageId = nodeWorkflowStageId\(node\)[\s\S]*if \(owningStageId && stageStatus\(owningStageId\) === 'completed' && isAdvancedUxGeneratingNode\(node\)\) return false/,
     'completed requirement-analysis stages should stop stale advanced-UX placeholders from spinning forever'
   )
+
+  assert.match(
+    loadingSource,
+    /if \(isPreviewCodeDetail\(node\) && codePreviewFiles\(node\)\.length && node\.artifactStatus === 'generating'\) return false/,
+    'HTML/Vue nodes with usable generated source should render their preview instead of being blocked by stale generating status'
+  )
 })
 
 test('requirement dissection stage advance aliases stay compatible but not visible as fixed recommendations', () => {
@@ -2197,6 +2203,9 @@ test('HTML stage generation uses workflow stage job polling without restored pag
   const ensureStart = appVue.indexOf('async function ensureWorkflowHtmlStageGeneration')
   const ensureEnd = appVue.indexOf('function workflowStageConfirmation', ensureStart)
   const htmlStageSource = appVue.slice(ensureStart, ensureEnd)
+  const resumeStart = appVue.indexOf('function resumeWorkflowHtmlStageBackgroundGeneration')
+  const resumeEnd = appVue.indexOf('async function ensureWorkflowHtmlStageGeneration', resumeStart)
+  const resumeSource = appVue.slice(resumeStart, resumeEnd)
   const selectStart = appVue.indexOf('function selectWorkflowStage')
   const selectEnd = appVue.indexOf('function canAdvanceToConfirmedNextStage', selectStart)
   const selectSource = appVue.slice(selectStart, selectEnd)
@@ -2211,13 +2220,18 @@ test('HTML stage generation uses workflow stage job polling without restored pag
   assert.match(htmlStageSource, /scheduleWorkflowHtmlStagePolling\(run\.id\)/)
   assert.match(appVue, /workflowHtmlStagePollTimer[\s\S]*15000/)
   assert.match(appVue, /api\.workspace\.getWorkflowRun\(state\.apiConfig,\s*runId\)/)
+  assert.match(resumeSource, /workflowHtmlStageIsGenerating\(totalFlow\)/)
+  assert.match(resumeSource, /scheduleWorkflowHtmlStagePolling\(run\.id\)/)
+  assert.match(resumeSource, /appendWorkflowHtmlStageAgentMessage\('generating'/)
+  assert.match(appVue, /openWorkflowCanvasRun\(run\)[\s\S]*resumeWorkflowHtmlStageBackgroundGeneration\(finalizedRun/)
+  assert.match(appVue, /function restoreActiveWorkflowCanvasIfAvailable\(\)[\s\S]*resumeWorkflowHtmlStageBackgroundGeneration\(activeRun/)
   assert.match(appVue, /function isManualArtifactStageId\(stageId = ''\)[\s\S]*'ui-visual'[\s\S]*'html-output'[\s\S]*'vue-output'/)
   assert.doesNotMatch(selectSource, /stageId === 'html-output'[\s\S]*ensureWorkflowHtmlStageGeneration\(\)/)
   assert.match(scheduleSource, /if \(isManualArtifactStageId\(stageId\)\) return/)
   assert.equal(
     [...appVue.matchAll(/ensureWorkflowHtmlStageGeneration\(/g)].length,
     1,
-    'HTML stage generation helper should not be invoked automatically by stage selection, scheduling, or run opening'
+    'HTML stage generation helper should not be invoked automatically by stage selection, scheduling, or run opening; refresh only resumes existing backend jobs'
   )
   assert.doesNotMatch(htmlStageSource, /restoredPage|upsertRestoredPageFromBackend|selectedRestoredPageId/)
 })
@@ -2323,6 +2337,18 @@ test('HTML and Vue node generation quick actions use the shared artifact generat
 
   assert.match(
     canvasVue,
+    /function fallbackCodeGenerationAction\(node = \{\}, action = ''\)[\s\S]*targetGenerator[\s\S]*html[\s\S]*vue/,
+    'historical HTML/Vue nodes without generationActions should synthesize a generation action from the regenerate label'
+  )
+
+  assert.match(
+    canvasVue,
+    /function codeQuickGenerationAction\(node = \{\}, action = ''\)[\s\S]*fallbackCodeGenerationAction\(node, label\)/,
+    'clicking 重新生成 HTML/Vue should enter artifact generation even when old nodes only persisted quickActions'
+  )
+
+  assert.match(
+    canvasVue,
     /function runNodeQuickAction\(node = \{\}, action = ''\)[\s\S]*visualQuickGenerationAction\(node, action\)[\s\S]*codeQuickGenerationAction\(node, action\)[\s\S]*emit\('quick-action', \{[\s\S]*generationAction/,
     'node quick actions should emit the same generation payload for visual and code artifacts'
   )
@@ -2349,6 +2375,18 @@ test('HTML and Vue artifact generation appends code result into the same Agent c
     appVue,
     /function isWorkflowRunnableCodeArtifact\(code = '', language = ''\)[\s\S]*Screen Contract[\s\S]*页面契约[\s\S]*asciiWireframe/,
     'generated code source selection should reject upstream screen contracts and ASCII wireframe text'
+  )
+
+  assert.match(
+    appVue,
+    /function hasWorkflowEscapedHtmlVisibleTextNoise\(html = ''\)[\s\S]*<script[\s\S]*literalBreakCount >= 12/,
+    'generated code source selection should reject complete HTML shells that visibly render escaped newline text'
+  )
+
+  assert.match(
+    appVue,
+    /if \(normalizedLanguage === 'html'\)[\s\S]*hasWorkflowEscapedHtmlVisibleTextNoise\(source\)[\s\S]*return false/,
+    'Agent should not append bad historical HTML shells as generated code cards'
   )
 
   assert.match(
@@ -2421,6 +2459,18 @@ test('Agent HTML and Vue recommendation chips enter the shared code generation c
     appVue,
     /function workflowAgentCodeGenerationQuickAction\(content = '', sourceMessage = null\)[\s\S]*isWorkflowAgentCodeGenerationQuickReply\(normalizedContent\)[\s\S]*findWorkflowGenerationTargetNode/,
     'Agent recommendation buttons such as 生成 HTML/Vue should resolve a backend-owned code target node'
+  )
+
+  assert.match(
+    appVue,
+    /function fallbackWorkflowCodeGenerationAction\(targetNode = \{\}, content = ''\)[\s\S]*targetGenerator[\s\S]*html[\s\S]*vue/,
+    'Agent recommendation buttons should synthesize a code generation action for historical HTML/Vue nodes without generationActions'
+  )
+
+  assert.match(
+    appVue,
+    /const generationAction = generationActions\.find[\s\S]*fallbackWorkflowCodeGenerationAction\(targetNode, normalizedContent\)/,
+    'Agent 生成 HTML/Vue quick replies should not silently do nothing when the historical node lacks generationActions'
   )
 
   assert.match(
@@ -2612,6 +2662,66 @@ test('HTML output canvas cards render the generated page while Agent keeps sourc
     cardSource,
     /isPreviewCodeDetail\(node\)[\s\S]*class="preview-code-card-preview"[\s\S]*previewCodeSrcdoc\(node\)[\s\S]*title="HTML 画布渲染预览"[\s\S]*iframe/,
     'HTML/Vue stage canvas cards should render the generated page through the same backend-owned HTML artifact'
+  )
+
+  assert.match(
+    cardSource,
+    /preview-code-card-placeholder[\s\S]*codePreviewEmptySummary\(node,\s*'生成后在这里展示页面效果。'\)/,
+    'HTML canvas card empty state should sanitize previewSummary before display'
+  )
+
+  assert.match(
+    detailSource,
+    /preview-code-result-title[\s\S]*codePreviewEmptySummary\(fullscreenNode,\s*'可检索布局 HTML，不是截图'\)/,
+    'fullscreen HTML title should sanitize previewSummary before display'
+  )
+
+  assert.match(
+    canvasVue,
+    /function codePreviewEmptySummary\(node = \{\}, fallback = '生成后在这里展示页面效果。'\)[\s\S]*if \(!codePreviewFiles\(node\)\.length\) return fallback[\s\S]*previewSummaryLooksPlaceholder/,
+    'HTML empty state should ignore descriptive summaries when the node has no usable generated HTML source'
+  )
+
+  assert.match(
+    canvasVue,
+    /function isCompleteGeneratedHtmlDocument\(value = ''\)[\s\S]*<!doctype\\s\+html[\s\S]*<html\[\\s>\][\s\S]*<\/html>/,
+    'HTML canvas cards should require a complete generated HTML document before rendering instead of showing escaped fragments'
+  )
+
+  assert.match(
+    canvasVue,
+    /function hasEscapedHtmlVisibleTextNoise\(html = ''\)[\s\S]*<script[\s\S]*literalBreakCount >= 12/,
+    'HTML canvas cards should treat complete shells with visible escaped newline text as empty historical bad artifacts'
+  )
+
+  assert.match(
+    canvasVue,
+    /return isCompleteGeneratedHtmlDocument\(normalizedGeneratedCodeContent\(text, normalizedLanguage, node\)\) &&[\s\S]*!hasEscapedHtmlVisibleTextNoise\(text\)/,
+    'HTML preview should reject historical complete HTML that visibly renders literal escaped newlines'
+  )
+
+  assert.doesNotMatch(
+    canvasVue,
+    /node\.stageId === 'html-output'[\s\S]*<\(main\|section\|div\|article/,
+    'HTML stage cards should not treat loose div/main fragments or historical text snippets as generated HTML'
+  )
+
+  assert.match(
+    canvasVue,
+    /function normalizedGeneratedCodeContent\(value = '', language = 'text', node = \{\}\)[\s\S]*looksLikeEscapedGeneratedDocument[\s\S]*replace\([\s\S]*replace\([\s\S]*replace\(/,
+    'HTML preview should decode whole-document escaped newlines and quotes before iframe/source rendering'
+  )
+
+  assert.match(
+    canvasVue,
+    /content:\s*normalizedGeneratedCodeContent\(file\.content,\s*file\.language \|\| preview\.codeLanguage,\s*node\)/,
+    'HTML source files should expose normalized generated code instead of literal escaped newlines'
+  )
+
+  assert.doesNotMatch(
+    cardSource,
+    /codePreview\(node\)\.previewSummary/,
+    'HTML card should not render raw previewSummary because historical runs may contain escaped placeholder text'
   )
 
   assert.match(
@@ -4437,6 +4547,21 @@ test('workflow canvas fullscreen switches page wireframe and page-level interact
     canvasVue,
     /function pageLofiPrototypeBlueprint\(node = \{\}\)[\s\S]*pageLayoutArtifact\(node\)[\s\S]*lofiPageArchetype\(node[\s\S]*lofiBlueprintRegions\([\s\S]*asciiWireframe/,
     'low-fi prototype board should derive page archetype and region positions from pageLayoutArtifact and its ASCII wireframe'
+  )
+  assert.match(
+    canvasVue,
+    /function lofiAsciiRegionPlacements\(asciiWireframe = ''\)[\s\S]*rowIndex[\s\S]*columnIndex[\s\S]*columnCount/,
+    'low-fi prototype should parse ASCII row and column placement so visual regions match the framework diagram'
+  )
+  assert.match(
+    canvasVue,
+    /function lofiRegionMapStyle\(archetype = 'document', regions = \[\]\)[\s\S]*asciiAreas[\s\S]*gridTemplateAreas/,
+    'low-fi prototype grid should use ASCII-derived areas when the framework diagram defines rows and columns'
+  )
+  assert.match(
+    canvasVue,
+    /lofiBlueprintRegions\(node, sections, archetype, artifact\.asciiWireframe\)/,
+    'low-fi prototype region placement should receive the backend ASCII wireframe instead of relying only on frontend role heuristics'
   )
   assert.match(
     canvasVue,

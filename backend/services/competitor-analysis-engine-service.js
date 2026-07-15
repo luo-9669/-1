@@ -12,6 +12,18 @@ const REPORT_STORAGE_DIR = path.join(storageRoot, 'competitor-analysis')
 const SAFE_FAILURE_MESSAGE = '竞品分析暂时无法完成，请检查 Python 依赖或稍后重试。'
 const MODEL_FALLBACK_FAILURE_MESSAGE = '当前后端模型暂时无法生成竞品分析，请检查模型配置后重试。'
 const STALE_RUNNING_RECORD_MS = 15 * 60 * 1000
+const CURRENT_COMPETITOR_ANALYSIS_VERSION = '2026-07-15-competitor-analysis-v3'
+const LEGACY_COMPETITOR_ANALYSIS_VERSION = 'legacy'
+const FRAMEWORK_NODE_TREE_LAYERS = [
+  '产品矩阵层',
+  '顶层导航层',
+  '创作模式/核心工作台层',
+  '核心能力层',
+  '重点场景层',
+  '模板与资产层',
+  '协作与商业化层',
+  '核心任务链路'
+]
 const DEFAULT_FRAMEWORK_PYTHON_ENV = {
   MAX_CRAWL_PAGES: '24',
   MAX_CRAWL_DEPTH: '2',
@@ -21,11 +33,23 @@ const DEFAULT_FRAMEWORK_PYTHON_ENV = {
 }
 
 function normalizeKind(value = '') {
-  return ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(value) ? value : 'daily'
+  return ['daily', 'weekly', 'monthly', 'flow', 'framework', 'gap'].includes(value) ? value : 'daily'
+}
+
+function normalizeAnalysisVersion(value = '') {
+  const text = String(value || '').trim()
+  return text || LEGACY_COMPETITOR_ANALYSIS_VERSION
+}
+
+function staleAnalysisReason(record = {}) {
+  const version = normalizeAnalysisVersion(record.analysisVersion || record.analysis_version)
+  if (version === CURRENT_COMPETITOR_ANALYSIS_VERSION) return ''
+  return '当前竞品分析链路已升级，这条历史记录基于旧版规则生成，不能继续作为有效结果使用，请重新分析。'
 }
 
 function kindLabel(kind = '') {
   if (kind === 'weekly') return '周报生成'
+  if (kind === 'monthly') return '月报生成'
   if (kind === 'flow') return '交互流程'
   if (kind === 'framework') return '完整框架'
   if (kind === 'gap') return '机会点分析'
@@ -238,14 +262,37 @@ function dateInRange(value = '', start = '', end = '') {
   return Boolean(date && start && end && date >= start && date <= end)
 }
 
-function weeklyPeriod(data = {}, currentDateProvider = () => new Date()) {
+function reportPeriod(data = {}, currentDateProvider = () => new Date(), fallbackDays = 7) {
   const end = dateString(data.period_end || data.periodEnd || data.report_date || data.reportDate || currentDateProvider())
   const explicitStart = dateString(data.period_start || data.periodStart)
   if (explicitStart) return { start: explicitStart, end }
   const endDate = new Date(`${end}T00:00:00.000Z`)
   if (Number.isNaN(endDate.getTime())) return { start: '', end }
-  endDate.setUTCDate(endDate.getUTCDate() - 7)
+  endDate.setUTCDate(endDate.getUTCDate() - fallbackDays)
   return { start: endDate.toISOString().slice(0, 10), end }
+}
+
+function periodicReportMeta(kind = '') {
+  const normalizedKind = normalizeKind(kind)
+  return normalizedKind === 'monthly'
+    ? {
+        title: '竞品监控月报',
+        shortName: '月报',
+        periodLabel: '本月',
+        datedLabel: '本月日期',
+        noFindingsTitle: '本月未发现明确的竞品变更',
+        noFindingsText: '未采集到发布日期或发现时间落在本月监控周期内、且可作为变更依据的有效信息。',
+        fallbackDays: 30
+      }
+    : {
+        title: '竞品监控周报',
+        shortName: '周报',
+        periodLabel: '本周',
+        datedLabel: '本周日期',
+        noFindingsTitle: '本周未发现明确的竞品变更',
+        noFindingsText: '未采集到发布日期或发现时间落在本周监控周期内、且可作为变更依据的有效信息。',
+        fallbackDays: 7
+      }
 }
 
 function parseJsonSafe(value = '') {
@@ -515,6 +562,8 @@ function normalizeRecord(record = {}) {
   const kind = normalizeKind(record.kind)
   const createdAt = record.createdAt || new Date().toISOString()
   const updatedAt = record.updatedAt || createdAt
+  const analysisVersion = normalizeAnalysisVersion(record.analysisVersion || record.analysis_version)
+  const staleReason = staleAnalysisReason({ ...record, analysisVersion })
   return {
     id: String(record.id || `competitor-analysis-${randomUUID()}`),
     projectId: String(record.projectId || 'default'),
@@ -541,8 +590,11 @@ function normalizeRecord(record = {}) {
     sourceRecordId: safeText(record.sourceRecordId || record.source_record_id, ''),
     sourceKind: safeText(record.sourceKind || record.source_kind, ''),
     sourceTitle: safeText(record.sourceTitle || record.source_title, ''),
-    failureType: safeText(record.failureType || record.failure_type, ''),
+    failureType: staleReason ? 'stale_version' : safeText(record.failureType || record.failure_type, ''),
     qualityIssues: uniquePlainTextList(record.qualityIssues || record.quality_issues),
+    analysisVersion,
+    isStaleAnalysis: Boolean(staleReason),
+    staleReason,
     durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : 0,
     createdAt,
     updatedAt
@@ -644,6 +696,13 @@ async function latestTempMarkdown() {
   return latest ? readFile(latest.file, 'utf8') : ''
 }
 
+async function sourceRecordForInput(projectId = '', input = {}) {
+  const sourceRecordId = String(input.sourceRecordId || input.source_record_id || '').trim()
+  if (!sourceRecordId) return null
+  const records = await readRecords(projectId || input.projectId || 'default')
+  return records.find((record) => record.id === sourceRecordId) || null
+}
+
 function fallbackMarkdown(input = {}, reason = '') {
   const kind = normalizeKind(input.kind)
   const title = kindLabel(kind)
@@ -663,7 +722,7 @@ function fallbackMarkdown(input = {}, reason = '') {
 
 function requiredInputFailure(input = {}) {
   const kind = normalizeKind(input.kind)
-  if (['daily', 'weekly'].includes(kind) && !selectedCompetitorsForPython(input).length) {
+  if (['daily', 'weekly', 'monthly'].includes(kind) && !selectedCompetitorsForPython(input).length) {
     return '请先选择要分析的竞品，系统不会再使用 Python 内置默认竞品池。'
   }
   if (kind === 'flow') {
@@ -716,7 +775,7 @@ function competitorSearchKeywords(name = '') {
 
 async function writeSelectedCompetitorsConfig(input = {}, outputDir = '') {
   const kind = normalizeKind(input.kind)
-  if (!['daily', 'weekly', 'flow'].includes(kind)) return ''
+  if (!['daily', 'weekly', 'monthly', 'flow'].includes(kind)) return ''
   const competitors = selectedCompetitorsForPython(input)
   if (!competitors.length) return ''
   const configPath = path.join(outputDir, 'selected-competitors.json')
@@ -750,10 +809,15 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
   const analysisAllowed = normalizeOptionalBoolean(input.analysisAllowed ?? input.analysis_allowed)
   const selectedFeature = normalizeSelectedFeature(input.selectedFeature || input.selected_feature)
   const referenceScreenshots = normalizeReferenceScreenshots(input.referenceScreenshots || input.reference_screenshots)
+  const evidenceCount = Number(evidenceCountText)
   const isCompositeFlowEvidence = kind === 'flow' &&
     evidenceQuality === 'partial' &&
     evidenceMode === 'composite' &&
     analysisAllowed === true
+  const isPartialFrameworkPublicEvidence = kind === 'framework' &&
+    evidenceQuality === 'partial' &&
+    Number.isFinite(evidenceCount) &&
+    evidenceCount > 0
   const lines = [
     `分析类型：${kindLabel(kind)}`,
     `竞品名称：${subject}`,
@@ -776,8 +840,12 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     '- evidenceQuality=none 时不应生成结论；只能说明未找到证据和待补采动作。',
     isCompositeFlowEvidence
       ? '- evidenceQuality=partial 且 evidenceMode=composite、analysisAllowed=true 时，按高置信组合证据继续输出可分析流程；只在证据校验、关键推断和待补采清单中标注“组合证据/直接官方声明待补采”，不要把整份报告降级成仅待补采报告。'
-      : '- evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足/待补采/缺失项”。',
-    '- evidenceQuality=full 时才允许输出完整分析结论。',
+      : isPartialFrameworkPublicEvidence
+        ? '- evidenceQuality=partial 对完整框架只表示覆盖范围有缺口；公开 URL、页面标题、导航入口、页面清单都是可用于确认产品框架的有效公开证据。不要把报告标题、产品定位、公开页面清单整体标成“证据不足”，只把未抓正文、登录后、无 URL、无页面证据支撑的部分标为“待补采”。'
+        : '- evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足/待补采/缺失项”。',
+    isPartialFrameworkPublicEvidence
+      ? '- 完整框架在 partial 覆盖下仍应输出“公开已确认框架 + 待补采缺口”：已抓到的页面、导航和 sitemap URL 可标 full/公开确认；仅推断链路、登录后细节、未抓正文页面标 partial/inferred/待补采。'
+      : '- evidenceQuality=full 时才允许输出完整分析结论。',
     '- 每个关键结论后写明依据，例如“依据：页面标题/导航/搜索结果/JSON 字段”。',
     '- 截图参考只用于理解目标入口、视觉位置和用户想验证的功能；不能单独作为竞品事实结论。',
     '- 结论仍需按公开证据分级：确认存在 / 相似存在 / 能力存在但入口不明确 / 未找到证据。',
@@ -792,8 +860,10 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     lines.push('- 每个信号需标注：id（SIG01格式）、type、title、description、evidence_urls、confidence（high/medium/low）、impact_assessment（user_impact/competitive_threat/opportunity）、tags、action_needed（monitor/deep_dive/respond）、raw_date。')
     lines.push('- 需输出 market_sentiment（整体市场情绪）和 data_gaps（信息缺口）。')
     lines.push('- 证据不足的信号 confidence 标注为 low，action_needed 建议为 deep_dive。')
-  } else if (kind === 'weekly') {
-    lines.push('- 周报需要包含本周重点、变化分类、影响判断、建议动作。')
+  } else if (['weekly', 'monthly'].includes(kind)) {
+    const periodLabel = kind === 'monthly' ? '月报' : '周报'
+    const periodScope = kind === 'monthly' ? '本月' : '本周'
+    lines.push(`- ${periodLabel}需要包含${periodScope}重点、变化分类、影响判断、建议动作。`)
     lines.push('- 每条变更需标注：id（CHG01格式）、category（feature_launch/ui_redesign/pricing/content/performance/bugfix/market）、confidence、trend_signal（accelerating/stable/declining/new_pattern）。')
     lines.push('- 需识别跨条目的趋势模式（trend_patterns），每个模式包含 pattern、description、related_changes、trajectory、strategic_implication。')
     lines.push('- 需输出三维评分（scores）：activity_score（竞品活跃度1-10）、threat_score（竞争威胁度1-10）、opportunity_score（机会窗口度1-10）及 rationale。')
@@ -810,6 +880,8 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     lines.push('- 缺失信息单独列出"待补采清单"')
   } else if (kind === 'framework') {
     lines.push('- 完整框架必须覆盖以下结构，不得只列核心页面或几个示例页面：')
+    lines.push('  0. 结构化节点树：用 text 代码块输出可直接复制进产品知识库的节点树，必须覆盖产品矩阵层、顶层导航层、创作模式/核心工作台层、核心能力层、重点场景层、模板与资产层、协作与商业化层、核心任务链路；证据不足的层写“待补采”，不要编造。')
+    lines.push('  0.1 Markdown 报告版：在节点树后输出可直接阅读的竞品分析报告，解释这些层级如何组成产品框架，并区分“公开确认”和“结构化归纳”。')
     lines.push('  1. 产品定位与分析边界：产品定位、目标用户、核心价值、公开证据覆盖范围。')
     lines.push('  2. 产品整体信息架构：顶层导航、功能模块划分、完整站点页面清单/站点地图、页面层级树。')
     lines.push('- 【强制要求】报告必须包含"完整站点页面清单"章节，将证据中"完整站点页面清单（报告必须原样包含以下清单，不得省略）"标记下的全部内容原样复制到报告中，不得省略、合并或只列部分页面。此章节是站点地图，不是摘要。')
@@ -827,6 +899,8 @@ function buildBackendModelReportPrompt(input = {}, pythonFailure = '') {
     lines.push('- 状态流转增加 transition_id（TR01格式）、state_machine_id（SM01格式，同一实体归为同一状态机）、confidence、reversible。')
     lines.push('- 跨功能关联增加 link_id（LNK01格式）、link_strength（strong/medium/weak）、user_visibility（用户可见/系统内部）、data_shared（共享字段列表）。')
     lines.push('- 输出 reusable_insights（可复用UX洞察列表）和 data_gaps（所有步骤的信息缺口汇总）。')
+    lines.push(`- 节点树必须至少包含这些层级名称：${FRAMEWORK_NODE_TREE_LAYERS.join('、')}。`)
+    lines.push('- 报告写法要像“公开产品框架还原”，不是只写 UX 流程深描；优先归纳产品矩阵、导航、工作台、场景、模板资产、协作、商业化和任务链路。')
   } else if (kind === 'gap') {
     lines.push('- 机会点分析报告需要包含以下结构化章节：')
     lines.push('  1. 差距矩阵（gap_matrix）：我方产品 vs 竞品的功能差距，表格形式')
@@ -1109,7 +1183,7 @@ function featureNameFromChange(change = {}) {
 
 function extractFeatureEventsFromAnalysisData(kind = '', data = {}, input = {}, options = {}) {
   const normalizedKind = normalizeKind(kind)
-  if (!['daily', 'weekly'].includes(normalizedKind)) return []
+  if (!['daily', 'weekly', 'monthly'].includes(normalizedKind)) return []
   const events = []
   if (normalizedKind === 'daily') {
     const today = todayString(options.currentDateProvider)
@@ -1138,8 +1212,9 @@ function extractFeatureEventsFromAnalysisData(kind = '', data = {}, input = {}, 
       }
     }
   }
-  if (normalizedKind === 'weekly') {
-    const period = weeklyPeriod(data, options.currentDateProvider)
+  if (['weekly', 'monthly'].includes(normalizedKind)) {
+    const meta = periodicReportMeta(normalizedKind)
+    const period = reportPeriod(data, options.currentDateProvider, meta.fallbackDays)
     const changes = Array.isArray(data.changes) ? data.changes : []
     for (const change of changes) {
       const item = normalizePlainObject(change)
@@ -1161,8 +1236,9 @@ function extractFeatureEventsFromAnalysisData(kind = '', data = {}, input = {}, 
   })
 }
 
-function weeklyChangesInPeriod(data = {}, currentDateProvider = () => new Date()) {
-  const period = weeklyPeriod(data, currentDateProvider)
+function periodicChangesInPeriod(data = {}, currentDateProvider = () => new Date(), kind = 'weekly') {
+  const meta = periodicReportMeta(kind)
+  const period = reportPeriod(data, currentDateProvider, meta.fallbackDays)
   return (Array.isArray(data.changes) ? data.changes : [])
     .map(normalizePlainObject)
     .filter((change) => dateInRange(
@@ -1224,50 +1300,222 @@ function buildDailyFeatureEventsMarkdown(events = [], input = {}, today = '') {
   return lines.join('\n').trim()
 }
 
-function buildWeeklyNoFindingsMarkdown(input = {}, data = {}, currentDateProvider = () => new Date()) {
-  const period = weeklyPeriod(data, currentDateProvider)
+function markdownTableCell(value = '') {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\|/g, '／')
+    .trim() || '-'
+}
+
+function truncateMarkdownCell(value = '', maxLength = 96) {
+  const text = markdownTableCell(value)
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text
+}
+
+function candidateFeatureThemes(entry = {}) {
+  const text = `${entry.title || ''} ${entry.snippet || ''}`.toLowerCase()
+  const themes = []
+  const push = (label, pattern) => {
+    if (pattern.test(text) && !themes.includes(label)) themes.push(label)
+  }
+  push('AI 设计', /ai\s*设计|ai设计|ai\s*创作|ai创作|design model|creative/)
+  push('智能编辑', /智能编辑|编辑器|edit|editor|upscale|抠图|生成图片|图片生成/)
+  push('视频创作', /视频|video|avatar|数字人|podcast|录制|直播/)
+  push('协作交付', /协作|团队|交付|workflow|工作流|newsletter|分发/)
+  push('模板素材', /模板|素材|海报|ppt|logo|电商主图|版权/)
+  push('打印服务', /打印|印刷|print/)
+  push('价格订阅', /价格|定价|pricing|subscribe|订阅/)
+  push('集成自动化', /mcp|api|cli|adobe|集成|自动化/)
+  push('教程评测', /教程|指南|how to|review|评测|使用方法/)
+  return themes.slice(0, 3)
+}
+
+function candidateThemeText(entries = []) {
+  const themes = []
+  for (const entry of entries) {
+    for (const theme of candidateFeatureThemes(entry)) {
+      if (!themes.includes(theme)) themes.push(theme)
+    }
+  }
+  return themes.slice(0, 4).join('、') || '产品介绍/教程/评测'
+}
+
+function candidateMentionedFeatures(entry = {}) {
+  const text = `${entry.title || ''} ${entry.snippet || ''}`.toLowerCase()
+  const features = []
+  const push = (label, pattern) => {
+    if (pattern.test(text) && !features.includes(label)) features.push(label)
+  }
+  push('AI 设计模型', /ai\s*设计模型|ai设计模型|design model/)
+  push('AI 创作能力', /ai\s*创作|ai创作|创意生成|creative/)
+  push('智能编辑器', /智能编辑器|智能编辑|编辑器|editor|edit/)
+  push('图片生成/处理', /生成图片|图片生成|抠图|upscale|扩图|修图/)
+  push('视频生成/数字人', /视频|video|avatar|数字人|录制|直播/)
+  push('团队协作/协作交付', /团队协作|协作|团队|交付|workflow|工作流/)
+  push('模板/素材应用', /模板|素材|海报|ppt|logo|电商主图/)
+  push('打印/印刷服务', /打印|印刷|print/)
+  push('价格/订阅体系', /价格|定价|pricing|subscribe|订阅/)
+  push('API/自动化集成', /api|mcp|cli|adobe|集成|自动化/)
+  const deduped = features.filter((feature) => !(feature === 'AI 创作能力' && features.includes('AI 设计模型')))
+  return deduped.slice(0, 4)
+}
+
+function candidateFeatureInterpretation(entries = []) {
+  const features = []
+  for (const entry of entries) {
+    for (const feature of candidateMentionedFeatures(entry)) {
+      if (!features.includes(feature)) features.push(feature)
+    }
+  }
+  return features.slice(0, 5).join('、') || '候选仅能看出产品介绍/教程/评测，未能粗读到明确功能点'
+}
+
+function candidateJourneySteps(entry = {}) {
+  const text = `${entry.title || ''} ${entry.snippet || ''}`.toLowerCase()
+  const steps = []
+  const push = (label, pattern) => {
+    if (pattern.test(text) && !steps.includes(label)) steps.push(label)
+  }
+  push('需求/素材输入', /素材|上传|导入|input|brief/)
+  push('创意生成', /ai\s*设计|ai设计|ai\s*创作|ai创作|创意生成|生成/)
+  push('智能编辑', /智能编辑|编辑器|editor|edit|修图|抠图|扩图/)
+  push('模板/场景套用', /模板|海报|ppt|logo|电商主图/)
+  push('视频/数字人生产', /视频|video|avatar|数字人/)
+  push('团队协作', /团队协作|协作|团队|workflow|工作流/)
+  push('场景交付', /交付|全场景应用|导出|发布|分发|打印|印刷/)
+  push('商业化转化', /价格|定价|pricing|subscribe|订阅/)
+  return steps.slice(0, 5)
+}
+
+function candidateJourneyText(entries = []) {
+  const steps = []
+  for (const entry of entries) {
+    for (const step of candidateJourneySteps(entry)) {
+      if (!steps.includes(step)) steps.push(step)
+    }
+  }
+  return steps.slice(0, 6).join(' -> ') || '入口/内容页 -> 功能了解 -> 人工确认'
+}
+
+function candidateSourceLabel(entry = {}) {
+  const url = String(entry.url || '').trim()
+  if (!url) return '未知来源'
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '')
+    return host
+  } catch {
+    return '公开链接'
+  }
+}
+
+function diagnosticConclusion(item = {}) {
+  if (item.datedCandidates > 0) return '可进入变更识别'
+  if (item.totalCandidates > 0) return '候选待确认'
+  return '暂无候选'
+}
+
+function diagnosticAction(item = {}) {
+  if (item.datedCandidates > 0) return '优先核对官方详情'
+  if (item.totalCandidates > 0) return '补采官方公告或可用发布日期'
+  return '补充官网/公告源后重试'
+}
+
+function buildCandidateInsightTables(diagnostics = [], kind = 'weekly') {
+  if (!diagnostics.length) return []
+  const meta = periodicReportMeta(kind)
+  const lines = [
+    '## 候选粗读总览',
+    '',
+    `| 竞品 | 候选数 | 可确认${meta.periodLabel}更新 | 疑似功能主题 | 疑似功能解读 | 粗略链路框架 | 粗读结论 | 建议动作 |`,
+    '|---|---:|---:|---|---|---|---|---|'
+  ]
+  for (const item of diagnostics.slice(0, 8)) {
+    const entries = item.sampleEntries || []
+    lines.push([
+      markdownTableCell(item.competitor),
+      String(item.totalCandidates),
+      String(item.datedCandidates),
+      markdownTableCell(candidateThemeText(entries)),
+      markdownTableCell(candidateFeatureInterpretation(entries)),
+      markdownTableCell(candidateJourneyText(entries)),
+      diagnosticConclusion(item),
+      diagnosticAction(item)
+    ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'))
+  }
+  lines.push(
+    '',
+    '## 候选明细表',
+    '',
+    '| 竞品 | 候选标题 | 疑似功能主题 | 候选提到的功能 | 粗略链路位置 | 日期 | 来源 | 摘要 |',
+    '|---|---|---|---|---|---|---|---|'
+  )
+  for (const item of diagnostics.slice(0, 8)) {
+    for (const entry of (item.sampleEntries || []).slice(0, kind === 'monthly' ? 12 : 8)) {
+      const themes = candidateFeatureThemes(entry).join('、') || '待人工判断'
+      const features = candidateMentionedFeatures(entry).join('、') || '未能从摘要判断'
+      const journey = candidateJourneySteps(entry).join(' -> ') || '待人工确认'
+      const title = entry.url
+        ? `[${truncateMarkdownCell(entry.title || entry.url, 48)}](${entry.url})`
+        : truncateMarkdownCell(entry.title || '未命名候选', 48)
+      lines.push([
+        markdownTableCell(item.competitor),
+        title,
+        markdownTableCell(themes),
+        markdownTableCell(features),
+        markdownTableCell(journey),
+        markdownTableCell(entry.publishedDate || '未提供'),
+        markdownTableCell(candidateSourceLabel(entry)),
+        truncateMarkdownCell(entry.snippet || '无摘要', 120)
+      ].join(' | ').replace(/^/, '| ').replace(/$/, ' |'))
+    }
+  }
+  return lines
+}
+
+function buildPeriodicNoFindingsMarkdown(input = {}, data = {}, currentDateProvider = () => new Date(), kind = 'weekly') {
+  const meta = periodicReportMeta(kind)
+  const period = reportPeriod(data, currentDateProvider, meta.fallbackDays)
   const competitors = normalizeNameList(input.competitorNames || input.competitor || input.productName)
   const diagnostics = weeklySearchDiagnostics(data)
   const lines = [
-    '# 竞品监控周报',
+    `# ${meta.title}`,
     '',
     `> 报告日期：${period.end || dateString(currentDateProvider())}`,
     `> 监控周期：${period.start || '未确认'} ~ ${period.end || '未确认'}`,
     '',
-    '## 本周概览',
+    `## ${meta.periodLabel}概览`,
     '',
     '- 共监控到 **0** 条周期内明确变更',
     `- 监控竞品 **${competitors.length || 0}** 个`,
     '',
-    '## 本周未发现明确的竞品变更',
+    `## ${meta.noFindingsTitle}`,
     '',
-    '未采集到发布日期或发现时间落在本周监控周期内、且可作为变更依据的有效信息。',
+    meta.noFindingsText,
     ''
   ]
   if (diagnostics.length) {
     lines.push('## 检索识别状态', '')
+    lines.push(`| 竞品 | 候选数 | 带${meta.datedLabel}候选 | 识别状态 |`, '|---|---:|---:|---|')
     for (const item of diagnostics.slice(0, 8)) {
-      lines.push(`- ${item.competitor}：检索到 ${item.totalCandidates} 条候选，${item.datedCandidates} 条带本周日期。${item.reason}`)
-      for (const entry of item.sampleEntries.slice(0, 2)) {
-        const title = entry.title || entry.url || '未命名候选'
-        const url = entry.url ? `（${entry.url}）` : ''
-        lines.push(`  - 候选：${title}${url}`)
-      }
+      const reason = kind === 'monthly' ? item.reason.replace(/本周/g, '本月') : item.reason
+      lines.push(`| ${markdownTableCell(item.competitor)} | ${item.totalCandidates} | ${item.datedCandidates} | ${markdownTableCell(reason)} |`)
     }
     lines.push('')
+    lines.push(...buildCandidateInsightTables(diagnostics, kind), '')
   }
   lines.push(
     '## 说明',
     '',
-    '- 周报只展示监控周期内的明确证据；历史页面、无日期搜索结果和第三方泛化介绍不会作为本周变更展示。',
+    `- ${meta.shortName}只展示监控周期内的明确证据；历史页面、无日期搜索结果和第三方泛化介绍不会作为${meta.periodLabel}变更展示。`,
     '- 如果需要继续确认，可补充官方 changelog、产品公告或截图证据后重新分析。'
   )
   return lines.join('\n')
 }
 
-function buildWeeklyChangesMarkdown(changes = [], input = {}, data = {}, currentDateProvider = () => new Date()) {
-  if (!changes.length) return buildWeeklyNoFindingsMarkdown(input, data, currentDateProvider)
-  const period = weeklyPeriod(data, currentDateProvider)
+function buildPeriodicChangesMarkdown(changes = [], input = {}, data = {}, currentDateProvider = () => new Date(), kind = 'weekly') {
+  if (!changes.length) return buildPeriodicNoFindingsMarkdown(input, data, currentDateProvider, kind)
+  const meta = periodicReportMeta(kind)
+  const period = reportPeriod(data, currentDateProvider, meta.fallbackDays)
   const grouped = new Map()
   for (const change of changes) {
     const key = change.competitor || change.competitorName || '未命名竞品'
@@ -1275,12 +1523,12 @@ function buildWeeklyChangesMarkdown(changes = [], input = {}, data = {}, current
     grouped.get(key).push(change)
   }
   const lines = [
-    '# 竞品监控周报',
+    `# ${meta.title}`,
     '',
     `> 报告日期：${period.end || dateString(currentDateProvider())}`,
     `> 监控周期：${period.start || '未确认'} ~ ${period.end || '未确认'}`,
     '',
-    '## 本周概览',
+    `## ${meta.periodLabel}概览`,
     '',
     `- 共监控到 **${changes.length}** 条周期内明确变更`,
     `- 涉及 **${grouped.size}** 个竞品`,
@@ -1598,6 +1846,8 @@ function partialEvidenceMarkdownIsSafe(markdown = '') {
 }
 
 const FRAMEWORK_REPORT_SECTION_RULES = [
+  ['结构化节点树', /结构化节点树|节点树|产品框架树/],
+  ['Markdown 报告版', /Markdown\s*报告版|报告版|产品框架还原/i],
   ['产品定位与分析边界', /产品定位|分析边界/],
   ['产品整体信息架构', /产品整体信息架构|信息架构/],
   ['完整页面清单或站点地图', /完整页面清单|完整站点页面清单|站点地图|页面层级关系/],
@@ -1611,6 +1861,17 @@ const FRAMEWORK_REPORT_SECTION_RULES = [
   ['跨功能关联', /跨功能关联|功能关联|数据共享/],
   ['可复用 UX 洞察', /可复用\s*UX\s*洞察|可复用启发|reusable_insights/i],
   ['证据与待补采', /待补采|信息缺口|data_gaps|证据来源/i]
+]
+
+const FRAMEWORK_NODE_TREE_PATTERN_RULES = [
+  ['产品矩阵层', /产品矩阵层|产品矩阵/],
+  ['顶层导航层', /顶层导航层|顶层导航/],
+  ['创作模式/核心工作台层', /创作模式|核心工作台层|工作台层/],
+  ['核心能力层', /核心能力层|主能力入口层|能力中台/],
+  ['重点场景层', /重点场景层|场景层|行业场景/],
+  ['模板与资产层', /模板与资产层|模板资产层|素材版权层/],
+  ['协作与商业化层', /协作与商业化层|协作层|商业化层/],
+  ['核心任务链路', /核心任务链路|典型任务链路|主链路/]
 ]
 
 function markdownHeadingSections(markdown = '') {
@@ -1643,9 +1904,12 @@ function frameworkReportQualityIssues(markdown = '', options = {}) {
   const issues = FRAMEWORK_REPORT_SECTION_RULES
     .filter(([, pattern]) => !sections.some((section) => pattern.test(section.title) && section.substantiveLength >= 8))
     .map(([label]) => `缺失或内容为空：${label}`)
+  const text = String(markdown || '')
+  for (const [label, pattern] of FRAMEWORK_NODE_TREE_PATTERN_RULES) {
+    if (!pattern.test(text)) issues.push(`结构化节点树缺失层级：${label}`)
+  }
   const expectedPageUrls = uniquePlainTextList(options.expectedPageUrls || [])
   if (expectedPageUrls.length) {
-    const text = String(markdown || '')
     const covered = expectedPageUrls.filter((url) => text.includes(url))
     if (covered.length !== expectedPageUrls.length) {
       issues.push(`页面清单覆盖不足：${covered.length}/${expectedPageUrls.length}`)
@@ -1689,6 +1953,8 @@ function buildFrameworkRepairPrompt(originalPrompt = '', markdown = '', missingS
     '上一版报告质量门禁未通过，请基于同一批证据重新输出完整 Markdown 正文。',
     `缺失章节：${missingSections.join('、')}`,
     '- 必须补齐所有缺失章节并保持章节结构完整，不要只输出补丁或解释。',
+    '- 必须先输出“## 结构化节点树”，用 text 代码块列出产品矩阵层、顶层导航层、创作模式/核心工作台层、核心能力层、重点场景层、模板与资产层、协作与商业化层、核心任务链路。',
+    '- 然后输出“## Markdown 报告版”，用自然语言解释产品框架、能力结构、场景组织和商业化/协作逻辑。',
     '- 页面清单必须覆盖证据中全部可见页面/栏目；不确定项进入待补采，不得编造。',
     '- 每个核心功能旅程必须分别标明主路径、分支路径、异常路径。',
     '',
@@ -1967,6 +2233,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         sourceRecordId: input.sourceRecordId || input.source_record_id || '',
         sourceKind: input.sourceKind || input.source_kind || '',
         sourceTitle: input.sourceTitle || input.source_title || '',
+        analysisVersion: CURRENT_COMPETITOR_ANALYSIS_VERSION,
         createdAt: nowText,
         updatedAt: nowText
       })
@@ -2059,6 +2326,40 @@ export function createCompetitorAnalysisEngineService(options = {}) {
 
       // 机会点分析：不走Python脚本，纯LLM分析
       if (kind === 'gap') {
+        const sourceRecord = await sourceRecordForInput(projectId, input)
+        const staleSourceReason = sourceRecord?.isStaleAnalysis
+          ? sourceRecord.staleReason || staleAnalysisReason(sourceRecord)
+          : ''
+        if (staleSourceReason) {
+          const response = {
+            ok: false,
+            title: `${kindLabel(kind)}结果`,
+            kind,
+            statusLabel: '记录已过期',
+            summary: staleSourceReason,
+            markdown: fallbackMarkdown(input, staleSourceReason),
+            interactionArtifacts: undefined,
+            featureEvents: [],
+            jsonAvailable: false,
+            durationMs: Date.now() - startedAt
+          }
+          if (recordId) {
+            await patchRecord(projectId, recordId, {
+              status: 'failed',
+              statusLabel: response.statusLabel,
+              title: response.title || analysisRecordTitle(input),
+              summary: response.summary,
+              markdown: response.markdown,
+              durationMs: response.durationMs,
+              selectedFeature: input.selectedFeature || input.selected_feature,
+              referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
+              sourceRecordId: input.sourceRecordId || '',
+              sourceKind: input.sourceKind || '',
+              sourceTitle: input.sourceTitle || ''
+            })
+          }
+          return response
+        }
         let projectKnowledge = []
         if (projectKnowledgeProvider) {
           try {
@@ -2133,7 +2434,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
             sourceRecordId: input.sourceRecordId || '',
             sourceKind: input.sourceKind || '',
-            sourceTitle: input.sourceTitle || ''
+            sourceTitle: input.sourceTitle || '',
+            analysisVersion: CURRENT_COMPETITOR_ANALYSIS_VERSION
           })
         } else if (response.markdown) {
           await upsertRecord(projectId, {
@@ -2158,6 +2460,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
             sourceRecordId: input.sourceRecordId || '',
             sourceKind: input.sourceKind || '',
             sourceTitle: input.sourceTitle || '',
+            analysisVersion: CURRENT_COMPETITOR_ANALYSIS_VERSION,
             createdAt: new Date().toISOString()
           })
         }
@@ -2245,8 +2548,8 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           ? (featureEvents.length
             ? buildDailyFeatureEventsMarkdown(featureEvents, input, todayString(currentDateProvider))
             : buildDailyNoFindingsMarkdown(input, todayString(currentDateProvider)))
-        : kind === 'weekly'
-          ? buildWeeklyChangesMarkdown(weeklyChangesInPeriod(analysisData, currentDateProvider), input, analysisData, currentDateProvider)
+        : ['weekly', 'monthly'].includes(kind)
+          ? buildPeriodicChangesMarkdown(periodicChangesInPeriod(analysisData, currentDateProvider, kind), input, analysisData, currentDateProvider, kind)
         : scriptOk
           ? sanitizeCompetitorAnalysisMarkdown(markdown, '报告内容已生成，但包含暂不展示的内部信息。')
           : sanitizeCompetitorAnalysisMarkdown('', '')
@@ -2290,6 +2593,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           monitorEvidence: input.monitorEvidence || input.monitor_evidence,
           selectedFeature: input.selectedFeature || input.selected_feature,
           referenceScreenshots: input.referenceScreenshots || input.reference_screenshots,
+          analysisVersion: CURRENT_COMPETITOR_ANALYSIS_VERSION,
           durationMs: response.durationMs
         })
       } else if (response.markdown) {
@@ -2317,6 +2621,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
           qualityIssues: response.qualityIssues,
           sourceFeatureEvent: input.sourceFeatureEvent || input.source_feature_event,
           monitorEvidence: input.monitorEvidence || input.monitor_evidence,
+          analysisVersion: CURRENT_COMPETITOR_ANALYSIS_VERSION,
           durationMs: response.durationMs,
           createdAt: new Date().toISOString()
         })

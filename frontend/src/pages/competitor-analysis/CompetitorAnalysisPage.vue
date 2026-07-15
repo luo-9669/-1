@@ -116,8 +116,8 @@
             <td>{{ recordCompetitorNames(record) }}</td>
             <td>{{ recordFeatureLabel(record) }}</td>
             <td>
-              <BaseTag :variant="statusVariant(record.status)">
-                {{ record.statusLabel || statusLabel(record.status) }}
+              <BaseTag :variant="recordStatusVariant(record)">
+                {{ recordStatusLabel(record) }}
               </BaseTag>
             </td>
             <td>{{ formatTime(record.createdAt) }}</td>
@@ -285,7 +285,12 @@
                   </thead>
                   <tbody>
                     <tr v-for="(row, rowIndex) in block.rows" :key="rowIndex">
-                      <td v-for="(cell, cellIndex) in row" :key="`${rowIndex}-${cellIndex}`">{{ cell }}</td>
+                      <td v-for="(cell, cellIndex) in row" :key="`${rowIndex}-${cellIndex}`">
+                        <template v-for="(part, partIndex) in markdownInlineParts(cell)" :key="`${rowIndex}-${cellIndex}-${partIndex}`">
+                          <a v-if="part.type === 'link'" class="competitor-analysis-md-link" :href="part.url" target="_blank" rel="noopener noreferrer">{{ part.text }}</a>
+                          <span v-else>{{ part.text }}</span>
+                        </template>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -350,10 +355,67 @@
           <header class="competitor-analysis-framework-explorer-header">
             <div>
               <h4>结构化清单</h4>
-              <p>已将完整框架报告整理为可筛选阅读的清单；长链接收起为“查看链接”，完整字段可展开查看。</p>
+              <p>先看节点树和报告版总览，再用清单核对页面、模块和链路证据。</p>
             </div>
             <span>{{ selectedFrameworkRows.length }} 条</span>
           </header>
+          <section class="competitor-analysis-framework-dashboard" aria-label="框架可视化总览">
+            <article class="competitor-analysis-framework-dashboard-card competitor-analysis-framework-coverage">
+              <h5>框架可视化总览</h5>
+              <p>{{ selectedFrameworkDashboard.coverageSummary }}</p>
+              <div class="competitor-analysis-framework-coverage-grid">
+                <span v-for="item in selectedFrameworkDashboard.coverageCards" :key="item.label">
+                  <strong>{{ item.value }}</strong>
+                  {{ item.label }}
+                </span>
+              </div>
+            </article>
+            <article class="competitor-analysis-framework-dashboard-card competitor-analysis-framework-map">
+              <h5>链路总览图</h5>
+              <ol>
+                <li v-for="step in selectedFrameworkDashboard.overviewSteps" :key="step.key">
+                  <strong>{{ step.title }}</strong>
+                  <span>{{ step.detail }}</span>
+                </li>
+              </ol>
+            </article>
+            <article class="competitor-analysis-framework-dashboard-card competitor-analysis-framework-tree">
+              <h5>结构树</h5>
+              <ul>
+                <li v-for="layer in selectedFrameworkDashboard.layers" :key="layer.name">
+                  <strong>{{ layer.name }}</strong>
+                  <span>{{ layer.items.join(' / ') }}</span>
+                </li>
+              </ul>
+            </article>
+            <article class="competitor-analysis-framework-dashboard-card competitor-analysis-framework-wireframes">
+              <h5>低保线框图</h5>
+              <div class="competitor-analysis-framework-wireframe-grid">
+                <figure v-for="wireframe in selectedFrameworkDashboard.wireframes" :key="wireframe.title">
+                  <figcaption>{{ wireframe.title }}</figcaption>
+                  <div class="competitor-analysis-framework-wireframe-box" aria-hidden="true">
+                    <span v-for="zone in wireframe.zones" :key="zone">{{ zone }}</span>
+                  </div>
+                </figure>
+              </div>
+            </article>
+          </section>
+          <section v-if="selectedFrameworkOverviewBlocks.length" class="competitor-analysis-framework-overview competitor-analysis-markdown" aria-label="完整框架总览">
+            <template v-for="(block, index) in selectedFrameworkOverviewBlocks" :key="markdownBlockKey(block, index)">
+              <h1 v-if="block.type === 'heading' && block.level === 1">{{ block.text }}</h1>
+              <h2 v-else-if="block.type === 'heading' && block.level === 2">{{ block.text }}</h2>
+              <h3 v-else-if="block.type === 'heading'">{{ block.text }}</h3>
+              <ul v-else-if="block.type === 'list' && !block.ordered">
+                <li v-for="item in block.items" :key="item">{{ item }}</li>
+              </ul>
+              <ol v-else-if="block.type === 'list'">
+                <li v-for="item in block.items" :key="item">{{ item }}</li>
+              </ol>
+              <blockquote v-else-if="block.type === 'quote'">{{ block.text }}</blockquote>
+              <pre v-else-if="block.type === 'code'" class="competitor-analysis-md-code"><code>{{ block.text }}</code></pre>
+              <p v-else>{{ block.text }}</p>
+            </template>
+          </section>
           <BaseDataTable class="competitor-analysis-framework-table" table-class="competitor-analysis-table" min-width="1080px">
             <thead>
               <tr>
@@ -489,7 +551,12 @@
               </thead>
               <tbody>
                 <tr v-for="(row, rowIndex) in block.rows" :key="rowIndex">
-                  <td v-for="(cell, cellIndex) in row" :key="`${rowIndex}-${cellIndex}`">{{ cell }}</td>
+                  <td v-for="(cell, cellIndex) in row" :key="`${rowIndex}-${cellIndex}`">
+                    <template v-for="(part, partIndex) in markdownInlineParts(cell)" :key="`${rowIndex}-${cellIndex}-${partIndex}`">
+                      <a v-if="part.type === 'link'" class="competitor-analysis-md-link" :href="part.url" target="_blank" rel="noopener noreferrer">{{ part.text }}</a>
+                      <span v-else>{{ part.text }}</span>
+                    </template>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -505,8 +572,8 @@
         </section>
       </section>
         <footer class="competitor-analysis-detail-actions">
-          <BaseButton type="button" :disabled="!selectedReportCopyText" @click="copySelectedReport">复制报告</BaseButton>
-          <BaseButton type="button" :disabled="!selectedReportCopyText" @click="downloadSelectedReport">下载报告</BaseButton>
+          <BaseButton type="button" :disabled="!selectedReportCopyText || selectedRecordIsStale" @click="copySelectedReport">复制报告</BaseButton>
+          <BaseButton type="button" :disabled="!selectedReportCopyText || selectedRecordIsStale" @click="downloadSelectedReport">下载报告</BaseButton>
           <BaseButton
             v-if="selectedSourceRecord"
             type="button"
@@ -537,7 +604,7 @@
             v-if="canQuickAnalyzeSelectedRecord"
             variant="primary"
             type="button"
-            :disabled="!selectedReportCopyText"
+            :disabled="!selectedReportCopyText || selectedRecordIsStale"
             @click="quickAnalyzeSelectedReport"
           >快速分析</BaseButton>
         </footer>
@@ -599,33 +666,15 @@
           <template v-if="analysisRequiresScopeFields">
             <section class="competitor-analysis-dialog-section">
               <div class="competitor-analysis-feature-picker">
-                <div>
-                  <h4>选择要分析的功能</h4>
-                  <p>只展示已确认的竞品主功能链路；用户只需要点选，不需要输入目标词。</p>
-                </div>
-                <ElSelect
-                  v-if="competitorFeatureMapOptions.length"
-                  v-model="analysisForm.selectedFeatureId"
+                <h4>输入要分析的功能</h4>
+                <ElInput
+                  v-model="analysisForm.feature"
                   class="competitor-analysis-dialog-select competitor-analysis-dialog-select-wide"
-                  popper-class="competitor-analysis-filter-popper competitor-analysis-feature-popper"
-                  aria-label="选择要分析的功能"
-                  filterable
-                  placeholder="选择竞品主功能链路"
-                  @change="handleCompetitorFeatureSelect"
-                >
-                  <ElOption
-                    v-for="item in competitorFeatureMapOptions"
-                    :key="item.id"
-                    :label="item.name"
-                    :value="item.id"
-                  >
-                    <div class="competitor-analysis-option">
-                      <strong>{{ item.name }}</strong>
-                      <small>{{ item.sourceLabel }} · {{ item.confidenceLabel }}</small>
-                    </div>
-                  </ElOption>
-                </ElSelect>
-                <p v-else class="competitor-analysis-help">暂未发现可点选主功能链路。可以先生成「完整框架」，或上传竞品截图作为参考。</p>
+                  aria-label="输入要分析的功能"
+                  clearable
+                  placeholder="例如：登录注册、AI 对话、作品发布流程"
+                  @input="analysisDialogMessage = ''"
+                />
               </div>
             </section>
 
@@ -702,7 +751,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElInput, ElOption, ElSelect } from 'element-plus'
 import { FileText, Play, Plus, Search } from 'lucide-vue-next'
 import { BaseButton, BaseDataTable, BaseSecondaryTabs, BaseTabs, BaseTag } from '../../components/base'
@@ -713,9 +762,12 @@ const props = defineProps({
   projectId: { type: String, default: '' }
 })
 
+const COMPETITOR_ANALYSIS_RECORD_VERSION = '2026-07-15-competitor-analysis-v3'
+
 const analysisTabs = [
   { value: 'daily', label: '每日生成' },
   { value: 'weekly', label: '周报生成' },
+  { value: 'monthly', label: '月报生成' },
   { value: 'flow', label: '交互流程' },
   { value: 'framework', label: '完整框架' }
   // 注意：gap（机会点分析）不从对话框手动触发，仅通过报告详情页「快速分析」按钮触发
@@ -730,6 +782,7 @@ const monitorTabs = [
   { value: 'competitors', label: '竞品表' },
   { value: 'daily', label: '每日生成' },
   { value: 'weekly', label: '周报生成' },
+  { value: 'monthly', label: '月报生成' },
   { value: 'flow', label: '交互流程' },
   { value: 'framework', label: '完整框架' }
 ]
@@ -758,6 +811,7 @@ const analysisRecords = ref([])
 const competitors = ref([])
 const submittingAnalysis = ref(false)
 const runningRecordIds = ref(new Set())
+let runningRecordsPollTimer = null
 const creatingCompetitor = ref(false)
 const editingCompetitorId = ref('')
 const showAnalysisDialog = ref(false)
@@ -779,7 +833,6 @@ const analysisForm = reactive({
   goal: '',
   competitorName: '',
   feature: '',
-  selectedFeatureId: '',
   selectedFeature: null,
   referenceScreenshots: [],
   productUrl: '',
@@ -812,6 +865,7 @@ const emptyListTitle = computed(() => hasActiveListFilters.value ? '没有匹配
 const emptyListMessage = computed(() => hasActiveListFilters.value ? '调整搜索或筛选条件后再查看。' : '点击右上角开始分析，选择竞品和类型后会在这里生成记录。')
 const selectedBaseRecord = computed(() => analysisRecords.value.find((record) => record.id === selectedRecordId.value) || null)
 const selectedRecord = computed(() => selectedBaseRecord.value)
+const selectedRecordIsStale = computed(() => recordIsStale(selectedRecord.value))
 const allCompetitorsSelected = computed(() =>
   Boolean(analysisCompetitorOptions.value.length) &&
   analysisCompetitorOptions.value.every((item) => analysisForm.competitorIds.includes(item.id))
@@ -825,6 +879,8 @@ const analysisRequiresScopeFields = computed(() => analysisForm.kind === 'flow')
 const competitorFeatureMapOptions = computed(() => buildCompetitorFeatureMapOptions())
 const selectedDetailMarkdown = computed(() => detailMarkdownForRecord(selectedRecord.value))
 const selectedFrameworkRows = computed(() => selectedRecord.value?.kind === 'framework' ? frameworkRowsForMarkdown(selectedDetailMarkdown.value) : [])
+const selectedFrameworkOverviewBlocks = computed(() => selectedRecord.value?.kind === 'framework' ? frameworkOverviewBlocksForMarkdown(selectedDetailMarkdown.value) : [])
+const selectedFrameworkDashboard = computed(() => selectedRecord.value?.kind === 'framework' ? frameworkDashboardForRows(selectedFrameworkRows.value) : frameworkDashboardForRows([]))
 const selectedFeatureEvents = computed(() => selectedRecord.value?.featureEvents || [])
 const selectedInteractionArtifacts = computed(() => interactionArtifactsForRecord(selectedRecord.value))
 const selectedRecordQualityIssues = computed(() =>
@@ -833,10 +889,12 @@ const selectedRecordQualityIssues = computed(() =>
     : []
 )
 const selectedRecordFailureTitle = computed(() => {
+  if (selectedRecordIsStale.value) return '记录已过期'
   if (selectedRecord.value?.failureType === 'quality_failed') return '质量门禁未通过'
   return '分析未完成'
 })
 const selectedRecordFailureReason = computed(() => {
+  if (selectedRecordIsStale.value) return selectedRecord.value?.staleReason || staleRecordReason(selectedRecord.value)
   if (!selectedRecord.value || selectedRecord.value.status !== 'failed') return ''
   return selectedRecord.value.summary || selectedRecord.value.statusLabel || '分析失败，请重新运行或补充更明确的竞品链接/截图。'
 })
@@ -847,13 +905,15 @@ const selectedSourceRecord = computed(() => {
 })
 const canQuickAnalyzeSelectedRecord = computed(() =>
   isAnalysisKind(selectedRecord.value?.kind) &&
-  selectedRecord.value?.kind !== 'gap'
+  selectedRecord.value?.kind !== 'gap' &&
+  !selectedRecordIsStale.value
 )
 const selectedFeatureEventForAction = computed(() => {
   const events = selectedFeatureEvents.value
   return events.find((event) => featureEventKey(event) === selectedFeatureEventId.value) || events.at(0) || null
 })
 const selectedReportCopyText = computed(() => {
+  if (selectedRecordIsStale.value) return ''
   const parts = [
     selectedDetailMarkdown.value,
     selectedInteractionArtifacts.value.documentMarkdown
@@ -873,7 +933,7 @@ const hasSelectedInteractionArtifacts = computed(() => Boolean(
 ))
 
 function isAnalysisKind(kind = '') {
-  return ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(kind)
+  return ['daily', 'weekly', 'monthly', 'flow', 'framework', 'gap'].includes(kind)
 }
 
 function currentDialogAnalysisKind() {
@@ -931,6 +991,35 @@ function statusVariant(status = '') {
   return 'info'
 }
 
+function normalizeAnalysisVersion(value = '') {
+  const text = String(value || '').trim()
+  return text || 'legacy'
+}
+
+function staleRecordReason(record = {}) {
+  if (!record || typeof record !== 'object') return ''
+  const explicitReason = String(record.staleReason || '').trim()
+  if (explicitReason) return explicitReason
+  const version = normalizeAnalysisVersion(record.analysisVersion || record.analysis_version)
+  if (record.isStaleAnalysis === true || version !== COMPETITOR_ANALYSIS_RECORD_VERSION) {
+    return '当前竞品分析链路已升级，这条历史记录基于旧版规则生成，不能继续作为有效结果使用，请重新分析。'
+  }
+  return ''
+}
+
+function recordIsStale(record = {}) {
+  return Boolean(staleRecordReason(record))
+}
+
+function recordStatusLabel(record = {}) {
+  if (recordIsStale(record)) return '已过期'
+  return record.statusLabel || statusLabel(record.status)
+}
+
+function recordStatusVariant(record = {}) {
+  return recordIsStale(record) ? 'error' : statusVariant(record.status)
+}
+
 function formatTime(value = '') {
   if (!value) return '暂未生成'
   const date = new Date(value)
@@ -958,7 +1047,7 @@ function recordFeatureLabel(record = {}) {
   if (event) return featureEventName(event)
   if (record.kind === 'framework') return '产品完整框架'
   if (record.kind === 'gap') return '机会点对比'
-  if (['daily', 'weekly'].includes(record.kind)) return '全部功能'
+  if (['daily', 'weekly', 'monthly'].includes(record.kind)) return '全部功能'
   return '未填写'
 }
 
@@ -1135,48 +1224,6 @@ function buildCompetitorFeatureMapOptions() {
   return [...options.values()].slice(0, 16)
 }
 
-function selectCompetitorFeature(option = {}) {
-  if (!option?.id) return
-  analysisForm.selectedFeatureId = option.id
-  analysisForm.selectedFeature = {
-    id: option.id,
-    name: option.name,
-    source: option.source,
-    confidence: option.confidence,
-    competitorName: option.competitorName || '',
-    evidence: option.evidence || ''
-  }
-  analysisForm.feature = option.name
-  analysisForm.goal = `验证竞品是否存在「${option.name}」，并输出入口路径、交互流程、证据分级和待补采清单。`
-}
-
-function handleCompetitorFeatureSelect(featureId = '') {
-  const option = competitorFeatureMapOptions.value.find((item) => item.id === featureId)
-  if (option) selectCompetitorFeature(option)
-}
-
-function ensureSelectedFeatureStillAvailable(options = {}) {
-  if (!analysisRequiresScopeFields.value) return
-  const featureOptions = competitorFeatureMapOptions.value
-  const preferred = options.preferScreenshot
-    ? featureOptions.find((item) => item.source === 'screenshot')
-    : null
-  if (preferred) {
-    selectCompetitorFeature(preferred)
-    return
-  }
-  if (analysisForm.selectedFeatureId && featureOptions.some((item) => item.id === analysisForm.selectedFeatureId)) return
-  const first = featureOptions[0]
-  if (first) {
-    selectCompetitorFeature(first)
-    return
-  }
-  analysisForm.selectedFeatureId = ''
-  analysisForm.selectedFeature = null
-  analysisForm.feature = ''
-  analysisForm.goal = ''
-}
-
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -1202,12 +1249,10 @@ async function handleReferenceScreenshotUpload(event) {
     })
   }
   analysisForm.referenceScreenshots = existing.slice(0, 4)
-  ensureSelectedFeatureStillAvailable({ preferScreenshot: true })
 }
 
 function removeReferenceScreenshot(id = '') {
   analysisForm.referenceScreenshots = analysisForm.referenceScreenshots.filter((item) => item.id !== id)
-  ensureSelectedFeatureStillAvailable()
 }
 
 function competitorForFeatureEvent(event = {}) {
@@ -1297,7 +1342,8 @@ function quickAnalyzeSelectedReport() {
     sourceContent: content,
     sourceRecordId: record.id || '',
     sourceKind: record.kind || '',
-    sourceTitle: record.title || getKindLabel(record.kind)
+    sourceTitle: record.title || getKindLabel(record.kind),
+    analysisVersion: COMPETITOR_ANALYSIS_RECORD_VERSION
   }
   const created = mergeRecord({
     ...draft,
@@ -1446,10 +1492,11 @@ function normalizeFeatureEvents(events = []) {
 }
 
 function normalizeRecord(record = {}) {
+  const staleReason = staleRecordReason(record)
   return {
     id: record.id || `local-${Date.now()}`,
     projectId: record.projectId || effectiveProjectId.value,
-    kind: ['daily', 'weekly', 'flow', 'framework', 'gap'].includes(record.kind) ? record.kind : 'daily',
+    kind: ['daily', 'weekly', 'monthly', 'flow', 'framework', 'gap'].includes(record.kind) ? record.kind : 'daily',
     title: record.title || `${getKindLabel(record.kind)}：${recordCompetitorNames(record)}`,
     status: record.status || 'pending',
     statusLabel: record.statusLabel || statusLabel(record.status),
@@ -1479,6 +1526,9 @@ function normalizeRecord(record = {}) {
       : Array.isArray(record.quality_issues)
         ? record.quality_issues
         : [],
+    analysisVersion: normalizeAnalysisVersion(record.analysisVersion || record.analysis_version),
+    isStaleAnalysis: Boolean(staleReason),
+    staleReason,
     createdAt: record.createdAt || new Date().toISOString(),
     updatedAt: record.updatedAt || record.createdAt || new Date().toISOString()
   }
@@ -1533,9 +1583,10 @@ async function loadRecords() {
   })
   if (requestProjectId !== effectiveProjectId.value) return
   if (result.ok && Array.isArray(result.data?.records)) {
-    analysisRecords.value = mergeBackendRecordsWithLocalRunning(result.data.records.map(normalizeRecord))
+    const normalizedRecords = result.data.records.map(normalizeRecord)
+    analysisRecords.value = mergeBackendRecordsWithLocalRunning(normalizedRecords)
+    syncRunningRecordIds(analysisRecords.value)
     persistCachedAnalysis()
-    ensureSelectedFeatureStillAvailable()
   }
 }
 
@@ -1547,7 +1598,7 @@ async function loadLatestAnalysis() {
   })
   if (!result.ok || !result.data?.markdown) return
   analysisResult.value = result.data
-  if (['daily', 'weekly', 'flow', 'framework', 'gap'].includes(result.data.kind)) {
+  if (['daily', 'weekly', 'monthly', 'flow', 'framework', 'gap'].includes(result.data.kind)) {
     mergeRecord({
       id: `restored-${result.data.kind}`,
       projectId: effectiveProjectId.value,
@@ -1604,7 +1655,6 @@ async function openAnalysisDialog() {
   }
   analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => analysisCompetitorOptions.value.some((item) => item.id === id))
   fillDialogDefaults()
-  ensureSelectedFeatureStillAvailable()
   showAnalysisDialog.value = true
 }
 
@@ -1667,7 +1717,6 @@ function pruneDeletedCompetitorReferences(competitor = {}, deletedOptionIds = co
   if (listFilters.competitor === competitor.name) listFilters.competitor = 'all'
   analysisForm.competitorIds = analysisForm.competitorIds.filter((id) => !deletedOptionIds.includes(id))
   fillDialogDefaults()
-  ensureSelectedFeatureStillAvailable()
 }
 
 function handleAnalysisCompetitorChange(value = []) {
@@ -1680,7 +1729,6 @@ function handleAnalysisCompetitorChange(value = []) {
     analysisForm.competitorIds = selectedIds.filter((id) => realIds.includes(id))
   }
   fillDialogDefaults()
-  ensureSelectedFeatureStillAvailable()
 }
 
 function selectedCompetitors() {
@@ -1697,7 +1745,7 @@ function competitorWebsiteUrl(item = {}) {
 
 function recordsForSelectedCompetitors() {
   const selected = selectedCompetitors()
-  if (['daily', 'weekly'].includes(analysisForm.kind)) {
+  if (['daily', 'weekly', 'monthly'].includes(analysisForm.kind)) {
     const names = selected.map(competitorDisplayName)
     const urls = selected.map(competitorWebsiteUrl)
     return [{
@@ -1736,7 +1784,6 @@ function recordsForSelectedCompetitors() {
 function setDialogKind(kind = 'daily') {
   analysisDialogMessage.value = ''
   setActiveKind(kind)
-  ensureSelectedFeatureStillAvailable()
 }
 
 function fillDialogDefaults() {
@@ -1796,17 +1843,39 @@ function clearRecordRunning(id = '') {
   runningRecordIds.value = next
 }
 
+function syncRunningRecordIds(records = []) {
+  if (!runningRecordIds.value.size) return
+  const activeIds = new Set(
+    records
+      .filter((record) => runningRecordIds.value.has(record.id) && ['pending', 'running'].includes(record.status))
+      .map((record) => record.id)
+  )
+  runningRecordIds.value = activeIds
+}
+
+function startRunningRecordsPolling() {
+  if (runningRecordsPollTimer || typeof window === 'undefined') return
+  runningRecordsPollTimer = window.setInterval(() => {
+    void loadRecords()
+  }, 5000)
+}
+
+function stopRunningRecordsPolling() {
+  if (!runningRecordsPollTimer || typeof window === 'undefined') return
+  window.clearInterval(runningRecordsPollTimer)
+  runningRecordsPollTimer = null
+}
+
 function analysisDialogValidationMessage() {
   if (!analysisForm.kind) return '请选择分析类型。'
   if (!analysisForm.competitorIds.length || !selectedCompetitors().length) return '请选择至少一个竞品。'
-  if (analysisRequiresScopeFields.value && !analysisForm.feature?.trim()) return '请选择一个已发现功能；如果暂未发现，可以先生成完整框架或上传截图参考。'
+  if (analysisRequiresScopeFields.value && !analysisForm.feature?.trim()) return '请输入要分析的功能。'
   return ''
 }
 
 async function handleConfirmAnalysis() {
   const kind = currentDialogAnalysisKind()
   analysisForm.kind = kind
-  ensureSelectedFeatureStillAvailable()
   const validationMessage = analysisDialogValidationMessage()
   if (validationMessage) {
     statusTone.value = 'failed'
@@ -1824,6 +1893,7 @@ async function handleConfirmAnalysis() {
       status: 'running',
       statusLabel: '分析中',
       summary: '分析任务已创建，正在调用竞品分析引擎。',
+      analysisVersion: COMPETITOR_ANALYSIS_RECORD_VERSION,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }))
@@ -1944,7 +2014,8 @@ async function deepAnalyzeFeatureEvent(event = {}) {
         title: sourceRecord.title || '',
         summary: sourceRecord.summary || '',
         markdown: sourceRecord.markdown || ''
-      }
+      },
+      analysisVersion: COMPETITOR_ANALYSIS_RECORD_VERSION
     }
     const createResult = await api.competitorAnalysis.createRecord(props.apiConfig, draft)
     const created = mergeRecord(createResult.ok ? createResult.data.record : draft)
@@ -2034,6 +2105,39 @@ function cleanMarkdownText(value = '') {
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .trim()
+}
+
+function safeExternalMarkdownUrl(value = '') {
+  const text = String(value || '').trim()
+  try {
+    const url = new URL(text)
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : ''
+  } catch {
+    return ''
+  }
+}
+
+function markdownInlineParts(value = '') {
+  const text = String(value || '')
+  const parts = []
+  const linkPattern = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g
+  let lastIndex = 0
+  for (const match of text.matchAll(linkPattern)) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', text: text.slice(lastIndex, match.index) })
+    }
+    const url = safeExternalMarkdownUrl(match[2])
+    if (url) {
+      parts.push({ type: 'link', text: cleanMarkdownText(match[1]), url })
+    } else {
+      parts.push({ type: 'text', text: match[0] })
+    }
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', text: text.slice(lastIndex) })
+  }
+  return parts.length ? parts : [{ type: 'text', text }]
 }
 
 function splitMarkdownTableRow(line = '') {
@@ -2371,6 +2475,120 @@ function frameworkRowsForMarkdown(markdown = '') {
   return rows.slice(0, 300)
 }
 
+const frameworkLayerCatalog = [
+  { name: '产品矩阵层', patterns: ['产品矩阵', '产品定位', '平台', '产品'] },
+  { name: '顶层导航层', patterns: ['顶层导航', '导航', '首页', '入口'] },
+  { name: '创作模式/核心工作台层', patterns: ['工作台', '创作', '创建', '编辑器', '画布'] },
+  { name: '核心能力层', patterns: ['核心能力', '功能模块', '生成', '编辑', '改图', '视频', 'Agent'] },
+  { name: '重点场景层', patterns: ['场景', '电商', '营销', '商品', '详情页', '分类'] },
+  { name: '模板与资产层', patterns: ['模板', '素材', '资产', '套图', '灵感'] },
+  { name: '协作与商业化层', patterns: ['协作', '会员', '额度', '商业化', '登录', '团队'] },
+  { name: '核心任务链路', patterns: ['链路', '路径', '流程', '状态', '异常', '分支'] }
+]
+
+function frameworkRowSearchText(row = {}) {
+  return [
+    row.typeLabel,
+    row.name,
+    row.level,
+    row.entry,
+    row.prerequisite,
+    row.context,
+    ...(row.details || []).map((detail) => `${detail.label} ${detail.value}`)
+  ].filter(Boolean).join(' ')
+}
+
+function frameworkLayerForRow(row = {}) {
+  const text = frameworkRowSearchText(row)
+  return frameworkLayerCatalog.find((layer) => layer.patterns.some((pattern) => text.includes(pattern)))?.name || '待归类结构'
+}
+
+function frameworkEvidenceBucket(row = {}) {
+  const text = frameworkRowSearchText(row)
+  if (/公开确认|确认存在|full|high|已确认/.test(text)) return '公开确认'
+  if (/待补采|证据不足|缺失|partial|推断|inferred/.test(text)) return '待补采/推断'
+  return '结构化线索'
+}
+
+function uniqueLimited(values = [], limit = 4) {
+  const result = []
+  for (const value of values.map((item) => cleanMarkdownText(item)).filter(Boolean)) {
+    if (!result.includes(value)) result.push(value)
+    if (result.length >= limit) break
+  }
+  return result
+}
+
+function frameworkWireframeForLayer(layer = {}, index = 0) {
+  const fallbackZones = [
+    ['顶部导航', '核心入口', '内容卡片', '行动按钮'],
+    ['筛选/分类', '资源列表', '详情预览', '创建入口'],
+    ['左侧工具栏', '画布区域', '右侧配置', '导出/交付']
+  ]
+  const zones = uniqueLimited(layer.items, 4)
+  return {
+    title: layer.name,
+    zones: zones.length >= 3 ? zones : fallbackZones[index % fallbackZones.length]
+  }
+}
+
+function frameworkDashboardForRows(rows = []) {
+  const safeRows = Array.isArray(rows) ? rows : []
+  const typeCounts = new Map()
+  const evidenceCounts = new Map()
+  const layerMap = new Map(frameworkLayerCatalog.map((layer) => [layer.name, []]))
+  for (const row of safeRows) {
+    typeCounts.set(row.typeLabel || '框架条目', (typeCounts.get(row.typeLabel || '框架条目') || 0) + 1)
+    const evidence = frameworkEvidenceBucket(row)
+    evidenceCounts.set(evidence, (evidenceCounts.get(evidence) || 0) + 1)
+    const layerName = frameworkLayerForRow(row)
+    if (!layerMap.has(layerName)) layerMap.set(layerName, [])
+    layerMap.get(layerName).push(row.name || row.code || '未命名条目')
+  }
+  const layers = [...layerMap.entries()]
+    .map(([name, items]) => ({
+      name,
+      items: uniqueLimited(items, 5)
+    }))
+    .filter((layer) => layer.items.length)
+    .slice(0, 8)
+  const visibleLayers = layers.length ? layers : frameworkLayerCatalog.slice(0, 4).map((layer) => ({
+    name: layer.name,
+    items: ['待补采']
+  }))
+  const topTypes = [...typeCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+  const coverageCards = [
+    { label: '结构条目', value: String(safeRows.length) },
+    { label: '覆盖层级', value: String(visibleLayers.length) },
+    { label: '公开/线索', value: String((evidenceCounts.get('公开确认') || 0) + (evidenceCounts.get('结构化线索') || 0)) },
+    { label: '待补采', value: String(evidenceCounts.get('待补采/推断') || 0) }
+  ]
+  const overviewSteps = visibleLayers.slice(0, 6).map((layer, index) => ({
+    key: `${layer.name}-${index}`,
+    title: layer.name,
+    detail: layer.items.slice(0, 3).join(' / ') || '待补采'
+  }))
+  return {
+    coverageSummary: safeRows.length
+      ? `基于 ${safeRows.length} 条结构化行生成低保视图；partial/待补采只表示细节未完全确认，不等于没有可读框架。`
+      : '还没有结构化行，先展示低保框架占位，需重新分析补齐证据。',
+    coverageCards,
+    layers: visibleLayers,
+    overviewSteps,
+    wireframes: visibleLayers.slice(0, 3).map(frameworkWireframeForLayer),
+    topTypes
+  }
+}
+
+function frameworkOverviewBlocksForMarkdown(markdown = '') {
+  return enhancedMarkdownBlocksFor(markdown)
+    .filter((block) => !Array.isArray(block.rows) || !block.rows.length)
+    .filter((block) => ['heading', 'paragraph', 'list', 'quote', 'code'].includes(block.type))
+    .slice(0, 80)
+}
+
 function markdownBlockKey(block = {}, index = 0) {
   return `${block.type || 'block'}-${index}-${block.text || block.headers?.join('-') || ''}`
 }
@@ -2548,6 +2766,10 @@ onMounted(() => {
   void refreshPageData()
 })
 
+onBeforeUnmount(() => {
+  stopRunningRecordsPolling()
+})
+
 watch(() => activeKind.value, (kind) => {
   void refreshActiveKindData(kind)
 }, { immediate: true })
@@ -2559,6 +2781,14 @@ watch(selectedFeatureEvents, (events) => {
   }
   const currentExists = events.some((event) => featureEventKey(event) === selectedFeatureEventId.value)
   if (!currentExists) selectedFeatureEventId.value = featureEventKey(events.at(0))
+}, { immediate: true })
+
+watch(runningRecordIds, (ids) => {
+  if (ids.size) {
+    startRunningRecordsPolling()
+  } else {
+    stopRunningRecordsPolling()
+  }
 }, { immediate: true })
 
 watch(() => props.projectId, () => {
@@ -3018,23 +3248,28 @@ watch(() => props.projectId, () => {
 }
 
 .competitor-analysis-md-table {
+  display: block;
   width: 100%;
+  max-width: 100%;
   margin-top: 16px;
   border-collapse: separate;
   border-spacing: 0;
   border: 1px solid #e4e7ec;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-x: auto;
   font-size: 14px;
+  line-height: 1.6;
 }
 
 .competitor-analysis-md-table th,
 .competitor-analysis-md-table td {
+  min-width: 120px;
   padding: 12px 16px;
   border-right: 1px solid #eef0f3;
   border-bottom: 1px solid #eef0f3;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 .competitor-analysis-md-table th {
@@ -3050,6 +3285,32 @@ watch(() => props.projectId, () => {
 
 .competitor-analysis-md-table tbody tr:last-child td {
   border-bottom: 0;
+}
+
+.competitor-analysis-md-table th:first-child,
+.competitor-analysis-md-table td:first-child {
+  min-width: 96px;
+  font-weight: 700;
+}
+
+.competitor-analysis-md-table th:nth-child(2),
+.competitor-analysis-md-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+.competitor-analysis-md-table th:last-child,
+.competitor-analysis-md-table td:last-child {
+  min-width: 280px;
+}
+
+.competitor-analysis-md-link {
+  color: #175cd3;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.competitor-analysis-md-link:hover {
+  text-decoration: underline;
 }
 
 .competitor-analysis-framework-explorer {
@@ -3095,6 +3356,179 @@ watch(() => props.projectId, () => {
   font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.competitor-analysis-framework-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 14px;
+}
+
+.competitor-analysis-framework-dashboard-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.05);
+}
+
+.competitor-analysis-framework-dashboard-card h5,
+.competitor-analysis-framework-dashboard-card p {
+  margin: 0;
+}
+
+.competitor-analysis-framework-dashboard-card h5 {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 22px;
+}
+
+.competitor-analysis-framework-dashboard-card p {
+  margin-top: 8px;
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.competitor-analysis-framework-coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.competitor-analysis-framework-coverage-grid span {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #eef4ff;
+  color: #475467;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.competitor-analysis-framework-coverage-grid strong {
+  color: #1849a9;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.competitor-analysis-framework-map ol,
+.competitor-analysis-framework-tree ul {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.competitor-analysis-framework-map li,
+.competitor-analysis-framework-tree li {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.competitor-analysis-framework-map li {
+  position: relative;
+}
+
+.competitor-analysis-framework-map li + li::before {
+  content: "↓";
+  position: absolute;
+  top: -14px;
+  left: 24px;
+  color: #98a2b3;
+  font-weight: 900;
+}
+
+.competitor-analysis-framework-map strong,
+.competitor-analysis-framework-tree strong {
+  color: #111827;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.competitor-analysis-framework-map span,
+.competitor-analysis-framework-tree span {
+  color: #667085;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.competitor-analysis-framework-wireframes {
+  grid-column: 1 / -1;
+}
+
+.competitor-analysis-framework-wireframe-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.competitor-analysis-framework-wireframes figure {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.competitor-analysis-framework-wireframes figcaption {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 20px;
+}
+
+.competitor-analysis-framework-wireframe-box {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  padding: 12px;
+  border: 1px dashed #98a2b3;
+  border-radius: 16px;
+  background:
+    linear-gradient(90deg, rgba(226, 232, 240, 0.5) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(226, 232, 240, 0.5) 1px, transparent 1px),
+    #ffffff;
+  background-size: 18px 18px;
+}
+
+.competitor-analysis-framework-wireframe-box span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+}
+
+.competitor-analysis-framework-overview {
+  max-height: 360px;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.competitor-analysis-framework-overview .competitor-analysis-md-code {
+  margin-top: 12px;
 }
 
 .competitor-analysis-framework-table td strong,

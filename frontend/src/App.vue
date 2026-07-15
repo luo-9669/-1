@@ -11490,6 +11490,7 @@ function restoreActiveWorkflowCanvasIfAvailable() {
   workflowAnalysisResult.value = displayAnalysis
   workflowStageStatusMap.value = finalWorkflowStageStatuses(displayAnalysis.totalDesignFlow)
   syncWorkflowActiveStageFromAnalysis(displayAnalysis)
+  resumeWorkflowHtmlStageBackgroundGeneration(activeRun)
   workflowAgentNodeId.value = displayAnalysis.totalDesignFlow?.stageCanvases?.[workflowActiveStageId.value]?.nodes?.[0]?.id ||
     displayAnalysis.canvas?.nodes?.[0]?.id ||
     'analysis'
@@ -14931,10 +14932,13 @@ function workflowHtmlStageNeedsGeneration(totalFlow = workflowTotalDesignFlow.va
 }
 
 function workflowHtmlStageIsGenerating(totalFlow = workflowTotalDesignFlow.value) {
-  const status = String(workflowStageStatusMap.value?.['html-output']?.status || totalFlow?.stageStatuses?.['html-output']?.status || '').trim()
+  const localStatus = String(workflowStageStatusMap.value?.['html-output']?.status || '').trim()
+  const persistedStatus = String(totalFlow?.stageStatuses?.['html-output']?.status || '').trim()
   const htmlCanvas = totalFlow?.stageCanvases?.['html-output'] || null
   const nodes = Array.isArray(htmlCanvas?.nodes) ? htmlCanvas.nodes : []
-  return status === 'generating' || nodes.some((node) => String(node?.artifactStatus || '').trim() === 'generating')
+  return localStatus === 'generating' ||
+    persistedStatus === 'generating' ||
+    nodes.some((node) => String(node?.artifactStatus || '').trim() === 'generating')
 }
 
 function stopWorkflowHtmlStagePolling() {
@@ -14990,12 +14994,14 @@ async function pollWorkflowHtmlStageRun(runId = state.activeWorkflowRun?.id || '
     const totalFlow = workflowAnalysisResult.value?.totalDesignFlow || null
     if (workflowHtmlStageIsGenerating(totalFlow) || workflowHtmlStageNeedsGeneration(totalFlow)) {
       setStatus(skillWorkbenchStatus, 'loading', workflowHtmlStageStatusText(totalFlow))
+      appendWorkflowHtmlStageAgentMessage('generating', { runId, totalFlow })
       scheduleWorkflowHtmlStagePolling(runId)
     } else {
       stopWorkflowHtmlStagePolling()
       workflowCanvasLoading.value = false
       workflowCanvasRefreshingNodeId.value = ''
       setStatus(skillWorkbenchStatus, 'success', 'HTML 阶段已生成并回填画布')
+      appendWorkflowHtmlStageAgentMessage('success', { runId, totalFlow })
     }
   } catch (error) {
     void error
@@ -15016,6 +15022,58 @@ function workflowHtmlStageStatusText(totalFlow = workflowTotalDesignFlow.value) 
   return '后台正在生成 HTML，完成后会自动回填画布。'
 }
 
+function appendWorkflowHtmlStageAgentMessage(status = 'generating', options = {}) {
+  const runId = state.activeWorkflowRun?.id || options.runId || ''
+  if (!runId) return ''
+  const totalFlow = options.totalFlow || workflowTotalDesignFlow.value || null
+  const statusText = status === 'success'
+    ? 'HTML 阶段已生成完成，结果已经回填到画布。'
+    : workflowHtmlStageStatusText(totalFlow)
+  const messageId = `${runId}-html-stage-background-generation`
+  const now = new Date().toISOString()
+  const metaStatus = status === 'success' ? 'success' : 'generating'
+  const message = {
+    id: messageId,
+    role: 'assistant',
+    content: statusText,
+    createdAt: options.createdAt || now,
+    meta: {
+      action: 'html-stage-background-generation',
+      source: 'system',
+      stageId: 'html-output',
+      clientMessageId: messageId,
+      hideStatus: false,
+      status: metaStatus,
+      statusLabel: workflowAgentStatusLabel(metaStatus),
+      typewriterDone: true
+    }
+  }
+  const existing = ensureWorkflowAgentSession('html-output').find((item) => item.id === messageId)
+  replaceOrAppendWorkflowAgentMessage(messageId, {
+    ...message,
+    createdAt: existing?.createdAt || message.createdAt
+  }, 'html-output')
+  saveState(state)
+  return messageId
+}
+
+function resumeWorkflowHtmlStageBackgroundGeneration(run = state.activeWorkflowRun || {}, options = {}) {
+  const totalFlow = workflowAnalysisResult.value?.totalDesignFlow ||
+    normalizeWorkflowAnalysisForDisplay(run?.documentAnalysis)?.totalDesignFlow ||
+    null
+  if (!run?.id || !workflowHtmlStageIsGenerating(totalFlow)) return false
+  if (workflowCurrentStageId.value === 'html-output' || options.forceCanvasLoading === true) {
+    workflowCanvasLoading.value = true
+    workflowCanvasRefreshingNodeId.value =
+      totalFlow?.stageStatuses?.['html-output']?.currentNodeId ||
+      workflowStageRefreshNodeId('html-output')
+  }
+  setStatus(skillWorkbenchStatus, 'loading', workflowHtmlStageStatusText(totalFlow))
+  appendWorkflowHtmlStageAgentMessage('generating', { runId: run.id, totalFlow })
+  scheduleWorkflowHtmlStagePolling(run.id)
+  return true
+}
+
 async function ensureWorkflowHtmlStageGeneration(options = {}) {
   const run = state.activeWorkflowRun || {}
   if (!run.id || workflowCurrentStageId.value !== 'html-output') return false
@@ -15029,6 +15087,7 @@ async function ensureWorkflowHtmlStageGeneration(options = {}) {
   mergeWorkflowStageStatus('html-output', 'generating', workflowStageStatusMap.value?.['html-output'] || {})
   applyWorkflowStageStatusesToAnalysis()
   setStatus(skillWorkbenchStatus, 'loading', workflowHtmlStageStatusText(totalFlow))
+  appendWorkflowHtmlStageAgentMessage('generating', { runId: run.id, totalFlow })
   scheduleWorkflowHtmlStagePolling(run.id)
   if (workflowHtmlStageJobRunId === run.id && options.force !== true) return true
   workflowHtmlStageJobRunId = run.id
@@ -16053,6 +16112,17 @@ function isWorkflowPlaceholderCodeArtifact(code = '') {
   return /根据交互低保与 UI 视觉生成 HTML 页面|根据交互低保与 UI 视觉生成 Vue 页面/.test(source)
 }
 
+function hasWorkflowEscapedHtmlVisibleTextNoise(html = '') {
+  const source = String(html || '')
+  if (!source) return false
+  const visibleText = source
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+  const literalBreakCount = (visibleText.match(/\\n/g) || []).length
+  return literalBreakCount >= 12
+}
+
 function isWorkflowRunnableCodeArtifact(code = '', language = '') {
   const source = String(code || '').trim()
   if (!source || isWorkflowPlaceholderCodeArtifact(source)) return false
@@ -16061,6 +16131,9 @@ function isWorkflowRunnableCodeArtifact(code = '', language = '') {
   const hasVueShell = /<template[\s>]|<script\s+setup[\s>]|export\s+default\s*\{/i.test(source)
   const isUpstreamSpecText = /Screen Contract|页面契约|asciiWireframe|ASCII\s*框架|上一阶段交互低保|交互低保\s*ASCII/i.test(source)
   if (isUpstreamSpecText && !hasHtmlShell && !hasVueShell) return false
+  if (normalizedLanguage === 'html') {
+    if (hasWorkflowEscapedHtmlVisibleTextNoise(source)) return false
+  }
   if (normalizedLanguage === 'vue') return /<template[\s>]/i.test(source) || hasVueShell
   if (normalizedLanguage === 'html') return hasHtmlShell
   return hasHtmlShell || hasVueShell || !isUpstreamSpecText
@@ -16718,6 +16791,7 @@ function openWorkflowCanvasRun(run) {
   workflowAnalysisResult.value = displayAnalysis
   workflowStageStatusMap.value = finalWorkflowStageStatuses(displayAnalysis.totalDesignFlow)
   syncWorkflowActiveStageFromAnalysis(displayAnalysis)
+  resumeWorkflowHtmlStageBackgroundGeneration(finalizedRun)
   workflowAgentNodeId.value = displayAnalysis.totalDesignFlow?.stageCanvases?.[workflowActiveStageId.value]?.nodes?.[0]?.id ||
     displayAnalysis.canvas?.nodes?.[0]?.id ||
     'analysis'
@@ -18685,6 +18759,18 @@ function isWorkflowAgentCodeGenerationQuickReply(content = '') {
   return /生成\s*(HTML|Vue)|重新生成\s*(HTML|Vue)|生成页面代码/.test(String(content || '').trim())
 }
 
+function fallbackWorkflowCodeGenerationAction(targetNode = {}, content = '') {
+  if (!targetNode?.id) return null
+  const label = String(content || '').trim()
+  const targetGenerator = targetNode.stageId === 'vue-output' || /vue/i.test(label) ? 'vue' : 'html'
+  return {
+    id: `fallback-${targetGenerator}-generation`,
+    label: label || (targetGenerator === 'vue' ? '生成 Vue' : '生成 HTML'),
+    targetGenerator,
+    status: targetNode.artifactStatus || 'pending'
+  }
+}
+
 function workflowAgentCodeGenerationQuickAction(content = '', sourceMessage = null) {
   const normalizedContent = String(content || '').trim()
   if (!isWorkflowAgentCodeGenerationQuickReply(normalizedContent)) return null
@@ -18698,7 +18784,7 @@ function workflowAgentCodeGenerationQuickAction(content = '', sourceMessage = nu
   const generationAction = generationActions.find((action) => {
     const target = String(action?.targetGenerator || targetNode?.targetGenerator || '').trim().toLowerCase()
     return targetStageId === 'vue-output' ? target === 'vue' : target === 'html'
-  }) || generationActions[0] || null
+  }) || generationActions[0] || fallbackWorkflowCodeGenerationAction(targetNode, normalizedContent)
   if (!targetNode?.id || !generationAction) return null
   return {
     nodeId: targetNode.id,
