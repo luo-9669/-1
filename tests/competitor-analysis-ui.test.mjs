@@ -421,6 +421,20 @@ test('competitor framework detail uses table explorer with expandable rows inste
   assert.doesNotMatch(pageSource, /selectedRecord\?\.kind === 'framework'[\s\S]{0,400}competitor-analysis-page-card-grid/)
 })
 
+test('competitor framework low-fi wireframes render all detected layers instead of only three', async () => {
+  const pageSource = await readFile(pageUrl, 'utf8')
+  const dashboardStart = pageSource.indexOf('function frameworkDashboardForRows')
+  const dashboardEnd = pageSource.indexOf('function frameworkOverviewBlocksForMarkdown', dashboardStart)
+  const dashboardSource = pageSource.slice(dashboardStart, dashboardEnd)
+  const wireframeGridRule = cssRule(pageSource, '.competitor-analysis-framework-wireframe-grid')
+
+  assert.ok(dashboardStart >= 0 && dashboardEnd > dashboardStart, 'framework dashboard helper should be present')
+  assert.doesNotMatch(dashboardSource, /wireframes:\s*visibleLayers\.slice\(0,\s*3\)/)
+  assert.match(dashboardSource, /wireframes:\s*visibleLayers\.map\(frameworkWireframeForLayer\)/)
+  assert.match(dashboardSource, /items:\s*uniqueLimited\(items,\s*12\)/)
+  assert.match(wireframeGridRule, /repeat\(auto-fit,\s*minmax\(260px,\s*1fr\)\)/)
+})
+
 test('competitor analysis report modal lets long markdown scroll without clipping content', async () => {
   const pageSource = await readFile(pageUrl, 'utf8')
   const reportDialogRule = cssRule(pageSource, '.competitor-analysis-report-dialog')

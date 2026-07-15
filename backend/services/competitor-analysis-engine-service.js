@@ -1074,6 +1074,151 @@ function buildFrameworkPageListing(data = {}) {
   ].join('\n')
 }
 
+function flattenFrameworkNavigation(navItems = [], source = 'navigation', limit = 500) {
+  const rows = []
+  const walk = (items = [], depth = 0, parent = '') => {
+    for (const item of Array.isArray(items) ? items : []) {
+      if (rows.length >= limit) return
+      const node = normalizePlainObject(item)
+      const name = safeText(node.name || node.title || node.label, '')
+      const url = safeText(node.url || node.href, '')
+      const pathText = [parent, name].filter(Boolean).join(' / ')
+      if (name || url) {
+        rows.push({
+          level: `L${depth + 1}`,
+          name: name || frameworkPageTitle({ url }),
+          path: pathText || name || url,
+          url,
+          source
+        })
+      }
+      if (Array.isArray(node.children)) walk(node.children, depth + 1, pathText)
+    }
+  }
+  walk(navItems)
+  return rows
+}
+
+function markdownLinkCell(url = '') {
+  const text = safeText(url, '')
+  return text ? `[查看](${text})` : '-'
+}
+
+function pushFrameworkEvidenceTable(lines = [], title = '', headers = [], rows = [], options = {}) {
+  const limit = Number.isFinite(Number(options.limit)) ? Number(options.limit) : 300
+  const visibleRows = rows.slice(0, limit)
+  lines.push(`### ${title}`, '')
+  lines.push(`共 ${rows.length} 条${rows.length > limit ? `，展示前 ${limit} 条` : ''}。`, '')
+  if (!visibleRows.length) {
+    lines.push('暂无采集数据。', '')
+    return
+  }
+  lines.push(`| ${headers.join(' | ')} |`)
+  lines.push(`|${headers.map(() => '---').join('|')}|`)
+  for (const row of visibleRows) {
+    lines.push(`| ${row.map((cell) => String(cell || '-')).join(' | ')} |`)
+  }
+  if (rows.length > limit) {
+    lines.push(`| ${headers.map((header, index) => (index === 0 ? `另有 ${rows.length - limit} 条未展开` : '-')).join(' | ')} |`)
+  }
+  lines.push('')
+}
+
+function normalizeFrameworkFeatureRows(features = [], source = 'features') {
+  return (Array.isArray(features) ? features : [])
+    .map((feature, index) => {
+      const item = normalizePlainObject(feature)
+      const url = safeText(item.url || item.href || item.entry_path || item.entryPath, '')
+      return [
+        markdownTableCell(item.name || item.title || item.module_id || `功能 ${index + 1}`),
+        markdownTableCell(item.level || item.category || item.type || source),
+        markdownTableCell(item.purpose || item.description || item.summary || ''),
+        markdownLinkCell(url)
+      ]
+    })
+}
+
+function normalizeFrameworkJourneyRows(journeys = []) {
+  return (Array.isArray(journeys) ? journeys : [])
+    .map((journey, index) => {
+      const item = normalizePlainObject(journey)
+      const rawSteps = Array.isArray(item.steps)
+        ? item.steps
+        : Array.isArray(item.path)
+          ? item.path
+          : []
+      const steps = rawSteps
+        .map((step) => typeof step === 'string' ? step : safeText(normalizePlainObject(step).name || normalizePlainObject(step).page || normalizePlainObject(step).action, ''))
+        .filter(Boolean)
+      return [
+        markdownTableCell(item.name || item.title || item.journey_id || `旅程 ${index + 1}`),
+        markdownTableCell(item.role || item.user || item.actor || ''),
+        markdownTableCell(steps.join(' -> ') || item.summary || item.description || ''),
+        markdownTableCell(item.evidence || item.confidence || item.evidence_status || '')
+      ]
+    })
+}
+
+function normalizeFrameworkGapRows(gaps = []) {
+  return (Array.isArray(gaps) ? gaps : [])
+    .map((gap, index) => {
+      if (typeof gap === 'string') return [markdownTableCell(`G${index + 1}`), markdownTableCell(gap), '待补采']
+      const item = normalizePlainObject(gap)
+      return [
+        markdownTableCell(item.id || item.name || `G${index + 1}`),
+        markdownTableCell(item.description || item.gap || item.title || item.reason || ''),
+        markdownTableCell(item.action || item.status || '待补采')
+      ]
+    })
+}
+
+function buildFrameworkEvidenceAppendix(data = {}, markdown = '') {
+  const item = normalizePlainObject(data)
+  if (normalizeEvidenceQuality(item, 'framework') === 'none') return ''
+  if (/##\s*采集证据完整清单/.test(String(markdown || ''))) return ''
+  const pageRows = [
+    ...collectFrameworkPageListingEntries(item.page_evidence || item.pageEvidence, 'page_evidence'),
+    ...collectFrameworkPageListingEntries(item.pages, 'pages')
+  ].map((entry) => [
+    markdownTableCell(frameworkPageTitle(entry)),
+    markdownTableCell(`L${frameworkPageLevel(entry.url)}`),
+    markdownLinkCell(entry.url),
+    markdownTableCell(entry.source),
+    markdownTableCell(entry.title || '')
+  ])
+  const navigationRows = [
+    ...flattenFrameworkNavigation(item.navigation_tree || item.navigationTree, 'navigation_tree'),
+    ...flattenFrameworkNavigation(item.sitemap_navigation || item.sitemapNavigation, 'sitemap_navigation')
+  ].map((entry) => [
+    markdownTableCell(entry.level),
+    markdownTableCell(entry.path || entry.name),
+    markdownLinkCell(entry.url),
+    markdownTableCell(entry.source)
+  ])
+  const featureRows = [
+    ...normalizeFrameworkFeatureRows(item.crawler_features || item.crawlerFeatures || item.features, 'crawler_features'),
+    ...normalizeFrameworkFeatureRows(item.similar_features || item.similarFeatures, 'similar_features')
+  ]
+  const moduleRows = normalizeFrameworkFeatureRows(item.feature_modules || item.featureModules, 'feature_modules')
+  const journeyRows = normalizeFrameworkJourneyRows(item.user_journeys || item.userJourneys)
+  const gapRows = normalizeFrameworkGapRows(item.data_gaps || item.dataGaps || item.coverage_gaps || item.coverageGaps)
+  const hasAppendix = [pageRows, navigationRows, featureRows, moduleRows, journeyRows, gapRows].some((rows) => rows.length)
+  if (!hasAppendix) return ''
+  const lines = [
+    '## 采集证据完整清单',
+    '',
+    '以下内容来自本次爬取/解析的结构化证据，用于补足模型摘要未完全展开的页面、导航、功能和待补采信息；不把待补采项当作已确认结论。',
+    ''
+  ]
+  pushFrameworkEvidenceTable(lines, '页面证据 page_evidence', ['页面', '层级', '链接', '来源字段', '标题'], pageRows, { limit: 500 })
+  pushFrameworkEvidenceTable(lines, '导航证据 sitemap_navigation', ['层级', '导航路径', '链接', '来源字段'], navigationRows, { limit: 500 })
+  pushFrameworkEvidenceTable(lines, '功能证据 crawler_features', ['功能', '层级/类型', '说明', '链接'], featureRows, { limit: 300 })
+  pushFrameworkEvidenceTable(lines, '功能模块 feature_modules', ['模块', '层级/类型', '说明', '链接'], moduleRows, { limit: 200 })
+  pushFrameworkEvidenceTable(lines, '用户旅程 user_journeys', ['旅程', '角色', '步骤', '证据'], journeyRows, { limit: 120 })
+  pushFrameworkEvidenceTable(lines, '待补采缺口 data_gaps', ['编号', '缺口', '状态/动作'], gapRows, { limit: 120 })
+  return lines.join('\n').trim()
+}
+
 function collectFeatureModuleEvidence(lines = [], features = [], label = '功能模块', limit = 12) {
   const items = Array.isArray(features) ? features : []
   for (const feature of items.slice(0, limit)) {
@@ -2691,7 +2836,7 @@ export function createCompetitorAnalysisEngineService(options = {}) {
       const frameworkPlaceholderReason = kind === 'framework' && !effectiveModelReport?.markdown
         ? frameworkPlaceholderReportReason(markdown)
         : ''
-      const generatedMarkdown = noEvidenceMarkdown
+      const baseGeneratedMarkdown = noEvidenceMarkdown
         ? sanitizeCompetitorAnalysisMarkdown(noEvidenceMarkdown, '')
         : frameworkPlaceholderReason
           ? ''
@@ -2706,6 +2851,12 @@ export function createCompetitorAnalysisEngineService(options = {}) {
         : scriptOk
           ? sanitizeCompetitorAnalysisMarkdown(markdown, '报告内容已生成，但包含暂不展示的内部信息。')
           : sanitizeCompetitorAnalysisMarkdown('', '')
+      const frameworkEvidenceAppendix = kind === 'framework' && baseGeneratedMarkdown && !frameworkQualityFailed && !frameworkPlaceholderReason
+        ? buildFrameworkEvidenceAppendix(analysisData, baseGeneratedMarkdown)
+        : ''
+      const generatedMarkdown = frameworkEvidenceAppendix
+        ? `${baseGeneratedMarkdown.trim()}\n\n${frameworkEvidenceAppendix}`
+        : baseGeneratedMarkdown
       const ok = kind === 'flow'
         ? ((scriptOk || Boolean(effectiveModelReport) || shouldBlockFlowModel) && flowHasEvidenceResult && Boolean(generatedMarkdown))
         : kind === 'framework'

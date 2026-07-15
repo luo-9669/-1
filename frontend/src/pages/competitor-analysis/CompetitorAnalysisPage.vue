@@ -2548,7 +2548,7 @@ function frameworkDashboardForRows(rows = []) {
   const layers = [...layerMap.entries()]
     .map(([name, items]) => ({
       name,
-      items: uniqueLimited(items, 5)
+      items: uniqueLimited(items, 12)
     }))
     .filter((layer) => layer.items.length)
     .slice(0, 8)
@@ -2577,7 +2577,7 @@ function frameworkDashboardForRows(rows = []) {
     coverageCards,
     layers: visibleLayers,
     overviewSteps,
-    wireframes: visibleLayers.slice(0, 3).map(frameworkWireframeForLayer),
+    wireframes: visibleLayers.map(frameworkWireframeForLayer),
     topTypes
   }
 }
@@ -3471,7 +3471,7 @@ watch(() => props.projectId, () => {
 
 .competitor-analysis-framework-wireframe-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
   margin-top: 14px;
 }

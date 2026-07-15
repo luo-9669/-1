@@ -1435,6 +1435,114 @@ test('framework partial coverage keeps public page evidence usable instead of gl
   assert.doesNotMatch(capturedPrompt, /evidenceQuality=partial 时可以整理已知线索，但标题、结论和流程都必须明确标注“证据不足\/待补采\/缺失项”/)
 })
 
+test('framework reports append complete collected evidence when model summary is sparse', async () => {
+  const sparseReport = [
+    '# 稿定设计完整流程框架',
+    '## 结构化节点树',
+    '```text',
+    '1. 产品矩阵层：创作产品',
+    '2. 顶层导航层：首页',
+    '3. 创作模式/核心工作台层：创作',
+    '4. 核心能力层：AI 生成',
+    '5. 重点场景层：电商设计',
+    '6. 模板与资产层：模板库',
+    '7. 协作与商业化层：会员',
+    '8. 核心任务链路：首页 -> 创作 -> 导出',
+    '```',
+    '## Markdown 报告版',
+    '公开证据可确认部分产品框架。',
+    '## 零、产品定位与分析边界',
+    '基于公开页面分析。',
+    '## 一、产品整体信息架构',
+    '导航与页面清单详见采集证据。',
+    '## 完整站点页面清单',
+    '| 页面 | URL | 层级 | 目的 | 置信度 |\n|---|---|---|---|---|\n| 首页 | https://gaoding.example.com | L1 | 入口 | full |\n| AI 图像教程模板 | https://gaoding.example.com/ai-tutorial | L1 | 页面 | partial |\n| 会员定价 | https://gaoding.example.com/pricing | L1 | 页面 | partial |\n| 发现页 | https://gaoding.example.com/explore | L1 | 导航 | partial |\n| Inspirations | https://gaoding.example.com/inspirations | L1 | 导航 | partial |',
+    '## 二、用户角色与使用场景',
+    '设计用户进入创作。',
+    '## 三、完整用户旅程',
+    '### 主路径\n用户从首页进入创作入口，选择 AI 图像教程模板，完成编辑后进入导出或交付。',
+    '### 分支路径\n用户也可以先进入模板库或 Inspirations 内容页，再回到编辑器继续创作。',
+    '### 异常路径\n当导出失败或登录后编辑器不可见时，需要提示用户重试并标记为待补采。',
+    '## 四、关键决策点',
+    '选择模板或空白创作。',
+    '## 五、状态与异常',
+    '核心状态包含浏览中、创作中、编辑中、导出中和导出失败重试。',
+    '## 六、跨功能关联',
+    '模板进入编辑器。',
+    '## 七、可复用 UX 洞察',
+    '入口直达核心任务。',
+    '## 八、证据与待补采',
+    '登录后工作台待补采。'
+  ].join('\n\n')
+  const service = createCompetitorAnalysisEngineService({
+    modelSettingsProvider: async () => ({
+      enabled: true,
+      provider: 'codex-cli',
+      defaultModel: 'gpt-5.5',
+      timeoutMs: 0
+    }),
+    resolveAgentProvider: async () => ({
+      name: 'codex-cli',
+      generate: async () => ({ content: sparseReport })
+    }),
+    pythonRunner: async (args, env) => {
+      await writeFile(join(env.OUTPUT_DIR, 'framework.md'), '# Python framework result')
+      await writeFile(join(env.OUTPUT_DIR, 'framework.json'), JSON.stringify({
+        product_name: '稿定设计',
+        product_url: 'https://gaoding.example.com',
+        evidence_quality: 'partial',
+        evidence_count: 8,
+        page_evidence: [
+          { title: '首页', url: 'https://gaoding.example.com', content: '公开首页，包含创作入口。' },
+          { title: 'AI 图像教程模板', url: 'https://gaoding.example.com/ai-tutorial', content: 'AI 图像教程模板页面。' },
+          { title: '会员定价', url: 'https://gaoding.example.com/pricing', content: '升级 AI 创作会员。' }
+        ],
+        sitemap_navigation: [
+          { name: '首页', url: 'https://gaoding.example.com', children: [] },
+          { name: '发现页', url: 'https://gaoding.example.com/explore', children: [
+            { name: 'Inspirations', url: 'https://gaoding.example.com/inspirations', children: [] }
+          ] }
+        ],
+        crawler_features: [
+          { name: 'AI 图像教程模板', url: 'https://gaoding.example.com/ai-tutorial', description: '教程模板入口' },
+          { name: '升级 AI 创作会员', url: 'https://gaoding.example.com/pricing', description: '会员转化入口' }
+        ],
+        feature_modules: [
+          { name: '创作任务', level: '核心工作台', entry_path: 'https://gaoding.example.com/create', description: '选择图片或视频提示词' }
+        ],
+        user_journeys: [
+          { name: '创作主链路', steps: ['首页', '创作', '编辑', '导出'] }
+        ],
+        data_gaps: ['登录后编辑器', '素材管理', '协作权限']
+      }))
+      return { code: 0, stdout: '', stderr: '' }
+    }
+  })
+
+  const response = await service.run({
+    projectId: 'competitor-analysis-framework-evidence-appendix',
+    kind: 'framework',
+    productName: '稿定设计',
+    productUrl: 'https://gaoding.example.com'
+  })
+
+  assert.equal(response.ok, true)
+  assert.match(response.markdown, /## 采集证据完整清单/)
+  assert.match(response.markdown, /### 页面证据 page_evidence/)
+  assert.match(response.markdown, /AI 图像教程模板/)
+  assert.match(response.markdown, /https:\/\/gaoding\.example\.com\/ai-tutorial/)
+  assert.match(response.markdown, /### 导航证据 sitemap_navigation/)
+  assert.match(response.markdown, /Inspirations/)
+  assert.match(response.markdown, /### 功能证据 crawler_features/)
+  assert.match(response.markdown, /升级 AI 创作会员/)
+  assert.match(response.markdown, /### 功能模块 feature_modules/)
+  assert.match(response.markdown, /创作任务/)
+  assert.match(response.markdown, /### 用户旅程 user_journeys/)
+  assert.match(response.markdown, /创作主链路/)
+  assert.match(response.markdown, /### 待补采缺口 data_gaps/)
+  assert.match(response.markdown, /协作权限/)
+})
+
 test('framework quality gate repairs an incomplete model report once', async () => {
   const prompts = []
   const completeReport = [
