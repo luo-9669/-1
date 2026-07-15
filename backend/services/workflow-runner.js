@@ -1451,6 +1451,40 @@ function htmlCanvasArtifactContext(node = {}, run = {}) {
   const interactionSpec = interactionNode?.interactionSpecArtifact || null
   const visualBrief = visualNode?.visualBrief && typeof visualNode.visualBrief === 'object' ? visualNode.visualBrief : {}
   const visualPreview = visualNode?.visualPreview && typeof visualNode.visualPreview === 'object' ? visualNode.visualPreview : {}
+  const visualArtifact = visualNode?.artifact && typeof visualNode.artifact === 'object' ? visualNode.artifact : {}
+  const sourceVisualImageDataUrl = String(
+    node.sourceVisualImageDataUrl ||
+    visualPreview.imageDataUrl ||
+    visualArtifact.imageDataUrl ||
+    visualNode?.imageDataUrl ||
+    ''
+  ).trim()
+  const sourceVisualImageUrl = String(
+    node.sourceVisualImageUrl ||
+    visualPreview.imageUrl ||
+    visualArtifact.imageUrl ||
+    visualNode?.imageUrl ||
+    ''
+  ).trim()
+  const sourceVisualLocalImagePath = String(
+    node.sourceVisualLocalImagePath ||
+    visualPreview.localImagePath ||
+    visualArtifact.localImagePath ||
+    visualNode?.localImagePath ||
+    ''
+  ).trim()
+  const sourceVisualReferenceImages = sourceVisualImageDataUrl || sourceVisualImageUrl || sourceVisualLocalImagePath
+    ? [
+        {
+          title: visualNode?.title || visualBrief.pageTitle || node.title || '上一阶段 UI视觉图',
+          sourceUrl: sourceVisualImageUrl || sourceVisualLocalImagePath || 'inline-data-url',
+          imageDataUrl: sourceVisualImageDataUrl,
+          imageUrl: sourceVisualImageUrl,
+          localImagePath: sourceVisualLocalImagePath,
+          imagePrompt: String(visualPreview.imagePrompt || visualBrief.imagePrompt || '').trim()
+        }
+      ]
+    : []
   const sections = Array.isArray(layoutArtifact?.sections) ? layoutArtifact.sections : []
   const wireframe = String(layoutArtifact?.asciiWireframe || layoutArtifact?.rawText || '').trim()
   const wireframeItems = compactWireframeItems(wireframe, 8)
@@ -1474,6 +1508,10 @@ function htmlCanvasArtifactContext(node = {}, run = {}) {
     componentItems,
     visualFocus: String(visualBrief.layoutFocus || visualBrief.goal || '').trim(),
     visualPrompt: String(visualPreview.imagePrompt || visualBrief.imagePrompt || '').trim(),
+    sourceVisualImageDataUrl,
+    sourceVisualImageUrl,
+    sourceVisualLocalImagePath,
+    sourceVisualReferenceImages,
     fallbackItems
   }
 }
@@ -1841,7 +1879,10 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReferen
     context.gestureItems.length ? `手势/动作：${context.gestureItems.join('；')}` : '',
     context.componentItems.length ? `UI 组件清单：${context.componentItems.join('；')}` : '',
     context.visualFocus ? `视觉方向：${context.visualFocus}` : '',
-    context.visualPrompt ? `上游视觉提示词：${compactPromptText(context.visualPrompt, 1200)}` : ''
+    context.visualPrompt ? `上游视觉提示词：${compactPromptText(context.visualPrompt, 1200)}` : '',
+    context.sourceVisualReferenceImages.length
+      ? `上一阶段 UI 视觉图是本次 HTML 生成的主参考：${context.sourceVisualReferenceImages.map((image) => image.sourceUrl || image.title).join('；')}`
+      : '上一阶段 UI 视觉图：未生成，不能仅凭低保文字自由生成 HTML。'
   ].filter(Boolean).join('\n')
   return {
     mode: 'workflow-html-artifact-generation',
@@ -1854,10 +1895,12 @@ function htmlArtifactModelContext(node = {}, payload = {}, run = {}, htmlReferen
     model: payload.model || run.model || 'gpt-5.5',
     timeoutMs: payload.timeoutMs,
     maxOutputTokens: 12000,
+    sourceVisualReferenceImages: context.sourceVisualReferenceImages,
     systemPrompt: [
       '你是资深前端工程师和产品 UI 还原专家。只输出一个可直接运行的单文件 HTML，不要输出 Markdown 解释。',
       '必须遵守传入的 HTML 参考规范 md；如果项目知识库规范和默认规范冲突，优先使用项目知识库规范。',
       '本次生成只写回工作流 HTML 画布节点，不创建网页工程资产、还原资产、restoredPage 或项目素材记录。',
+      '必须优先依据上一阶段已生成 UI 视觉图还原 HTML；交互低保、区域、状态和提示词只作为辅助约束。',
       '必须严格基于上游交互低保、UI视觉说明和状态说明生成；不要编造无关业务页面，不要使用会员中心、余额、积分、优惠券等通用兜底内容，除非上游明确要求。',
       'HTML 必须包含完整 <!doctype html>、<html>、<head>、<body>、CSS 和必要 JS。'
     ].join('\n'),
@@ -1903,6 +1946,24 @@ async function buildHtmlModelCanvasArtifact(node = {}, payload = {}, run = {}, o
   }
   const htmlReference = await resolveHtmlReferenceForRun(run, options)
   const context = htmlArtifactModelContext(node, payload, run, htmlReference)
+  const requiresVisualImage = node.htmlOutputKind !== 'total-interactive'
+  if (requiresVisualImage && !context.sourceVisualReferenceImages?.length) {
+    const message = '请先生成上一阶段 UI 视觉图，再基于该图片生成 HTML。'
+    return {
+      kind: 'html',
+      generatedAt: now,
+      codeStatus: 'failed',
+      contentStatus: 'missing-source-visual',
+      failureMessage: message,
+      error: message,
+      html: '',
+      codePreview: {
+        ...basePreview,
+        previewSummary: message,
+        code: ''
+      }
+    }
+  }
   try {
     const result = await provider.generate(context)
     const html = providerHtmlContent(result)

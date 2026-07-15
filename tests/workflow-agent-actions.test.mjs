@@ -2670,6 +2670,24 @@ test('HTML output canvas cards render the generated page while Agent keeps sourc
 
   assert.match(
     detailSource,
+    /v-if="codePreviewFiles\(fullscreenNode\)\.length"[\s\S]*source-project-layout[\s\S]*v-if="selectedCodePreviewCode\(fullscreenNode\)\.trim\(\)"[\s\S]*generated-source-code[\s\S]*v-else[\s\S]*preview-code-source-empty[\s\S]*待生成源码/,
+    'fullscreen source tab should show a clean empty state instead of rendering pending summaries or escaped placeholder text as code'
+  )
+
+  assert.match(
+    canvasVue,
+    /function previewCodeSrcdoc\(node = \{\}\)[\s\S]*generatedHtmlCodeForPreview\(node\)[\s\S]*withPreviewCodeFitStyle/,
+    'HTML iframe preview should only render validated generated HTML, not summary or pending placeholder text'
+  )
+
+  assert.doesNotMatch(
+    canvasVue,
+    /function compactCodePreview\(node = \{\}\)[\s\S]*previewSummary[\s\S]*等待生成 HTML/,
+    'compact code preview should not fall back to previewSummary because that leaks non-code text into copy/download/source paths'
+  )
+
+  assert.match(
+    detailSource,
     /runFullscreenGenerationAction\(fullscreenNode, action\)[\s\S]*codeGenerationButtonLabel\(fullscreenNode, action\)/,
     'fullscreen HTML/Vue generation actions should use code-specific regenerate labels'
   )
@@ -4372,8 +4390,8 @@ test('workflow canvas fullscreen switches page wireframe and page-level interact
   )
   assert.match(
     detailTemplate,
-    /pageLofiPrototypeSections\(fullscreenNode\)[\s\S]*section\.title[\s\S]*section\.items/,
-    'low-fi prototype should derive its sections from the pageLayoutArtifact instead of fixed business screenshots'
+    /pageLofiPrototypeBlueprint\(fullscreenNode\)[\s\S]*page-lofi-wireframe-board[\s\S]*blueprint\.archetype[\s\S]*page-lofi-wireframe-region-map[\s\S]*region in blueprint\.regions[\s\S]*pageLofiRegionStyle\(region\)[\s\S]*page-lofi-wireframe-actionbar[\s\S]*page-lofi-wireframe-exception/,
+    'low-fi prototype should render an archetype-specific region map derived from the current page framework'
   )
   assert.match(
     detailTemplate,
@@ -4417,8 +4435,8 @@ test('workflow canvas fullscreen switches page wireframe and page-level interact
   )
   assert.match(
     canvasVue,
-    /function pageLofiPrototypeSections\(node = \{\}\)[\s\S]*pageLayoutArtifact\(node\)[\s\S]*asciiWireframe/,
-    'low-fi prototype sections should be derived from pageLayoutArtifact and its ASCII wireframe'
+    /function pageLofiPrototypeBlueprint\(node = \{\}\)[\s\S]*pageLayoutArtifact\(node\)[\s\S]*lofiPageArchetype\(node[\s\S]*lofiBlueprintRegions\([\s\S]*asciiWireframe/,
+    'low-fi prototype board should derive page archetype and region positions from pageLayoutArtifact and its ASCII wireframe'
   )
   assert.match(
     canvasVue,
@@ -4467,8 +4485,8 @@ test('workflow canvas fullscreen switches page wireframe and page-level interact
   )
   assert.match(
     stylesSource,
-    /\.page-lofi-prototype-artifact[\s\S]*\.page-lofi-prototype-frame[\s\S]*\.page-lofi-prototype-section/,
-    'low-fi prototype mode should have dedicated visual prototype styling'
+    /\.page-lofi-prototype-artifact[\s\S]*\.page-lofi-wireframe-board[\s\S]*\.page-lofi-wireframe-board\.list[\s\S]*\.page-lofi-wireframe-board\.modal[\s\S]*\.page-lofi-wireframe-region-map[\s\S]*grid-template-areas[\s\S]*\.page-lofi-wireframe-region/,
+    'low-fi prototype mode should style distinct page archetypes and a region map rather than one fixed two-column board'
   )
   assert.match(
     stylesSource,
@@ -5963,7 +5981,7 @@ test('workflow fullscreen detail uses one left-aligned layout shell across skill
   }
   assert.match(
     stylesSource,
-    /\.page-lofi-prototype-frame\.mobile[\s\S]*margin:\s*0;[\s\S]*justify-self:\s*start;/,
+    /\.page-lofi-wireframe-board\.mobile[\s\S]*margin:\s*0;[\s\S]*justify-self:\s*start;/,
     'mobile low-fidelity prototype detail should start from the left edge instead of centering in fullscreen detail'
   )
   assert.match(

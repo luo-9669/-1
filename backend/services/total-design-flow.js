@@ -6503,6 +6503,40 @@ function findInteractionSourceNode(totalFlow = {}, node = {}) {
   return interactionNodes.find((sourceNode) => normalizePageTitleForMatch(sourceNode?.title || '') === nodeTitle) || null
 }
 
+function findVisualNodeForInteractionSource(totalFlow = {}, sourceNode = {}) {
+  const visualNodes = totalFlow?.stageCanvases?.['ui-visual']?.nodes
+  const nodes = Array.isArray(visualNodes) ? visualNodes : []
+  if (!nodes.length || !sourceNode) return null
+  const sourceKeys = new Set(pageIdentityKeys(sourceNode).filter(Boolean))
+  const bySourceLookup = nodes.find((node) => findInteractionSourceNode(totalFlow, node)?.id === sourceNode.id)
+  if (bySourceLookup) return bySourceLookup
+  return nodes.find((node) =>
+    pageIdentityKeys(node).some((key) => sourceKeys.has(key)) ||
+    (sourceNode?.id && node?.id === `ui-${sourceNode.id}`)
+  ) || null
+}
+
+function sourceVisualArtifactPatch(visualNode = null) {
+  if (!visualNode || typeof visualNode !== 'object') return {}
+  const preview = visualNode.visualPreview && typeof visualNode.visualPreview === 'object' ? visualNode.visualPreview : {}
+  const artifact = visualNode.artifact && typeof visualNode.artifact === 'object' ? visualNode.artifact : {}
+  const imageUrl = cleanText(preview.imageUrl || artifact.imageUrl || visualNode.imageUrl || '')
+  const imageDataUrl = cleanText(preview.imageDataUrl || artifact.imageDataUrl || visualNode.imageDataUrl || '')
+  const localImagePath = cleanText(preview.localImagePath || artifact.localImagePath || visualNode.localImagePath || '')
+  const imageSource = imageDataUrl || imageUrl || localImagePath
+  if (!imageSource && !Object.keys(preview).length && !Object.keys(artifact).length) return {}
+  return {
+    sourceVisualStageId: 'ui-visual',
+    sourceVisualNodeId: visualNode.id || '',
+    sourceVisualStatus: visualNode.artifactStatus || preview.imageStatus || artifact.imageStatus || '',
+    sourceVisualImageUrl: imageUrl,
+    sourceVisualImageDataUrl: imageDataUrl,
+    sourceVisualLocalImagePath: localImagePath,
+    sourceVisualPreview: preview,
+    sourceVisualArtifact: artifact
+  }
+}
+
 function evidenceRefIds(artifact = {}) {
   return uniqueTexts((Array.isArray(artifact?.evidenceRefs) ? artifact.evidenceRefs : [])
     .map((ref) => typeof ref === 'string' ? ref : ref?.id || ref?.source || ref?.title), 10)
@@ -6851,7 +6885,7 @@ function htmlPageFromInteractionSource(sourceNode = {}, index = 0) {
   }
 }
 
-function codeNodeForSourceAlignment(sourceNode = {}, existingNode = null, index = 0, sourceNodes = []) {
+function codeNodeForSourceAlignment(sourceNode = {}, existingNode = null, index = 0, sourceNodes = [], totalFlow = {}) {
   const page = htmlPageFromInteractionSource(sourceNode, index)
   const baseNode = htmlPageNode(page, index, {}, '', sourceNodes.map(htmlPageFromInteractionSource))
   const sourceChanged = existingNode && downstreamNodeSourceChanged(existingNode, sourceNode)
@@ -6875,7 +6909,7 @@ function codeNodeForSourceAlignment(sourceNode = {}, existingNode = null, index 
           : baseNode.generationActions
       }
     : baseNode
-  return enrichCodeNodeWithSource(node, sourceNode, 'html')
+  return enrichCodeNodeWithSource(node, sourceNode, 'html', totalFlow)
 }
 
 function htmlTotalNodeForSourceAlignment(sourceNodes = [], existingNode = null) {
@@ -6944,7 +6978,7 @@ function realignHtmlCanvasToInteractionSources(totalFlow = {}, htmlCanvas = {}) 
   const sourceNodes = interactionNodesWithArtifacts(totalFlow)
   const pageNodes = sourceNodes.map((sourceNode, index) => {
     const existingNode = htmlNodes.find((node) => findInteractionSourceNode(totalFlow, node)?.id === sourceNode.id && isPageDerivedHtmlNode(node)) || null
-    return codeNodeForSourceAlignment(sourceNode, existingNode, index, sourceNodes)
+    return codeNodeForSourceAlignment(sourceNode, existingNode, index, sourceNodes, totalFlow)
   })
   const existingTotalNode = htmlNodes.find((node) => node.htmlOutputKind === 'total-interactive' || /总交互/.test(node.title || '')) || null
   const totalNode = htmlTotalNodeForSourceAlignment(sourceNodes, existingTotalNode)
@@ -6962,15 +6996,18 @@ function realignHtmlCanvasToInteractionSources(totalFlow = {}, htmlCanvas = {}) 
   }, recoveringFailedPlaceholder ? 'html-output' : '')
 }
 
-function enrichCodeNodeWithSource(node = {}, sourceNode = {}, kind = 'html') {
+function enrichCodeNodeWithSource(node = {}, sourceNode = {}, kind = 'html', totalFlow = {}) {
   const patch = upstreamArtifactPatch(sourceNode)
+  const visualPatch = sourceVisualArtifactPatch(findVisualNodeForInteractionSource(totalFlow, sourceNode))
   const regions = sourceRegionLabels(sourceNode)
   const targets = sourceInteractionTargets(sourceNode)
   const existingPlan = node.engineeringPlan && typeof node.engineeringPlan === 'object' ? node.engineeringPlan : engineeringPlanArtifact(kind)
   const existingPreview = node.codePreview && typeof node.codePreview === 'object' ? node.codePreview : codePreviewArtifact(kind)
+  const visualInput = visualPatch.sourceVisualImageDataUrl || visualPatch.sourceVisualImageUrl || visualPatch.sourceVisualLocalImagePath
   return {
     ...node,
     ...patch,
+    ...visualPatch,
     content: uniqueTexts([
       `上游低保：${sourceNode.title || '交互低保页面'} 已继承`,
       ...(Array.isArray(node.content) ? node.content : [])
@@ -6995,6 +7032,7 @@ function enrichCodeNodeWithSource(node = {}, sourceNode = {}, kind = 'html') {
     engineeringPlan: {
       ...existingPlan,
       inputArtifacts: uniqueTexts([
+        visualInput ? `上一阶段 UI视觉图：${visualPatch.sourceVisualImageUrl || visualPatch.sourceVisualLocalImagePath || '已生成图片数据'}` : '',
         `${sourceNode.title || '当前页面'} pageLayoutArtifact ${patch.upstreamPageLayoutVersion || ''}`.trim(),
         ...regions,
         ...targets,
@@ -7077,7 +7115,7 @@ export function withDownstreamStageArtifactContext(totalFlow = {}) {
         nodes: htmlCanvas.nodes.map((node) => {
           if (node.htmlOutputKind === 'total-interactive' || /总交互/.test(node.title || '')) return node
           const sourceNode = findInteractionSourceNode(totalFlow, node)
-          return sourceNode ? enrichCodeNodeWithSource(node, sourceNode, 'html') : node
+          return sourceNode ? enrichCodeNodeWithSource(node, sourceNode, 'html', totalFlow) : node
         })
       }
     }

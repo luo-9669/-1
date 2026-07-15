@@ -1116,26 +1116,60 @@
                     <span>{{ pageLowFiWireframeArtifact(fullscreenNode).pageId }} {{ pageLowFiWireframeArtifact(fullscreenNode).pageName }}</span>
                   </figcaption>
                 </figure>
-                <div v-else class="page-lofi-prototype-frame" :class="pageLofiPrototypeTone(fullscreenNode)">
-                  <section
-                    v-for="section in pageLofiPrototypeSections(fullscreenNode)"
-                    :key="`${fullscreenNode.id}-lofi-section-${section.key}`"
-                    class="page-lofi-prototype-section"
-                    :class="[section.kind, section.weight]"
-                  >
-                    <header>
-                      <b>{{ section.title }}</b>
-                      <span>{{ section.kindLabel }}</span>
+                <template v-else v-for="blueprint in [pageLofiPrototypeBlueprint(fullscreenNode)]" :key="`${fullscreenNode.id}-lofi-blueprint`">
+                  <div class="page-lofi-wireframe-board" :class="[blueprint.tone, blueprint.layout, blueprint.archetype]">
+                    <header class="page-lofi-wireframe-topbar">
+                      <strong>{{ blueprint.topbar.title }}</strong>
+                      <div class="page-lofi-wireframe-nav-placeholders">
+                        <span v-for="item in blueprint.topbar.items" :key="`${fullscreenNode.id}-topbar-${item.key}`">{{ item.label }}</span>
+                      </div>
+                      <i aria-hidden="true"></i>
                     </header>
-                    <div class="page-lofi-prototype-items">
-                      <article v-for="item in section.items" :key="`${fullscreenNode.id}-${section.key}-${item.key}`" :class="item.kind">
-                        <i v-if="item.kind === 'media'"></i>
-                        <strong>{{ item.label }}</strong>
-                        <small v-if="item.meta">{{ item.meta }}</small>
-                      </article>
+                    <section v-if="blueprint.progressSteps.length" class="page-lofi-wireframe-progress">
+                      <span>{{ blueprint.progressSteps.join(' → ') }}</span>
+                    </section>
+                    <div class="page-lofi-wireframe-region-map" :style="blueprint.regionMapStyle">
+                      <section
+                        v-for="region in blueprint.regions"
+                        :key="`${fullscreenNode.id}-lofi-region-${region.key}`"
+                        class="page-lofi-wireframe-region"
+                        :class="[region.role, region.shape]"
+                        :style="pageLofiRegionStyle(region)"
+                      >
+                        <header>
+                          <strong>{{ region.title }}</strong>
+                          <span>{{ region.badge }}</span>
+                        </header>
+                        <div v-if="region.showPlaceholder" class="page-lofi-wireframe-media" :class="region.shape">
+                          <span v-if="region.shape === 'video'" class="page-lofi-wireframe-play" aria-hidden="true"></span>
+                          <b>{{ region.primaryLabel }}</b>
+                        </div>
+                        <div class="page-lofi-wireframe-region-items">
+                          <article v-for="item in region.items" :key="`${fullscreenNode.id}-${region.key}-${item.key}`" :class="item.kind">
+                            <strong>{{ item.label }}</strong>
+                            <small v-if="item.meta">{{ item.meta }}</small>
+                          </article>
+                        </div>
+                      </section>
                     </div>
-                  </section>
-                </div>
+                    <footer class="page-lofi-wireframe-actionbar">
+                      <strong>{{ blueprint.actionbar.title }}</strong>
+                      <div>
+                        <button
+                          v-for="item in blueprint.actionbar.items"
+                          :key="`${fullscreenNode.id}-action-${item.key}`"
+                          type="button"
+                          :class="{ primary: item.primary }"
+                        >
+                          {{ item.label }}
+                        </button>
+                      </div>
+                    </footer>
+                    <section class="page-lofi-wireframe-exception">
+                      <span>{{ blueprint.exceptionEntry }}</span>
+                    </section>
+                  </div>
+                </template>
               </section>
               <section v-else-if="fullscreenPageDetailMode(fullscreenNode) === 'interaction-spec' && hasInteractionSpecArtifact(fullscreenNode)" class="page-interaction-spec-artifact">
                 <header>
@@ -1465,9 +1499,9 @@
               >
                 <div class="source-toolbar">
                   <span class="source-toolbar-label">{{ codePreviewSourceTitle(fullscreenNode) }} 源码</span>
-                  <small>{{ selectedCodePreviewFile(fullscreenNode).path || codePreview(fullscreenNode).codeLanguage }}</small>
+                  <small>{{ selectedCodePreviewFile(fullscreenNode).path || '待生成' }}</small>
                 </div>
-                <div class="source-project-layout" aria-label="源码文件">
+                <div v-if="codePreviewFiles(fullscreenNode).length" class="source-project-layout" aria-label="源码文件">
                   <aside class="source-file-tree">
                     <strong>文件</strong>
                     <button
@@ -1483,8 +1517,16 @@
                     </button>
                   </aside>
                   <div class="source-file-editor">
-                    <pre class="generated-source-code"><code>{{ selectedCodePreviewCode(fullscreenNode) }}</code></pre>
+                    <pre v-if="selectedCodePreviewCode(fullscreenNode).trim()" class="generated-source-code"><code>{{ selectedCodePreviewCode(fullscreenNode) }}</code></pre>
+                    <div v-else class="preview-code-source-empty">
+                      <strong>待生成源码</strong>
+                      <span>生成 HTML 后，这里会展示后端返回的真实源码。</span>
+                    </div>
                   </div>
+                </div>
+                <div v-else class="preview-code-source-empty standalone">
+                  <strong>待生成源码</strong>
+                  <span>当前节点还没有生成 HTML，源码面板不会展示占位文案。</span>
                 </div>
               </section>
             </article>
@@ -5820,16 +5862,21 @@ function normalizePrototypeItem(item, index = 0, fallbackKind = 'control') {
 
 function normalizePrototypeSection(section = {}, index = 0) {
   if (!section || typeof section !== 'object') return null
-  const title = String(section.title || section.name || section.label || section.region || section.id || '').trim()
+  const title = String(section.title || section.name || section.label || section.region || section.area || section['区域'] || section.id || '').trim()
   const rawItems = Array.isArray(section.items)
     ? section.items
     : Array.isArray(section.children)
       ? section.children
       : Array.isArray(section.controls)
         ? section.controls
-        : []
+        : [
+            section.content || section['内容'],
+            section.summary || section.description || section.note || section.detail || section['说明'],
+            section.stateDescription || section.state_description || section['状态说明'],
+            section.componentReference || section.component_reference || section['组件引用']
+          ].filter(Boolean)
   const items = rawItems.map((item, itemIndex) => normalizePrototypeItem(item, itemIndex)).filter(Boolean)
-  const summary = String(section.summary || section.description || section.note || '').trim()
+  const summary = String(section.content || section['内容'] || section.summary || section.description || section.note || section.detail || section['说明'] || '').trim()
   if (summary && !items.length) items.push(normalizePrototypeItem(summary, 0, 'text'))
   if (!title && !items.length) return null
   const kind = String(section.kind || section.type || '').trim() ||
@@ -5883,6 +5930,309 @@ function pageLofiPrototypeSections(node = {}) {
   if (footerLines.length) pushSection('固定与底部操作', 'footer', footerLines)
   if (!sections.length) pushSection(artifact.title || node.title || '页面原型', 'content', ['页面结构待模型补充'])
   return sections
+}
+
+function lofiSectionText(section = {}) {
+  return [
+    section.title,
+    section.kind,
+    ...(Array.isArray(section.items) ? section.items.map((item) => `${item?.label || ''} ${item?.meta || ''}`) : [])
+  ].join(' ')
+}
+
+function lofiSectionMatches(section = {}, pattern) {
+  return pattern.test(lofiSectionText(section))
+}
+
+function lofiCleanWireframeLines(text = '') {
+  return String(text || '').split('\n')
+    .map((line) => line.replace(/[│|┌┐└┘├┤┬┴┼─━═╭╮╰╯]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !/^#+\s*/.test(line) && !/^\d+$/.test(line))
+}
+
+function lofiUniqueItems(items = [], fallback = [], prefix = 'lofi', limit = 4) {
+  const source = Array.isArray(items) && items.length ? items : fallback
+  const seen = new Set()
+  return (Array.isArray(source) ? source : [])
+    .map((item, index) => normalizePrototypeItem(item, index))
+    .filter((item) => {
+      if (!item?.label) return false
+      const key = item.label.replace(/\s+/g, '')
+      if (seen.has(key)) return false
+      seen.add(key)
+      item.key = item.key || `${prefix}-${seen.size}`
+      return true
+    })
+    .slice(0, limit)
+}
+
+function lofiProgressSteps(node = {}, wireframeLines = []) {
+  const flowLine = wireframeLines.find((line) => /→|->|流程|步骤|进度/.test(line))
+  if (flowLine) {
+    const normalized = flowLine.replace(/^.*?[：:]\s*/, '')
+    const steps = normalized.split(/→|->|>|\/|，|、/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+    if (steps.length >= 2) return steps
+  }
+  return interactionSpecFlowPreview(node)
+    .slice(0, 5)
+    .map((step) => step.to || step.result || step.trigger)
+    .filter(Boolean)
+}
+
+function lofiInteractionItems(node = {}, limit = 4) {
+  return interactionSpecRows(node)
+    .map((row, index) => ({
+      key: row.id || row.annotationId || `interaction-${index + 1}`,
+      label: row.target || row.userAction || row.gesture || row.feedback || `交互 ${index + 1}`,
+      meta: row.feedback || row.systemFeedback || row.result || row.statePromptCopy || '',
+      kind: /提交|确认|导出|生成|保存|按钮|click|单击/.test(`${row.target} ${row.gesture} ${row.feedback}`) ? 'action' : 'text'
+    }))
+    .filter((item) => item.label)
+    .slice(0, limit)
+}
+
+function lofiStateItems(node = {}, limit = 4) {
+  return interactionSpecStateMatrix(node)
+    .map((row, index) => ({
+      key: row.id || `state-${index + 1}`,
+      label: row.state || row.display || row.promptCopy || `状态 ${index + 1}`,
+      meta: row.recovery || row.handling || row.trigger || '',
+      kind: 'text'
+    }))
+    .filter((item) => item.label)
+    .slice(0, limit)
+}
+
+function lofiPageArchetype(node = {}, sections = [], wireframeLines = []) {
+  const artifact = pageLayoutArtifact(node)
+  const text = [
+    node?.title,
+    artifact.pageName,
+    artifact.title,
+    artifact.layoutType,
+    artifact.pageType,
+    artifact.layout?.layoutType,
+    artifact.screenContract?.layoutStrategy?.archetype,
+    ...sections.map((section) => lofiSectionText(section)),
+    ...wireframeLines
+  ].join(' ')
+  if (/弹窗|抽屉|modal|popup|dialog/i.test(text)) return 'modal'
+  if (/进度|排队|任务|生成中|解析中|progress|queue/i.test(text)) return 'progress'
+  if (/上传|替换|编辑|配置|表单|输入|拆解|工作台|upload|edit|form/i.test(text)) return 'editor'
+  if (/预览|导出|视频|播放器|播放|preview|export|video/i.test(text)) return 'preview'
+  if (/列表|模板|项目|搜索|筛选|卡片|库|list|grid|card/i.test(text)) return 'list'
+  if (/首页|主页|入口|home/i.test(text)) return 'entry'
+  return 'document'
+}
+
+function lofiRegionRole(section = {}, index = 0, archetype = 'document') {
+  const text = lofiSectionText(section)
+  if (/顶部|导航|入口|header|nav/i.test(text)) return 'top'
+  if (/底部|固定|操作栏|footer|action/i.test(text)) return 'bottom'
+  if (/右侧|侧栏|侧边|面板|详情|精修|参数|抽屉|aside|side/i.test(text)) return 'side'
+  if (/弹窗|抽屉|提醒|设置|modal|popup|dialog/i.test(text)) return 'modal'
+  if (/进度|状态|排队|步骤|progress|queue/i.test(text)) return 'progress'
+  if (/筛选|搜索|分类|过滤|filter|search/i.test(text)) return 'filter'
+  if (/列表|卡片|模板|项目|表格|list|grid|card|table/i.test(text)) return archetype === 'list' ? 'list' : 'main'
+  if (/视频|预览|播放器|封面|图|图片|播放|preview|video|media/i.test(text)) return 'preview'
+  if (/上传|表单|输入|编辑|替换|配置|form|upload|edit/i.test(text)) return 'editor'
+  if (index === 0 && archetype !== 'modal') return 'main'
+  return 'support'
+}
+
+function lofiRegionShape(section = {}, role = 'support', archetype = 'document') {
+  const text = lofiSectionText(section)
+  if (role === 'preview' || /视频|播放器|播放|预览|video/i.test(text)) return 'video'
+  if (role === 'list' || archetype === 'list' || /列表|卡片|表格|模板|项目|list|grid|table/i.test(text)) return 'list'
+  if (role === 'editor' || archetype === 'editor' || /上传|表单|输入|编辑|配置|替换|form|upload/i.test(text)) return 'form'
+  if (role === 'modal' || archetype === 'modal') return 'modal'
+  if (role === 'progress' || archetype === 'progress') return 'progress'
+  return 'block'
+}
+
+function lofiRegionGridArea(role = 'support', index = 0, archetype = 'document') {
+  if (role === 'top') return 'top'
+  if (role === 'bottom') return 'bottom'
+  if (role === 'side') return 'side'
+  if (role === 'filter') return 'filter'
+  if (role === 'modal') return 'modal'
+  if (role === 'progress') return archetype === 'progress' ? 'main' : 'filter'
+  if (role === 'preview') return archetype === 'preview' ? 'main' : 'main'
+  if (role === 'list' || role === 'editor' || role === 'main') return 'main'
+  if (archetype === 'modal') return 'modal'
+  return index % 2 === 0 ? 'main' : 'side'
+}
+
+function lofiRegionBadge(role = '', shape = '') {
+  if (role === 'top') return '固定'
+  if (role === 'bottom') return '底部'
+  if (role === 'side') return '可滚动'
+  if (role === 'filter') return '筛选'
+  if (role === 'modal') return '浮层'
+  if (shape === 'video') return '预览'
+  if (shape === 'list') return '列表'
+  if (shape === 'form') return '表单'
+  if (shape === 'progress') return '状态'
+  return '区域'
+}
+
+function lofiRegionItems(section = {}, node = {}, role = 'support') {
+  const interactionItems = role === 'side' || role === 'bottom' ? lofiInteractionItems(node, 4) : []
+  const stateItems = role === 'side' || role === 'modal' ? lofiStateItems(node, 3) : []
+  return lofiUniqueItems(
+    section.items || [],
+    [
+      ...interactionItems,
+      ...stateItems,
+      section.title || '区域内容待模型补充'
+    ],
+    `region-${role}`,
+    role === 'main' || role === 'list' ? 6 : 4
+  )
+}
+
+function lofiBlueprintRegionFallback(node = {}, archetype = 'document') {
+  const title = node?.title || pageLayoutArtifact(node).title || '页面'
+  if (archetype === 'modal') {
+    return [
+      normalizePrototypeSection({ title: `${title} 标题区`, kind: 'overlay', items: ['标题 / 说明 / 关闭入口'] }, 0),
+      normalizePrototypeSection({ title: `${title} 内容区`, kind: 'content', items: ['核心提示 / 参数 / 风险说明'] }, 1),
+      normalizePrototypeSection({ title: `${title} 操作区`, kind: 'footer', items: ['取消', '确认'] }, 2)
+    ].filter(Boolean)
+  }
+  return pageLofiPrototypeSections(node)
+}
+
+function lofiBlueprintRegions(node = {}, sections = [], archetype = 'document') {
+  const sourceSections = sections.length ? sections : lofiBlueprintRegionFallback(node, archetype)
+  const regions = sourceSections
+    .map((section, index) => {
+      const role = lofiRegionRole(section, index, archetype)
+      const shape = lofiRegionShape(section, role, archetype)
+      const gridArea = lofiRegionGridArea(role, index, archetype)
+      const items = lofiRegionItems(section, node, role)
+      return {
+        key: section.key || `region-${index + 1}`,
+        title: section.title || `区域 ${index + 1}`,
+        role,
+        shape,
+        gridArea,
+        badge: lofiRegionBadge(role, shape),
+        showPlaceholder: ['main', 'preview', 'editor', 'list', 'modal', 'progress'].includes(role) || ['video', 'list', 'form', 'modal', 'progress'].includes(shape),
+        primaryLabel: items[0]?.label || section.title || `区域 ${index + 1}`,
+        items
+      }
+    })
+    .filter((region) => region.title || region.items.length)
+
+  if (!regions.some((region) => region.gridArea === 'main')) {
+    const support = regions.find((region) => !['top', 'bottom'].includes(region.role))
+    if (support) support.gridArea = 'main'
+  }
+  const occupiedAreas = new Set()
+  regions.forEach((region) => {
+    if (!region.gridArea || region.gridArea === 'top') return
+    if (occupiedAreas.has(region.gridArea)) {
+      region.gridArea = ''
+      return
+    }
+    occupiedAreas.add(region.gridArea)
+  })
+  return regions.length ? regions : [{
+    key: 'region-main',
+    title: node?.title || '页面主体',
+    role: 'main',
+    shape: 'block',
+    gridArea: 'main',
+    badge: '主体',
+    showPlaceholder: true,
+    primaryLabel: '页面结构待模型补充',
+    items: lofiUniqueItems([], ['页面结构待模型补充'], 'region-main', 1)
+  }]
+}
+
+function lofiRegionMapStyle(archetype = 'document') {
+  if (archetype === 'modal') {
+    return {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      gridTemplateAreas: '"modal" "main" "bottom"'
+    }
+  }
+  if (archetype === 'list') {
+    return {
+      gridTemplateColumns: 'minmax(220px, 28%) minmax(0, 1fr)',
+      gridTemplateAreas: '"filter main" "side main" "bottom bottom"'
+    }
+  }
+  if (archetype === 'progress') {
+    return {
+      gridTemplateColumns: 'minmax(0, 1fr)',
+      gridTemplateAreas: '"main" "side" "bottom"'
+    }
+  }
+  if (archetype === 'editor' || archetype === 'preview') {
+    return {
+      gridTemplateColumns: 'minmax(0, 1fr) minmax(280px, 34%)',
+      gridTemplateAreas: '"main side" "bottom bottom"'
+    }
+  }
+  return {
+    gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 32%)',
+    gridTemplateAreas: '"main side" "bottom bottom"'
+  }
+}
+
+function pageLofiRegionStyle(region = {}) {
+  return region.gridArea ? { gridArea: region.gridArea } : {}
+}
+
+function pageLofiPrototypeBlueprint(node = {}) {
+  const artifact = pageLayoutArtifact(node)
+  const sections = pageLofiPrototypeSections(node)
+  const wireframeLines = lofiCleanWireframeLines(artifact.asciiWireframe)
+  const title = node?.title || artifact.pageName || artifact.title || '页面'
+  const archetype = lofiPageArchetype(node, sections, wireframeLines)
+  const regions = lofiBlueprintRegions(node, sections, archetype)
+  const topbarSection = sections.find((section) => section.kind === 'navigation' || lofiSectionMatches(section, /顶部|导航|入口|header|nav/i)) || sections[0] || {}
+  const footerSection = sections.find((section) => section.kind === 'footer' || lofiSectionMatches(section, /底部|固定|操作栏|footer|action/i)) || null
+  const interactionItems = lofiInteractionItems(node, 6)
+  const stateItems = lofiStateItems(node, 5)
+  const actionItems = lofiUniqueItems(
+    footerSection?.items || [],
+    [
+      ...interactionItems.filter((item) => /返回|修改|重试|重新|生成|导出|确认|提交|保存/.test(`${item.label} ${item.meta}`)),
+      '返回修改',
+      '重新生成',
+      '确认继续'
+    ],
+    'action',
+    3
+  ).map((item, index, list) => ({ ...item, primary: index === list.length - 1 }))
+  const exceptionEntry = [
+    ...stateItems.filter((item) => /失败|异常|错误|风险|超时|不满|空|权限/.test(`${item.label} ${item.meta}`)),
+    ...wireframeLines.filter((line) => /异常|失败|风险|超时|不满意|权限/.test(line)).map((line, index) => ({ key: `exception-${index + 1}`, label: line, meta: '', kind: 'text' }))
+  ][0]?.label || '异常入口：失败 / 风险 / 不满意 / 任务超时'
+
+  return {
+    tone: pageLofiPrototypeTone(node),
+    layout: regions.some((region) => region.gridArea === 'side') ? 'with-side-panel' : 'region-driven',
+    archetype,
+    regionMapStyle: lofiRegionMapStyle(archetype),
+    regions,
+    topbar: {
+      title: topbarSection?.title || '顶部固定导航',
+      items: lofiUniqueItems(topbarSection?.items || [], wireframeLines.filter((line) => /导航|顶部|入口|返回|项目|账户|菜单/.test(line)), 'topbar', 3)
+    },
+    progressSteps: lofiProgressSteps(node, wireframeLines),
+    actionbar: {
+      title: footerSection?.title || '底部固定操作栏',
+      items: actionItems
+    },
+    exceptionEntry
+  }
 }
 
 function pageLofiPrototypeTone(node = {}) {
@@ -6337,6 +6687,29 @@ function codePreview(node = {}) {
     : { previewTitle: '运行预览', previewSummary: '等待生成可预览代码。', codeLanguage: 'text', code: '' }
 }
 
+function isLikelyEscapedPlaceholderCode(value = '') {
+  const text = String(value || '').trim()
+  if (!text) return true
+  if (/^(等待|待生成|生成后|请先生成|HTML 生成模型未配置|HTML 生成失败)/.test(text)) return true
+  if (/\\n/.test(text) && !/[<>]/.test(text)) return true
+  return false
+}
+
+function isUsableCodeContent(value = '', language = 'text', node = {}) {
+  const text = String(value || '').trim()
+  if (!text || isLikelyEscapedPlaceholderCode(text)) return false
+  const normalizedLanguage = String(language || '').trim().toLowerCase()
+  if (normalizedLanguage === 'html' || node.stageId === 'html-output') {
+    return /<!doctype\s+html/i.test(text) ||
+      /<html[\s>]/i.test(text) ||
+      /<(main|section|div|article|body|head|style|script)[\s>]/i.test(text)
+  }
+  if (normalizedLanguage === 'vue' || node.stageId === 'vue-output') {
+    return /<template[\s>]/i.test(text) || /<script[\s>]/i.test(text) || /<style[\s>]/i.test(text)
+  }
+  return true
+}
+
 function codePreviewFiles(node = {}) {
   const preview = codePreview(node)
   const artifactFiles = Array.isArray(node.artifact?.files) ? node.artifact.files : []
@@ -6349,18 +6722,38 @@ function codePreviewFiles(node = {}) {
       }))
   if (files.length) {
     return files
-      .filter((file) => file?.path)
+      .filter((file) => file?.path && isUsableCodeContent(file.content, file.language || preview.codeLanguage, node))
       .map((file) => ({
         path: String(file.path || '').trim(),
         language: file.language || preview.codeLanguage || 'text',
         content: String(file.content || '')
       }))
   }
-  return [{
-    path: preview.filePath || preview.codeLanguage || '代码',
-    language: preview.codeLanguage || 'text',
-    content: String(preview.code || '')
-  }]
+  const previewCode = String(preview.code || '').trim()
+  if (isUsableCodeContent(previewCode, preview.codeLanguage, node)) {
+    return [{
+      path: preview.filePath || preview.codeLanguage || '代码',
+      language: preview.codeLanguage || 'text',
+      content: previewCode
+    }]
+  }
+  const artifactHtml = String(node.artifact?.html || '').trim()
+  if (isUsableCodeContent(artifactHtml, 'html', node)) {
+    return [{
+      path: preview.filePath || 'index.html',
+      language: 'html',
+      content: artifactHtml
+    }]
+  }
+  const artifactCode = String(node.artifact?.code || node.code || '').trim()
+  if (isUsableCodeContent(artifactCode, preview.codeLanguage, node)) {
+    return [{
+      path: preview.filePath || preview.codeLanguage || '代码',
+      language: preview.codeLanguage || 'text',
+      content: artifactCode
+    }]
+  }
+  return []
 }
 
 function selectedCodePreviewFile(node = {}) {
@@ -6370,7 +6763,7 @@ function selectedCodePreviewFile(node = {}) {
 }
 
 function selectedCodePreviewCode(node = {}) {
-  return selectedCodePreviewFile(node).content || codePreview(node).code || ''
+  return selectedCodePreviewFile(node).content || ''
 }
 
 function fullscreenCodeDetailTab(node = {}) {
@@ -6400,7 +6793,7 @@ function setPreviewCodeFrameWidth(node = {}, width = 1440) {
 }
 
 function compactCodePreview(node = {}) {
-  const code = selectedCodePreviewCode(node).trim() || codePreview(node).previewSummary || '等待生成 HTML。'
+  const code = selectedCodePreviewCode(node).trim()
   return code.length > 720 ? `${code.slice(0, 720).trim()}\n...` : code
 }
 
@@ -6450,7 +6843,7 @@ function showCodeCopyToast() {
 }
 
 async function copyCodePreview(node = {}) {
-  const code = selectedCodePreviewCode(node).trim() || compactCodePreview(node)
+  const code = selectedCodePreviewCode(node).trim()
   if (!code) return
   try {
     if (navigator?.clipboard?.writeText) {
@@ -6473,7 +6866,7 @@ async function copyCodePreview(node = {}) {
 }
 
 function downloadCodePreview(node = {}) {
-  const code = selectedCodePreviewCode(node).trim() || compactCodePreview(node)
+  const code = selectedCodePreviewCode(node).trim()
   if (!code || typeof document === 'undefined') return
   const blob = new Blob([code], { type: codePreviewLanguageLabel(node) === 'html' ? 'text/html;charset=utf-8' : 'text/plain;charset=utf-8' })
   const href = URL.createObjectURL(blob)
@@ -6530,14 +6923,21 @@ function engineeringPlanSections(node = {}) {
 }
 
 function previewCodeSrcdoc(node = {}) {
-  const preview = codePreview(node)
-  const artifactHtml = String(node.artifact?.html || '').trim()
-  if (artifactHtml) return withPreviewCodeFitStyle(artifactHtml)
-  if (preview.codeLanguage === 'html' && String(preview.code || '').trim()) return withPreviewCodeFitStyle(preview.code)
+  const generatedHtml = generatedHtmlCodeForPreview(node)
+  if (generatedHtml) return withPreviewCodeFitStyle(generatedHtml)
   const selected = selectedCodePreviewCode(node)
-  if (preview.codeLanguage === 'vue' || selectedCodePreviewFile(node).path?.endsWith('.vue')) {
-    return vuePreviewSrcdoc(selected || preview.code, node)
+  const selectedFile = selectedCodePreviewFile(node)
+  if (selected && (codePreview(node).codeLanguage === 'vue' || selectedFile.path?.endsWith('.vue'))) {
+    return vuePreviewSrcdoc(selected, node)
   }
+  return ''
+}
+
+function generatedHtmlCodeForPreview(node = {}) {
+  const artifactHtml = String(node.artifact?.html || '').trim()
+  if (isUsableCodeContent(artifactHtml, 'html', node)) return artifactHtml
+  const selected = selectedCodePreviewCode(node)
+  if (isUsableCodeContent(selected, 'html', node)) return selected
   return ''
 }
 

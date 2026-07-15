@@ -16,6 +16,10 @@ import {
   withDownstreamStageArtifactContext
 } from '../backend/services/total-design-flow.js'
 import { buildWorkflowStageRuntime } from '../backend/services/stage-runtime.js'
+import {
+  createWorkflowRunnerStore,
+  generateRunHtmlStageArtifacts
+} from '../backend/services/workflow-runner.js'
 import { buildRequirementDissectionGuidanceArtifact } from '../backend/services/requirement-dissection-guidance.js'
 import { validateSkillOutput } from '../backend/services/schema-validator.js'
 import { buildSkillPrompt } from '../backend/services/prompt-builder.js'
@@ -4014,9 +4018,115 @@ test('downstream UI visual and HTML canvases sync all interaction pages while pr
   assert.deepEqual(htmlPageNodes.map((node) => node.title), ['复刻首页 HTML', '拆解结果页 HTML'])
   assert.equal(htmlPageNodes[0].artifactStatus, 'generated')
   assert.equal(htmlPageNodes[0].codePreview.code, '<main>home</main>')
+  assert.equal(htmlPageNodes[0].sourceVisualImageUrl, '/generated/home.png')
+  assert.equal(htmlPageNodes[0].sourceVisualPreview.imagePrompt, '已生成的首页提示词')
+  assert.match(htmlPageNodes[0].engineeringPlan.inputArtifacts[0], /上一阶段 UI视觉图/)
   assert.equal(htmlPageNodes[1].sourceNodeId, 'advanced-ux-page-result')
   assert.equal(htmlPageNodes[1].artifactStatus, 'pending')
   assert.deepEqual(htmlTotalNode.linkedPageIds, ['advanced-ux-page-home', 'advanced-ux-page-result'])
+})
+
+test('HTML stage generation sends previous UI visual image as primary model context', async () => {
+  const visualImageDataUrl = 'data:image/png;base64,ZmFrZS12aXN1YWw='
+  const store = createWorkflowRunnerStore({
+    runs: [
+      {
+        id: 'run-html-visual-source',
+        input: '把已确认的 UI 视觉图生成可运行 HTML。',
+        model: 'unit-model',
+        documentAnalysis: {
+          totalDesignFlow: {
+            stageCanvases: {
+              'interaction-lofi': {
+                nodes: [
+                  {
+                    id: 'advanced-ux-page-home',
+                    stageId: 'interaction-lofi',
+                    title: '复刻首页',
+                    pageLayoutArtifact: {
+                      version: 'layout-home-v1',
+                      asciiWireframe: 'A1 顶部导航区 | A2 上传区',
+                      layout: { regions: [{ id: 'upload', label: '上传区' }] }
+                    },
+                    interactionSpecArtifact: {
+                      version: 'interaction-home-v1',
+                      interactionRows: [{ target: '点击上传区', targetRegionId: 'upload' }]
+                    }
+                  }
+                ]
+              },
+              'ui-visual': {
+                nodes: [
+                  {
+                    id: 'ui-advanced-ux-page-home',
+                    stageId: 'ui-visual',
+                    title: '复刻首页 UI视觉',
+                    sourcePageId: 'advanced-ux-page-home',
+                    artifactStatus: 'generated',
+                    visualPreview: {
+                      imageStatus: 'generated',
+                      imageDataUrl: visualImageDataUrl,
+                      imageUrl: '/generated/home.png',
+                      imagePrompt: '按首页视觉稿生成'
+                    },
+                    artifact: {
+                      imageDataUrl: visualImageDataUrl,
+                      imageUrl: '/generated/home.png'
+                    }
+                  }
+                ]
+              },
+              'html-output': {
+                nodes: [
+                  {
+                    id: 'html-page-advanced-ux-page-home',
+                    stageId: 'html-output',
+                    title: '复刻首页 HTML',
+                    htmlOutputKind: 'page',
+                    sourcePageId: 'advanced-ux-page-home',
+                    artifactStatus: 'pending',
+                    targetGenerator: 'html',
+                    codePreview: {
+                      codeLanguage: 'html',
+                      code: '',
+                      filePath: 'pages/home.html'
+                    },
+                    generationActions: [
+                      { id: 'generate-html-home', label: '生成 HTML', targetGenerator: 'html' }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    ]
+  })
+  const contexts = []
+  const provider = {
+    name: 'unit-html-provider',
+    async generate(context) {
+      contexts.push(context)
+      return { content: '<!doctype html><html><body><main>home</main></body></html>' }
+    }
+  }
+
+  await generateRunHtmlStageArtifacts(store, {
+    runId: 'run-html-visual-source',
+    nodeIds: ['html-page-advanced-ux-page-home'],
+    force: true
+  }, {
+    htmlProvider: provider,
+    defaultHtmlReferenceMarkdown: '# HTML 规范\n- 生成完整 HTML'
+  })
+
+  assert.equal(contexts.length, 1)
+  assert.equal(contexts[0].mode, 'workflow-html-artifact-generation')
+  assert.equal(contexts[0].sourceVisualReferenceImages[0].imageDataUrl, visualImageDataUrl)
+  assert.equal(contexts[0].sourceVisualReferenceImages[0].sourceUrl, '/generated/home.png')
+  assert.match(contexts[0].userPrompt, /上一阶段 UI 视觉图是本次 HTML 生成的主参考/)
+  assert.match(contexts[0].systemPrompt, /必须优先依据上一阶段已生成 UI 视觉图/)
 })
 
 test('total design flow attaches model page layout artifact to interaction canvas nodes', () => {
@@ -5353,7 +5463,15 @@ test('backend workflow route generates and persists canvas node artifacts', asyn
                   componentChecklist: ['搜索栏', '分类 Tab', '商品卡片', '底部结算栏']
                 },
                 visualPreview: {
+                  imageStatus: 'generated',
+                  imageDataUrl: 'data:image/png;base64,dGVhLW9yZGVyLXZpc3VhbA==',
+                  imageUrl: '/generated/tea-order.png',
                   imagePrompt: '清爽茶饮品牌高保真点单页，保留固定底部结算栏。'
+                },
+                artifact: {
+                  imageStatus: 'generated',
+                  imageDataUrl: 'data:image/png;base64,dGVhLW9yZGVyLXZpc3VhbA==',
+                  imageUrl: '/generated/tea-order.png'
                 }
               }
             ],
